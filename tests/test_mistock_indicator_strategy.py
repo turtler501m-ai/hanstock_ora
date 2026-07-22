@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from src.mistock.config import config
 from src.mistock import strategy
@@ -59,6 +59,16 @@ class MistockIndicatorStrategyTests(unittest.TestCase):
 
         self.assertEqual(result["min_score"], 5)
         self.assertEqual(result["candidates"], [])
+
+    def test_fetch_history_converts_kis_share_class_symbol_for_yahoo(self):
+        empty = MagicMock()
+        empty.empty = True
+        with patch("src.online_access.require_online_access"), \
+                patch("src.mistock.strategy.yf.download", return_value=empty) as download:
+            result = strategy.fetch_history("BRK.B")
+
+        self.assertEqual(result, {"close": [], "high": [], "volume": []})
+        self.assertEqual(download.call_args.args[0], "BRK-B")
 
 
 class RsiDivergenceTests(unittest.TestCase):

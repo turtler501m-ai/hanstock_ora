@@ -1319,8 +1319,6 @@ def _bg_run_mistock_scheduled_cycle(mode: str):
         result = run_mistock_scheduled_cycle(mode=mode)
         
         recorded_at = datetime.now(timezone(timedelta(hours=9))).isoformat()
-        save_mistock_daily_run(recorded_at, mode, result)
-        
         with _mistock_scheduler_running_lock:
             _mistock_scheduler_run_state.replace({
                 **_mistock_scheduler_run_state,
@@ -1352,7 +1350,6 @@ def _bg_run_mistock_scheduled_cycles(mode: str, strategy_ids: list[str]):
             try:
                 result = run_mistock_scheduled_cycle(mode=mode, strategy_id=strategy_id)
                 recorded_at = datetime.now(timezone(timedelta(hours=9))).isoformat()
-                save_mistock_daily_run(recorded_at, mode, result)
                 mistock_db.execute(
                     "UPDATE strategy_schedules SET last_run_at = ? WHERE strategy_id = ?",
                     (recorded_at, strategy_id),

@@ -333,8 +333,10 @@ def fetch_history(symbol: str, period: str = "6mo") -> dict[str, list[float]]:
     from src.online_access import require_online_access
 
     require_online_access("Mistock market-data download")
+    # Yahoo Finance uses '-' for share classes (BRK-B/BF-B), while KIS uses '.'.
+    yahoo_symbol = normalize_symbol(symbol).replace(".", "-")
     data = yf.download(
-        normalize_symbol(symbol),
+        yahoo_symbol,
         period=period,
         interval="1d",
         auto_adjust=False,
