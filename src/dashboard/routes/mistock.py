@@ -13,6 +13,7 @@ from src.mistock.config import config as mistock_config
 from src.mistock import db as mistock_db
 from src.mistock import trader as mistock_trader
 from src.mistock.strategy import NASDAQ_UNIVERSE, normalize_symbol, quote, symbol_name
+from src.utils.logger import logger
 
 router = APIRouter(tags=["mistock"])
 

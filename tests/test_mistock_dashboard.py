@@ -884,6 +884,15 @@ class MistockDashboardTests(unittest.TestCase):
         self.assertEqual(holding["strategy_ids"], ["mistock_nasdaq_rule_v1"])
         self.assertEqual(holding["strategies"][0]["qty"], 2.0)
 
+    def test_auto_approval_can_be_enabled_while_market_is_closed(self):
+        with patch.object(mistock, "_is_mistock_order_window_open", return_value=False):
+            result = mistock.mistock_set_auto_approval({"enabled": True})
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["enabled"])
+        self.assertEqual(result["processed_count"], 0)
+        self.assertEqual(mistock_db.get_setting("auto_approval"), "true")
+
 
 if __name__ == "__main__":
     unittest.main()
