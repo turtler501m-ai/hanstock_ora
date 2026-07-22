@@ -1098,6 +1098,14 @@ async function renderBalance() {
 
         const principal = Number(latestConfig?.total_capital || 0);
         const isPrincipalKrw = (latestConfig?.currency === 'KRW');
+        const principalUsd = Number(
+            latestConfig?.total_capital_usd
+            || (isPrincipalKrw && Number(latestConfig?.exchange_rate || 0) > 0
+                ? principal / Number(latestConfig.exchange_rate)
+                : principal)
+        );
+        const accountPnl = displayTotal - principalUsd;
+        const accountReturnRate = principalUsd > 0 ? (accountPnl / principalUsd) * 100 : 0;
         const evalPnl = Number(balance.pnl || 0);
         const evalCost = Math.max(0, Number(balance.stock_eval || holdingValue || 0) - evalPnl);
         const returnRate = evalCost > 0 ? (evalPnl / evalCost) * 100 : 0;
@@ -1106,6 +1114,15 @@ async function renderBalance() {
         setElementText('val-total', formatCurrency(displayTotal));
         setElementText('val-principal', formatCurrency(principal, isPrincipalKrw));
         setElementText('val-cash', formatCurrency(balance.cash));
+        setElementText('val-stock-eval', formatCurrency(Number(balance.stock_eval || holdingValue || 0)));
+        const accountPnlEl = setElementText('val-account-pnl', formatCurrency(accountPnl));
+        if (accountPnlEl) {
+            accountPnlEl.className = `value ${accountPnl >= 0 ? 'text-success' : 'text-danger'}`;
+        }
+        const accountReturnEl = setElementText('val-account-return', formatPercent(accountReturnRate));
+        if (accountReturnEl) {
+            accountReturnEl.className = `value ${accountReturnRate >= 0 ? 'text-success' : 'text-danger'}`;
+        }
         setElementText('val-realized', formatCurrency(realizedPnl));
         const realizedEl = document.getElementById('val-realized');
         if (realizedEl) {
@@ -1190,7 +1207,10 @@ async function renderBalance() {
         console.error('Failed to fetch balance data', err);
         setElementText('val-total', '불러오기 실패');
         setElementText('val-principal', '불러오기 실패');
+        setElementText('val-account-pnl', '불러오기 실패');
+        setElementText('val-account-return', '-');
         setElementText('val-cash', '불러오기 실패');
+        setElementText('val-stock-eval', '불러오기 실패');
         setElementText('val-pnl', '불러오기 실패');
         setElementText('val-return', '-');
         setStatus(`계좌 API 오류: ${err.message}`);
