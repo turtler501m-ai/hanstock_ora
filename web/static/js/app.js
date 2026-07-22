@@ -1299,7 +1299,6 @@ async function syncStrategiesToDropdown() {
         const select = document.getElementById('select-ai-ranker');
         if (!select) return;
 
-        const previous = select.value || localStorage.getItem('hanstock_ai_ranker') || '';
         select.innerHTML = '';
         const strategies = (data.strategies || []).filter((strategy) => strategy.status !== 'retired');
         const uniqueStrategies = [];
@@ -1349,15 +1348,19 @@ async function syncStrategiesToDropdown() {
             });
         }
 
-        const active = uniqueStrategies.find((strategy) => strategy.selected) || uniqueStrategies[0];
-        if (previous && select.querySelector(`option[value="${previous}"]`)) {
-            select.value = previous;
-        } else if (active) {
+        const active = uniqueStrategies.find((strategy) => strategy.selected);
+        if (active) {
             select.value = active.id;
+            localStorage.setItem('hanstock_ai_ranker', active.id);
+        } else if (strategies.length > 0) {
+            const sharedOption = document.createElement('option');
+            sharedOption.value = '';
+            sharedOption.textContent = '공용 관심종목 (선택된 전략 없음)';
+            select.insertBefore(sharedOption, select.firstChild);
+            select.value = '';
+            localStorage.removeItem('hanstock_ai_ranker');
         } else if (select.options.length > 0) {
             select.value = select.options[0].value;
-        }
-        if (select.value) {
             localStorage.setItem('hanstock_ai_ranker', select.value);
         }
     } catch (err) {
@@ -3030,13 +3033,16 @@ async function fetchDashboardData() {
     } catch (err) {
         console.error("Failed to load config:", err);
     }
+    // Watchlist and other strategy-scoped requests must run after the server-selected
+    // strategy has populated the dropdown. Otherwise the template's placeholder or
+    // a stale browser value can incorrectly request an empty isolated watchlist.
+    await syncStrategiesToDropdown();
     await Promise.all([
         renderRuntime(),
         renderBalance(),
         renderTrades(),
         renderApprovals(),
         renderCandidateHistory(),
-        syncStrategiesToDropdown(),
         renderStrategyContext(),
         renderAiStrategies(),
         renderWatchlist()
