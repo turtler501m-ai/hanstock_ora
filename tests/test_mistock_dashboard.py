@@ -702,6 +702,7 @@ class MistockDashboardTests(unittest.TestCase):
                 patch.object(mistock_trader, "signals", return_value=[]), \
                 patch.object(mistock_trader, "build_orders", return_value=[order]), \
                 patch.object(mistock_trader, "broker_submission_available", return_value=True), \
+                patch.object(mistock_trader, "runtime_flags", return_value={"order_submission_enabled": True}), \
                 patch.object(mistock_trader, "place_order", return_value=failed_order), \
                 patch.object(mistock_db, "get_setting", return_value="true"), \
                 patch.object(mistock_scheduler, "send_mistock_slack"):

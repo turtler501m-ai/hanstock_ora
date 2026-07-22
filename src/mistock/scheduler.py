@@ -6,6 +6,7 @@ import os
 import sys
 import time
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 # Add project root to sys.path to allow running as a script directly
@@ -22,6 +23,51 @@ from src.utils.logger import logger
 from src.mistock.strategy import symbol_name
 
 KST = timezone(timedelta(hours=9))
+
+
+def _weekday_matches(spec: str, weekday: int) -> bool:
+    """Match ISO weekday (1=Mon..7=Sun) against values such as 1-5 or 1,3,5."""
+    for token in str(spec or "").split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if "-" in token:
+            start, end = token.split("-", 1)
+            if int(start) <= weekday <= int(end):
+                return True
+        elif int(token) == weekday:
+            return True
+    return False
+
+
+def _schedule_due(schedule: dict, now: datetime | None = None) -> bool:
+    now = (now or datetime.now(KST)).astimezone(KST)
+    start_hm = str(schedule.get("start_hm") or "0000").zfill(4)
+    end_hm = str(schedule.get("end_hm") or "2359").zfill(4)
+    current_hm = now.strftime("%H%M")
+    wraps = start_hm > end_hm
+    in_window = (current_hm >= start_hm or current_hm <= end_hm) if wraps else start_hm <= current_hm <= end_hm
+    if not in_window:
+        return False
+
+    weekday_specs = str(schedule.get("weekdays") or "1-7").split("/")
+    weekday_spec = weekday_specs[0]
+    if wraps and current_hm <= end_hm and len(weekday_specs) > 1:
+        weekday_spec = weekday_specs[1]
+    if not _weekday_matches(weekday_spec, now.isoweekday()):
+        return False
+
+    last_run_at = schedule.get("last_run_at")
+    if not last_run_at:
+        return True
+    try:
+        last_run = datetime.fromisoformat(str(last_run_at).replace("Z", "+00:00"))
+        if last_run.tzinfo is None:
+            last_run = last_run.replace(tzinfo=KST)
+    except (TypeError, ValueError):
+        return True
+    interval = max(1, int(schedule.get("interval_minutes") or 60))
+    return (now - last_run.astimezone(KST)).total_seconds() >= interval * 60
 
 
 def _pending_scheduler_approval_exists(symbol: str, action: str) -> bool:
@@ -50,15 +96,11 @@ def is_us_market_open() -> bool:
         return True
     if mistock_config.trading_env not in {"demo", "real"}:
         return True
-    now = datetime.now(KST)
-    is_dst = 3 <= now.month <= 11
-    current_time_str = now.strftime("%H:%M")
-    if is_dst:
-        # 서머타임 운영: 22:30 ~ 익일 05:00 (주문 가드 04:55)
-        return ("22:30" <= current_time_str <= "23:59") or ("00:00" <= current_time_str <= "04:55")
-    else:
-        # 일반 시간 운영: 23:30 ~ 익일 06:00 (주문 가드 05:55)
-        return ("23:30" <= current_time_str <= "23:59") or ("00:00" <= current_time_str <= "05:55")
+    now_ny = datetime.now(ZoneInfo("America/New_York"))
+    if now_ny.weekday() >= 5:
+        return False
+    current_time = now_ny.time().replace(tzinfo=None)
+    return datetime.strptime("09:30", "%H:%M").time() <= current_time <= datetime.strptime("15:55", "%H:%M").time()
 
 
 def _order_delay_seconds() -> float:
@@ -135,7 +177,11 @@ def run_mistock_scheduled_cycle(mode: str = "execute", strategy_id: str | None =
         if str(mistock_config.strategy_model or "").lower() == "macd_rsi_momentum"
         else 2
     )
-    scan = mistock_trader.scan_candidates(min_score=min_score, limit=mistock_config.scan_universe_size)
+    scan = mistock_trader.scan_candidates(
+        min_score=min_score,
+        limit=mistock_config.scan_universe_size,
+        strategy_id=strategy_id,
+    )
     candidates = scan["candidates"]
     logger.info(f"[MISTOCK SCHEDULER] Scanned {scan['scanned']} symbols. Found {len(candidates)} candidates.")
     
@@ -158,7 +204,7 @@ def run_mistock_scheduled_cycle(mode: str = "execute", strategy_id: str | None =
     for idx, sig in enumerate(sell_sigs):
         qty = float(sig["signal_qty"])
         price = float(sig["signal_price"])
-        if mode == "execute" and (auto_approve or flags["order_submission_enabled"]) and broker_submission_available and market_open:
+        if mode == "execute" and auto_approve and flags["order_submission_enabled"] and broker_submission_available and market_open:
             logger.info(f"[MISTOCK SCHEDULER] Sell signal for {sig['symbol']}. Qty={qty}, Price={price}")
             res = _place_order(sig["symbol"], "sell", qty, price, sig["reason"], strategy_id)
             sold_items.append({"symbol": sig["symbol"], "qty": qty, "price": price, "result": res})
@@ -210,7 +256,7 @@ def run_mistock_scheduled_cycle(mode: str = "execute", strategy_id: str | None =
     bought_items = []
     
     if mode == "execute":
-        if (auto_approve or flags["order_submission_enabled"]) and broker_submission_available and market_open:
+        if auto_approve and flags["order_submission_enabled"] and broker_submission_available and market_open:
             for idx, ord in enumerate(orders):
                 qty = float(ord["quantity"])
                 price = float(ord["price"])
@@ -345,16 +391,18 @@ def main() -> int:
     )
     args = parser.parse_args()
     try:
+        if args.mode == "execute" and not is_us_market_open():
+            logger.info("[MISTOCK SCHEDULER] Outside the US regular-session order window; cron run skipped.")
+            return 0
         strategy_ids = list(dict.fromkeys(args.strategy_ids or []))
         if not strategy_ids:
-            strategy_ids = [
-                str(row["strategy_id"])
-                for row in mistock_db.rows(
-                    "SELECT strategy_id FROM strategy_schedules WHERE enabled = 1 ORDER BY strategy_id"
-                )
-            ]
+            schedules = mistock_db.rows(
+                "SELECT * FROM strategy_schedules WHERE enabled = 1 ORDER BY strategy_id"
+            )
+            strategy_ids = [str(row["strategy_id"]) for row in schedules if _schedule_due(row)]
         if not strategy_ids:
-            strategy_ids = ["mistock_nasdaq_rule_v1"]
+            logger.info("[MISTOCK SCHEDULER] No strategy schedule is due; cron run skipped.")
+            return 0
         failed = False
         for strategy_id in strategy_ids:
             result = run_mistock_scheduled_cycle(mode=args.mode, strategy_id=strategy_id)

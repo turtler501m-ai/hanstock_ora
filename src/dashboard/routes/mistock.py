@@ -213,6 +213,12 @@ def mistock_config_api():
     watchlist = [item["symbol"] for item in mistock_trader.get_watchlist()]
     from src.config import config as main_config
     account_no = main_config.kistock_account if mistock_config.trading_env in {"demo", "real"} else "MISTOCK-DEMO"
+    exchange_rate = get_usd_krw_rate()
+    total_capital_usd = (
+        float(mistock_config.total_capital) / exchange_rate
+        if str(mistock_config.currency).upper() == "KRW" and exchange_rate > 0
+        else float(mistock_config.total_capital)
+    )
     return {
         **flags,
         "kistock_account": account_no,
@@ -233,13 +239,14 @@ def mistock_config_api():
             "strategy_name": "MACD+RSI 모멘텀",
         },
         "total_capital": mistock_config.total_capital,
+        "total_capital_usd": total_capital_usd,
         "max_positions": mistock_config.max_positions,
         "max_single_weight": mistock_config.max_single_weight,
         "cash_buffer": mistock_config.cash_buffer,
         "max_daily_loss_pct": mistock_config.max_daily_loss_pct,
         "watchlist": watchlist,
         "currency": mistock_config.currency,
-        "exchange_rate": get_usd_krw_rate(),
+        "exchange_rate": exchange_rate,
         "scan_universe_size": mistock_config.scan_universe_size,
         "kospi_universe_size": len(NASDAQ_UNIVERSE),
         "nasdaq_universe_size": len(NASDAQ_UNIVERSE),
@@ -410,6 +417,13 @@ def _mistock_ai_analysis() -> dict:
 
 def _strategy_rows() -> list[dict]:
     items = mistock_db.rows("SELECT * FROM ai_strategies ORDER BY selected DESC, name ASC")
+    supported_ids = {
+        "mistock_nasdaq_rule_v1",
+        "plunge_bounce_strategy",
+        "rsi_limit_strategy",
+        "heikin_ashi_scalping_strategy",
+    }
+    items = [item for item in items if item.get("id") in supported_ids or str(item.get("id", "")).startswith("mistock_")]
     for item in items:
         profile = item.get("profile_json")
         try:

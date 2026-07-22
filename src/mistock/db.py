@@ -221,17 +221,16 @@ def init_db() -> None:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN strategy_id TEXT")
             except sqlite3.OperationalError:
                 pass
+        try:
+            conn.execute("ALTER TABLE scanned_candidates ADD COLUMN strategy_id TEXT")
+        except sqlite3.OperationalError:
+            pass
         conn.execute(
             """
             INSERT OR IGNORE INTO strategy_schedules (strategy_id, enabled, auto_approve)
             SELECT id, selected, 0 FROM ai_strategies
             """
         )
-        try:
-            from src.db.repository import sync_custom_rules_to_db
-            sync_custom_rules_to_db(conn)
-        except Exception:
-            pass
         conn.commit()
     finally:
         conn.close()

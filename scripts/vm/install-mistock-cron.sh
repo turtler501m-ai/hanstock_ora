@@ -7,8 +7,8 @@ set -euo pipefail
 # (KST 토요일 00:00~06:00)이 통째로 누락된다. 따라서 저녁/새벽 세션을 분리해
 # 새벽 세션은 화~토(2-6)로 발화시켜 금요일 마감까지 커버한다. 최종 시간 판정은
 # mistock-auto.sh의 should_run_now()가 다시 거른다.
-EVENING_SPEC="${HANSTOCK_MISTOCK_EVENING_SPEC:-0 21-23 * * 1-5}"  # 저녁 세션 (월~금)
-MORNING_SPEC="${HANSTOCK_MISTOCK_MORNING_SPEC:-0 0-5 * * 2-6}"     # 새벽 세션 (화~토)
+EVENING_SPEC="${HANSTOCK_MISTOCK_EVENING_SPEC:-*/5 21-23 * * 1-5}"  # 전략별 주기 판정을 위한 5분 tick
+MORNING_SPEC="${HANSTOCK_MISTOCK_MORNING_SPEC:-*/5 0-5 * * 2-6}"     # 전략별 주기 판정을 위한 5분 tick
 EVENING_MONITOR_SPEC="${HANSTOCK_MISTOCK_EVENING_MONITOR_SPEC:-30 22-23 * * 1-5}"  # 모니터 저녁 세션 (월~금)
 MORNING_MONITOR_SPEC="${HANSTOCK_MISTOCK_MORNING_MONITOR_SPEC:-30 0-5 * * 2-6}"     # 모니터 새벽 세션 (화~토)
 CRON_TZ_VALUE="${HANSTOCK_CRON_TZ:-Asia/Seoul}"

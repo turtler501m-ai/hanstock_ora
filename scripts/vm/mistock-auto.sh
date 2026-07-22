@@ -41,28 +41,17 @@ should_run_now() {
         return 0
     fi
 
-    local dow hhmm month start_hhmm end_hhmm
+    local dow hhmm
     dow="$(TZ=Asia/Seoul date '+%u')"    # 1 (Mon) - 7 (Sun)
     hhmm="$(TZ=Asia/Seoul date '+%H%M')"  # 0000 - 2359
-    month="$(TZ=Asia/Seoul date '+%-m')"
-
-    # Keep this window aligned with src.mistock.scheduler.is_us_market_open().
-    # DST months use 22:30-04:55 KST; standard-time months use 23:30-05:55 KST.
-    if [ "$month" -ge 3 ] && [ "$month" -le 11 ]; then
-        start_hhmm=2230
-        end_hhmm=0455
-    else
-        start_hhmm=2330
-        end_hhmm=0555
-    fi
 
     # 1. Weekday evening session
-    if [ "$dow" -ge 1 ] && [ "$dow" -le 5 ] && [ "$hhmm" -ge "$start_hhmm" ] && [ "$hhmm" -le 2359 ]; then
+    if [ "$dow" -ge 1 ] && [ "$dow" -le 5 ] && [ "$hhmm" -ge 2100 ] && [ "$hhmm" -le 2359 ]; then
         return 0
     fi
 
     # 2. Weekday early morning session
-    if [ "$dow" -ge 2 ] && [ "$dow" -le 6 ] && [ "$hhmm" -ge 0000 ] && [ "$hhmm" -le "$end_hhmm" ]; then
+    if [ "$dow" -ge 2 ] && [ "$dow" -le 6 ] && [ "$hhmm" -ge 0000 ] && [ "$hhmm" -le 0600 ]; then
         return 0
     fi
 

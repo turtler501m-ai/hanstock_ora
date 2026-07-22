@@ -6,6 +6,7 @@ from typing import Any
 from src.mistock.config import config
 from src.mistock import db
 from src.mistock.strategy import NASDAQ_UNIVERSE, fetch_history, normalize_symbol, quote, strategy_profile, symbol_name
+from src.strategy.indicators import calc_bollinger
 from src.utils.exchange_rate import get_usd_krw_rate
 
 
@@ -458,7 +459,25 @@ def _active_min_score(default: int = 2, model: str | None = None) -> int:
     return default
 
 
-def scan_candidates(min_score: int | None = None, limit: int | None = None, model: str | None = None) -> dict[str, Any]:
+def _custom_strategy(strategy_id: str | None):
+    if strategy_id == "plunge_bounce_strategy":
+        from src.strategy.custom_rules.plunge_bounce_strategy import PlungeBounceStrategy
+        return PlungeBounceStrategy()
+    if strategy_id == "rsi_limit_strategy":
+        from src.strategy.custom_rules.rsi_limit_strategy import CustomRSILimitStrategy
+        return CustomRSILimitStrategy()
+    if strategy_id == "heikin_ashi_scalping_strategy":
+        from src.strategy.custom_rules.heikin_ashi_scalping_strategy import AlphaHeikinAshiScalpingStrategy
+        return AlphaHeikinAshiScalpingStrategy()
+    return None
+
+
+def scan_candidates(
+    min_score: int | None = None,
+    limit: int | None = None,
+    model: str | None = None,
+    strategy_id: str | None = None,
+) -> dict[str, Any]:
     api = None
     try:
         api = _get_kis_client()
@@ -468,6 +487,7 @@ def scan_candidates(min_score: int | None = None, limit: int | None = None, mode
     watchlist = [item["symbol"] for item in get_watchlist()]
     dynamic_universe = build_scan_universe(api)
     universe = list(dict.fromkeys(watchlist + dynamic_universe))[: limit or config.scan_universe_size]
+    custom_strategy = _custom_strategy(strategy_id)
     effective_min_score = int(min_score if min_score is not None else _active_min_score(model=model))
     candidates = []
     scanned = 0
@@ -476,6 +496,19 @@ def scan_candidates(min_score: int | None = None, limit: int | None = None, mode
         try:
             hist = fetch_history(symbol)
             profile = strategy_profile(hist["close"], hist["high"], hist["volume"], model=model)
+            if custom_strategy is not None:
+                bb_lo, _bb_mid, _bb_hi = calc_bollinger(hist["close"], 20)
+                indicators = {
+                    **profile,
+                    "symbol": symbol,
+                    "highs": hist["high"],
+                    "lows": hist["close"],
+                    "opens": hist["close"],
+                    "volumes": hist["volume"],
+                    "bb_lo": bb_lo,
+                }
+                profile["score"] = float(custom_strategy.calculate_score(hist["close"], indicators))
+                profile["reasons"] = indicators.get("custom_reasons") or indicators.get("pb_reasons") or [strategy_id]
             scanned += 1
             score = float(profile["score"])
             row = {
@@ -490,16 +523,17 @@ def scan_candidates(min_score: int | None = None, limit: int | None = None, mode
                 "macd_hist": profile["macd_hist"],
                 "sma20": profile["sma20"],
                 "sma60": profile["sma60"],
+                "strategy_id": strategy_id or "mistock_nasdaq_rule_v1",
             }
             db.execute(
                 """
                 INSERT INTO scanned_candidates
-                (scanned_at, symbol, name, score, reasons, price, env, rsi, rsi2, macd_hist, sma20, sma60)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (scanned_at, symbol, name, score, reasons, price, env, rsi, rsi2, macd_hist, sma20, sma60, strategy_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     db.now_text(), symbol, row["name"], score, ",".join(profile["reasons"]),
-                    row["price"], config.trading_env, row["rsi"], row["rsi2"], row["macd_hist"], row["sma20"], row["sma60"],
+                    row["price"], config.trading_env, row["rsi"], row["rsi2"], row["macd_hist"], row["sma20"], row["sma60"], row["strategy_id"],
                 ),
             )
             if score >= effective_min_score:
@@ -531,6 +565,7 @@ def scan_candidates(min_score: int | None = None, limit: int | None = None, mode
         "min_score": effective_min_score,
         "scan_summary": {"scanned": scanned, "matched": len(candidates), "scan_error": scan_error},
         "scan_error": scan_error,
+        "strategy_id": strategy_id or "mistock_nasdaq_rule_v1",
     }
 
 
