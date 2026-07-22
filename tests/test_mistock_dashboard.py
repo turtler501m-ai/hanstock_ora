@@ -840,6 +840,10 @@ class MistockDashboardTests(unittest.TestCase):
         self.assertIn("GOOG", added)
         self.assertIn("COST", added)
         self.assertIn("PEP", added)
+        cost = next(row for row in mistock_trader.get_watchlist() if row["symbol"] == "COST")
+        self.assertEqual(cost["name"], "Costco")
+        self.assertEqual(cost["display_name"], "Costco (COST)")
+        self.assertEqual(cost["asset_type"], "미국 주식")
 
     def test_mistock_strategy_selection_supports_multiple(self):
         mistock_db.init_db()

@@ -1786,7 +1786,10 @@ function drawWatchlist() {
         tr.innerHTML = `
             <td style="text-align: center; color: rgba(255,255,255,0.4);">${s.index}</td>
             <td style="font-weight: 600; color: #fff;">${escapeHtml(s.symbol)}</td>
-            <td style="color: rgba(255,255,255,0.8);">${escapeHtml(s.name)}</td>
+            <td style="color: rgba(255,255,255,0.8);">
+                <div class="symbol-name" style="font-weight:600;">${escapeHtml(s.name || s.symbol)}</div>
+                <div class="time-muted" style="font-size:0.72rem; margin-top:2px;">${escapeHtml([s.market || 'US', s.asset_type || '미국 주식', s.symbol].filter(Boolean).join(' · '))}</div>
+            </td>
             <td style="text-align: center;">${sectorHtml}</td>
             <td style="text-align: right;">${priceHtml}</td>
             <td style="text-align: center;">${scoreStr}</td>

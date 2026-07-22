@@ -775,7 +775,7 @@ def mistock_watchlist():
             "score": scan.get("score"),
             "rsi": scan.get("rsi"),
             "reasons": scan.get("reasons", ""),
-            "sector": "NASDAQ",
+            "sector": "미국 주식",
             "last_scanned_at": scan.get("scanned_at"),
         })
     return {

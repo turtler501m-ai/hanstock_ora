@@ -136,7 +136,19 @@ def broker_submission_available(balance: dict[str, Any] | None = None) -> bool:
 
 
 def get_watchlist() -> list[dict[str, Any]]:
-    return db.rows("SELECT symbol, name, created_at FROM watchlist ORDER BY symbol")
+    items = db.rows("SELECT symbol, name, created_at FROM watchlist ORDER BY symbol")
+    for item in items:
+        official_name = symbol_name(item["symbol"])
+        if official_name != item["symbol"]:
+            item["name"] = official_name
+        item["display_name"] = (
+            f"{item['name']} ({item['symbol']})"
+            if item.get("name") and item["name"] != item["symbol"]
+            else item["symbol"]
+        )
+        item["market"] = "US"
+        item["asset_type"] = "미국 주식"
+    return items
 
 
 def add_watchlist(symbol: str, name: str | None = None) -> dict[str, Any]:
@@ -161,10 +173,19 @@ def add_watchlist(symbol: str, name: str | None = None) -> dict[str, Any]:
     for sym in symbols:
         item_name = name or symbol_name(sym)
         db.execute(
-            "INSERT OR IGNORE INTO watchlist (symbol, name, created_at) VALUES (?, ?, ?)",
+            """
+            INSERT INTO watchlist (symbol, name, created_at) VALUES (?, ?, ?)
+            ON CONFLICT(symbol) DO UPDATE SET name = excluded.name
+            """,
             (sym, item_name, db.now_text()),
         )
-        last_item = {"symbol": sym, "name": item_name}
+        last_item = {
+            "symbol": sym,
+            "name": item_name,
+            "display_name": f"{item_name} ({sym})" if item_name != sym else sym,
+            "market": "US",
+            "asset_type": "미국 주식",
+        }
     return last_item
 
 
