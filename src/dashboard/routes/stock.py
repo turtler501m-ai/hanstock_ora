@@ -192,6 +192,88 @@ def _compact_scheduler_status_result(last_result: dict | None, item_limit: int =
     return compact
 
 
+def _enrich_scheduler_display(last_result: dict | None) -> dict | None:
+    """Fill display-only stock fields omitted from persisted scheduler summaries."""
+    if not isinstance(last_result, dict):
+        return last_result
+    result = last_result.get("result")
+    if not isinstance(result, dict):
+        return last_result
+
+    plans = result.get("results") if isinstance(result.get("results"), list) else []
+    approved = result.get("auto_approved") if isinstance(result.get("auto_approved"), list) else []
+    approval_ids = {
+        int(value)
+        for item in [*plans, *approved]
+        if isinstance(item, dict)
+        for value in [item.get("approval_id") or item.get("id")]
+        if str(value or "").isdigit()
+    }
+    symbols = {
+        str(item.get("symbol") or "").strip()
+        for item in [*plans, *approved]
+        if isinstance(item, dict) and str(item.get("symbol") or "").strip()
+    }
+
+    approval_by_id: dict[int, dict] = {}
+    latest_name_by_symbol: dict[str, str] = {}
+    try:
+        _init_approval_db()
+        with trader.connect_db() as conn:
+            conn.row_factory = sqlite3.Row
+            if approval_ids:
+                placeholders = ",".join("?" for _ in approval_ids)
+                rows = conn.execute(
+                    f"SELECT * FROM approvals WHERE id IN ({placeholders})",
+                    tuple(sorted(approval_ids)),
+                ).fetchall()
+                approval_by_id = {int(row["id"]): dict(row) for row in rows}
+            if symbols:
+                placeholders = ",".join("?" for _ in symbols)
+                rows = conn.execute(
+                    f"SELECT symbol, name FROM approvals WHERE symbol IN ({placeholders}) ORDER BY id DESC",
+                    tuple(sorted(symbols)),
+                ).fetchall()
+                for row in rows:
+                    symbol = str(row["symbol"] or "").strip()
+                    name = str(row["name"] or "").strip()
+                    if symbol and name and name != symbol:
+                        latest_name_by_symbol.setdefault(symbol, name)
+    except (sqlite3.Error, OSError, TypeError, ValueError):
+        pass
+
+    try:
+        from src.strategy.seven_split import STOCK_NAMES
+        for symbol, name in STOCK_NAMES.items():
+            latest_name_by_symbol.setdefault(str(symbol), str(name))
+    except (ImportError, AttributeError, TypeError):
+        pass
+
+    unknown_names = {"", "-", "알 수 없는 종목", "우량 종목", "Unknown"}
+
+    def enrich_name(item: dict) -> None:
+        symbol = str(item.get("symbol") or "").strip()
+        current = str(item.get("name") or "").strip()
+        if symbol and (current in unknown_names or current == symbol):
+            item["name"] = latest_name_by_symbol.get(symbol, current or symbol)
+
+    for item in plans:
+        if isinstance(item, dict):
+            enrich_name(item)
+
+    for item in approved:
+        if not isinstance(item, dict):
+            continue
+        value = item.get("approval_id") or item.get("id")
+        approval = approval_by_id.get(int(value)) if str(value or "").isdigit() else None
+        if approval:
+            for key in ("symbol", "name", "action", "qty", "price", "status", "response_msg"):
+                if item.get(key) in (None, "", "-") and approval.get(key) not in (None, ""):
+                    item[key] = approval[key]
+        enrich_name(item)
+    return last_result
+
+
 def _compact_scheduler_run_state(run_state: dict, item_limit: int = 100) -> dict:
     if not isinstance(run_state, dict):
         return run_state
@@ -1782,6 +1864,7 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
             except Exception:
                 pass
 
+    last_result = _enrich_scheduler_display(last_result)
     if compact:
         last_result = _compact_scheduler_status_result(last_result)
             

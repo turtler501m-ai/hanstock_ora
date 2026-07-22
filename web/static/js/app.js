@@ -3789,7 +3789,7 @@ async function renderScheduleInfo() {
                                     tr.innerHTML = `
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(row.symbol || '-')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;"><div class="symbol-name" style="font-weight: 500;">${escapeHtml(row.name || '-')}</div></td>
-                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(row.category || 'ai_rebalance', 'hold')}</td>
+                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(toKorPlanCategory(row.category), 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(toKorDecision(decision), kind)}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right;">${formatNumber(row.qty || row.signal_qty)}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right; font-weight: 500;">${formatNumber(row.price || row.signal_price)} 원</td>
@@ -3920,6 +3920,15 @@ function toKorDecision(dec) {
     if (dec === 'queue') return '승인 대기';
     if (dec === 'skip') return '수행 보류';
     return dec || '보류';
+}
+
+function toKorPlanCategory(category) {
+    const labels = {
+        position: '보유종목',
+        candidate: '매수후보',
+        ai_rebalance: 'AI 리밸런싱',
+    };
+    return labels[category] || category || 'AI 리밸런싱';
 }
 
 function formatKstTime(isoStr) {

@@ -96,6 +96,49 @@ class SchedulerApiTests(unittest.TestCase):
         self.assertEqual(status["last_result"]["range_days"], 30)
         self.assertIn("run_date", rows[0])
 
+    def test_get_scheduler_status_enriches_names_and_approved_order_details(self):
+        from datetime import datetime
+        from src.db.scheduler_repository import KST
+        from src.db.repository import connect_db, save_scheduler_result
+
+        now = datetime.now(KST)
+        created_at = now.strftime("%Y-%m-%d %H:%M:%S")
+        with connect_db() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO approvals (
+                    created_at, updated_at, symbol, name, action, qty, price,
+                    reason, source, status, response_msg
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    created_at, created_at, "251340", "KODEX 코스닥150선물인버스",
+                    "buy", 3, 2800, "test", "scheduler-test", "executed", "ok",
+                ),
+            )
+            approval_id = cursor.lastrowid
+            conn.commit()
+
+        save_scheduler_result(
+            "execute",
+            now.isoformat(),
+            {
+                "results": [{"symbol": "251340", "name": "251340", "category": "candidate"}],
+                "auto_approved": [{"id": approval_id, "status": "executed"}],
+            },
+        )
+
+        status = get_scheduler_status()
+        result = status["last_result"]["result"]
+        plan = next(row for row in result["results"] if row["symbol"] == "251340")
+        order = next(row for row in result["auto_approved"] if row["id"] == approval_id)
+
+        self.assertEqual(plan["name"], "KODEX 코스닥150선물인버스")
+        self.assertEqual(order["symbol"], "251340")
+        self.assertEqual(order["name"], "KODEX 코스닥150선물인버스")
+        self.assertEqual(order["action"], "buy")
+        self.assertEqual(order["qty"], 3)
+
     def test_get_scheduler_status_compacts_large_result_but_keeps_counts(self):
         from datetime import datetime
         from src.db.scheduler_repository import KST
