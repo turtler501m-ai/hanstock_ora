@@ -44,6 +44,131 @@ def _now_kst_text() -> str:
     return trader.datetime.now(trader.KST).strftime("%Y-%m-%d %H:%M:%S")
 
 
+STRATEGY_DISPLAY_NAMES = {
+    "seven_split": "기본 분할매매",
+    "rule_only_default": "기본 기술룰",
+    "gpt_5_mini_default": "GPT-5 미니 기본 전략",
+    "ai_stock_default_v1": "AI 기본 종목발굴",
+    "narrative_momentum_strategy": "내러티브 모멘텀",
+    "plunge_bounce_strategy": "급락 반등",
+    "issue_sector_rotation_strategy": "이슈 섹터 순환 모멘텀",
+}
+
+STRATEGY_STATUS_LABELS = {
+    "draft": "초안",
+    "verified": "검증완료",
+    "backtested": "백테스트완료",
+    "paper_running": "모의운영중",
+    "paper_passed": "모의운영통과",
+    "approved": "승인완료",
+    "review_required": "검토필요",
+    "retired": "사용중지",
+}
+
+STRATEGY_MODE_LABELS = {
+    "daily_auto": "자동매매",
+    "execute": "주문실행",
+    "analysis_only": "분석전용",
+}
+
+
+def _strategy_display_name(strategy_id: str | None, fallback: str | None = None) -> str:
+    sid = str(strategy_id or "").strip()
+    text = str(fallback or "").strip()
+    if text:
+        return text
+    return STRATEGY_DISPLAY_NAMES.get(sid, sid or "-")
+
+
+def _strategy_status_label(status: str | None) -> str:
+    key = str(status or "").lower()
+    return STRATEGY_STATUS_LABELS.get(key, status or "-")
+
+
+def _operation_status_label(operation: dict | None) -> str:
+    operation = operation or {}
+    if operation.get("ready"):
+        mode = operation.get("mode")
+        if mode == "live":
+            return "실전운영 가능"
+        if mode == "dry_run":
+            return "모의주문 가능"
+        return "데모운영 가능"
+    if operation.get("mode") == "inactive":
+        return "선택 안됨"
+    return "승인/검증 필요"
+
+
+def _operation_reason_label(operation: dict | None) -> str:
+    operation = operation or {}
+    reason = str(operation.get("reason") or "")
+    if reason == "strategy is not selected":
+        return "현재 선택된 전략이 아닙니다."
+    if reason.startswith("strategy status is "):
+        return f"현재 상태가 {_strategy_status_label(reason.removeprefix('strategy status is '))}입니다."
+    if reason.startswith("missing "):
+        missing = [
+            _approval_missing_label(item.strip())
+            for item in reason.removeprefix("missing ").split(",")
+            if item.strip()
+        ]
+        return f"필수 검증 미완료: {', '.join(missing)}"
+    if reason == "selected, approved, and validation gate passed":
+        return "선택, 승인, 검증 조건을 모두 통과했습니다."
+    return reason or "-"
+
+
+def _approval_missing_label(value: str) -> str:
+    labels = {
+        "static verification": "정적검증",
+        "api verification": "API검증",
+        "backtest": "백테스트",
+        "paper trading": "모의운영",
+        "active strategy": "활성전략",
+    }
+    return labels.get(value, value)
+
+
+def _approval_gate_label(gate: dict | None) -> str:
+    gate = gate or {}
+    if gate.get("ok"):
+        return "검증 통과"
+    missing = [_approval_missing_label(item) for item in gate.get("missing") or []]
+    return f"필수 검증 미완료: {', '.join(missing)}" if missing else "검증 필요"
+
+
+def _strategy_mode_label(mode: str | None) -> str:
+    return STRATEGY_MODE_LABELS.get(str(mode or "").lower(), mode or "-")
+
+
+def _schedule_display_payload(schedule: dict, display_name: str | None = None) -> dict:
+    enabled = bool(schedule.get("enabled"))
+    interval = int(schedule.get("interval_minutes") or 0)
+    start_hm = str(schedule.get("start_hm") or "").strip()
+    end_hm = str(schedule.get("end_hm") or "").strip()
+    weekdays = str(schedule.get("weekdays") or "1-5")
+    mode = str(schedule.get("mode") or "")
+    auto_approve = bool(schedule.get("auto_approve"))
+
+    weekday_label = "월-금" if weekdays == "1-5" else weekdays
+    window = f"{start_hm[:2]}:{start_hm[2:]}-{end_hm[:2]}:{end_hm[2:]}" if len(start_hm) == 4 and len(end_hm) == 4 else "-"
+    return {
+        "display_name": _strategy_display_name(schedule.get("strategy_id"), display_name),
+        "enabled_label": "사용 중" if enabled else "중지",
+        "interval_label": f"{interval}분마다" if interval else "-",
+        "window_label": f"{weekday_label} {window}",
+        "mode_label": _strategy_mode_label(mode),
+        "auto_approve_label": "자동승인" if auto_approve else "승인대기",
+        "last_run_label": schedule.get("last_run_at") or "아직 실행 이력 없음",
+        "summary": (
+            f"{'사용 중' if enabled else '중지'} · "
+            f"{_strategy_mode_label(mode)} · "
+            f"{interval}분마다 · {weekday_label} {window} · "
+            f"{'자동승인' if auto_approve else '승인대기'}"
+        ),
+    }
+
+
 def _json_safe(value):
     import math
 
@@ -319,6 +444,12 @@ def _strategy_api_payload(strategy: dict) -> dict:
         )
     payload["approval_gate"] = _approval_gate(strategy)
     payload["operation_status"] = _operation_status(strategy)
+    payload["display_name"] = _strategy_display_name(strategy.get("id"), strategy.get("name"))
+    payload["status_label"] = _strategy_status_label(strategy.get("status"))
+    payload["selected_label"] = "현재 사용" if strategy.get("selected") else "대기"
+    payload["approval_gate"]["label"] = _approval_gate_label(payload["approval_gate"])
+    payload["operation_status"]["label"] = _operation_status_label(payload["operation_status"])
+    payload["operation_status"]["reason_label"] = _operation_reason_label(payload["operation_status"])
     return payload
 
 
@@ -439,13 +570,28 @@ def get_strategy_context():
     if active is None and strategies:
         active = strategies[0]
     profile = active.get("profile") if active else {}
+    active_gate = _approval_gate(active) if active else {"ok": False, "missing": ["active strategy"]}
+    active_operation = _operation_status(active) if active else {
+        "ready": False,
+        "mode": "blocked",
+        "selected": False,
+        "approved": False,
+        "dry_run": bool(trader.DRY_RUN),
+        "live_enabled": bool(trader.ENABLE_LIVE_TRADING),
+        "reason": "active strategy is missing",
+    }
+    active_gate["label"] = _approval_gate_label(active_gate)
+    active_operation["label"] = _operation_status_label(active_operation)
+    active_operation["reason_label"] = _operation_reason_label(active_operation)
     return {
         "active_strategy": {
             "id": active.get("id") if active else None,
             "name": active.get("name") if active else None,
+            "display_name": _strategy_display_name(active.get("id"), active.get("name")) if active else "-",
             "model": (profile or {}).get("model") or (active.get("model") if active else None),
             "ai_weight": (profile or {}).get("ai_weight") if active else 0.0,
             "status": active.get("status") if active else None,
+            "status_label": _strategy_status_label(active.get("status")) if active else "-",
             "strategy_version": active.get("strategy_version") if active else None,
             "profile_hash": active.get("profile_hash") if active else None,
             "last_verified_at": active.get("last_verified_at") if active else None,
@@ -454,16 +600,8 @@ def get_strategy_context():
             "last_paper_completed_at": active.get("last_paper_completed_at") if active else None,
             "last_used_at": active.get("last_used_at") if active else None,
             "validation": _validation_payload(active) if active else {"checks": {}},
-            "approval_gate": _approval_gate(active) if active else {"ok": False, "missing": ["active strategy"]},
-            "operation_status": _operation_status(active) if active else {
-                "ready": False,
-                "mode": "blocked",
-                "selected": False,
-                "approved": False,
-                "dry_run": bool(trader.DRY_RUN),
-                "live_enabled": bool(trader.ENABLE_LIVE_TRADING),
-                "reason": "active strategy is missing",
-            },
+            "approval_gate": active_gate,
+            "operation_status": active_operation,
         },
         "safety": {
             "trading_env": trader.TRADING_ENV,
@@ -979,8 +1117,10 @@ def get_watchlist(strategy_id: str | None = None):
         from src.db.repository import load_strategy_universe_symbols
 
         symbols = load_strategy_universe_symbols(strategy_id)
-        # Dashboard reads inherit the shared list when a strategy-specific list is
-        # empty. Execution isolation remains enforced by the trading engine.
+        # This route is a dashboard view. Even isolated execution strategies should
+        # show the shared watchlist when their dedicated universe is empty; execution
+        # continues to enforce isolation in trader.build_runtime_plan(). This also
+        # keeps older browser sessions with a stale strategy id from rendering blank.
         if not symbols:
             symbols = data.get("symbols", [])
             inherited = True
@@ -1870,10 +2010,16 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
         last_result = _compact_scheduler_status_result(last_result)
             
     active_strategy_id = "seven_split"
+    strategy_name_by_id = {}
     active_strategy_name = "기본 룰베이스 (Seven Split)"
     try:
         from src.db.repository import load_ai_strategies
         strategies = load_ai_strategies()
+        strategy_name_by_id = {
+            str(strategy.get("id") or ""): _strategy_display_name(strategy.get("id"), strategy.get("name"))
+            for strategy in strategies
+            if strategy.get("id")
+        }
         active = next(
             (
                 strategy
@@ -1893,6 +2039,7 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
             active_strategy_name = active.get("name") or active_strategy_id
     except Exception:
         pass
+    active_strategy_name = STRATEGY_DISPLAY_NAMES.get(active_strategy_id, active_strategy_name or active_strategy_id)
 
     strategy_dispatch = {
         "enabled_count": 0,
@@ -1910,15 +2057,19 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
             sid = schedule.get("strategy_id")
             universe_count = len(load_strategy_universe(sid)) if sid else 0
             total_universe_count += universe_count
+            display_name = strategy_name_by_id.get(str(sid or "")) or _strategy_display_name(sid)
             schedule_items.append({
                 **schedule,
+                **_schedule_display_payload(schedule, display_name),
                 "universe_count": universe_count,
             })
+        enabled_count = sum(1 for item in schedule_items if item.get("enabled"))
         strategy_dispatch = {
-            "enabled_count": sum(1 for item in schedule_items if item.get("enabled")),
+            "enabled_count": enabled_count,
             "schedule_count": len(schedule_items),
             "universe_count": total_universe_count,
             "schedules": schedule_items,
+            "summary": f"사용 {enabled_count}개 / 전체 {len(schedule_items)}개 / 감시종목 {total_universe_count}개",
         }
     except Exception:
         pass
