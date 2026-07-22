@@ -3630,6 +3630,55 @@ def _bg_run_scheduled_cycle(
         mode=mode,
         include_ai_rebalance=include_ai_rebalance,
         auto_approve=auto_approve,
-        strategy_id=force_strategy_id,
+        force_strategy_id=force_strategy_id,
+        allowed_categories=allowed_categories,
+    )
+
+
+def _run_scheduled_cycles_for_strategies(
+    mode: str,
+    include_ai_rebalance: bool,
+    auto_approve: bool,
+    strategy_ids: list[str],
+    allowed_categories: set[str] | None = None,
+) -> dict:
+    from src.scheduler import run_scheduled_cycle
+
+    runs = []
+    errors = []
+    for strategy_id in strategy_ids:
+        try:
+            result = run_scheduled_cycle(
+                mode,
+                include_ai_rebalance=include_ai_rebalance,
+                auto_approve=auto_approve,
+                force_strategy_id=strategy_id,
+                allowed_categories=allowed_categories,
+            )
+            runs.append({"strategy_id": strategy_id, "result": result})
+        except Exception as exc:
+            errors.append({"strategy_id": strategy_id, "message": str(exc)})
+    return {
+        "status": "failed" if errors and not runs else "success",
+        "ok": bool(runs),
+        "strategy_ids": strategy_ids,
+        "runs": runs,
+        "errors": errors,
+    }
+
+
+def _bg_run_multiple_scheduled_cycles(
+    mode: str,
+    include_ai_rebalance: bool,
+    auto_approve: bool,
+    strategy_ids: list[str],
+    allowed_categories: set[str] | None = None,
+):
+    _dashboard_scheduler_service.run(
+        _run_scheduled_cycles_for_strategies,
+        mode=mode,
+        include_ai_rebalance=include_ai_rebalance,
+        auto_approve=auto_approve,
+        strategy_ids=strategy_ids,
         allowed_categories=allowed_categories,
     )

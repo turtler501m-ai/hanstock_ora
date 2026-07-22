@@ -306,6 +306,20 @@ class SchedulerApiTests(unittest.TestCase):
         mock_thread.assert_called_once()
         mock_thread_instance.start.assert_called_once()
 
+    @patch("src.dashboard.threading.Thread")
+    def test_trigger_scheduler_run_accepts_multiple_strategies(self, mock_thread):
+        mock_thread.return_value = MagicMock()
+
+        response = trigger_scheduler_run(payload={
+            "mode": "analysis_only",
+            "strategy_ids": ["alpha", "beta", "alpha"],
+        })
+
+        self.assertEqual(response["strategy_ids"], ["alpha", "beta"])
+        self.assertIsNone(response["strategy_id"])
+        thread_args = mock_thread.call_args.kwargs["args"]
+        self.assertEqual(thread_args[3], ["alpha", "beta"])
+
     def test_trigger_scheduler_run_prevents_double_execution(self):
         with _scheduler_running_lock:
             _scheduler_run_state["is_running"] = True

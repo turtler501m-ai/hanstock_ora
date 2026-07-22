@@ -8,6 +8,47 @@ globals().update({k: v for k, v in _core.__dict__.items() if not k.startswith('_
 router = APIRouter(tags=["account"])
 
 
+def _attach_holding_strategies(parsed: dict) -> dict:
+    """Attach best-effort strategy ownership reconstructed from successful trades."""
+    from src.db.repository import load_ai_strategies
+
+    names = {
+        str(item.get("id")): str(item.get("name") or item.get("id"))
+        for item in load_ai_strategies()
+        if item.get("id")
+    }
+    ownership: dict[str, list[dict]] = {}
+    with trader.connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT symbol, strategy_id,
+                   SUM(CASE WHEN action = 'buy' THEN qty WHEN action = 'sell' THEN -qty ELSE 0 END) AS net_qty
+            FROM trades
+            WHERE ok = 1
+              AND COALESCE(strategy_id, '') <> ''
+              AND (? = '' OR env = ?)
+            GROUP BY symbol, strategy_id
+            HAVING net_qty > 0
+            ORDER BY net_qty DESC, strategy_id
+            """,
+            (str(trader.TRADING_ENV or ""), str(trader.TRADING_ENV or "")),
+        ).fetchall()
+    for row in rows:
+        sid = str(row["strategy_id"])
+        ownership.setdefault(str(row["symbol"]), []).append({
+            "id": sid,
+            "name": names.get(sid, sid),
+            "qty": int(row["net_qty"] or 0),
+        })
+    for holding in parsed.get("holdings", []):
+        strategies = ownership.get(str(holding.get("symbol") or ""), [])
+        holding["strategies"] = strategies
+        holding["strategy_ids"] = [item["id"] for item in strategies]
+        holding["strategy_names"] = [item["name"] for item in strategies]
+    return parsed
+
+
 def _active_sell_approval_symbols() -> set[str]:
     _init_approval_db()
     with trader.connect_db() as conn:
@@ -191,6 +232,7 @@ def get_balance():
             raise HTTPException(status_code=503, detail="Online access is blocked and no balance snapshot is available")
         parsed = _parse_balance(balance_data)
         _hide_active_sell_approval_holdings(parsed)
+        _attach_holding_strategies(parsed)
         for holding in parsed["holdings"]:
             holding.pop("_raw", None)
         parsed["_offline"] = True
@@ -213,6 +255,7 @@ def get_balance():
         balance_data = _get_balance_data(api)
         parsed = _parse_balance(balance_data)
         _hide_active_sell_approval_holdings(parsed)
+        _attach_holding_strategies(parsed)
         for holding in parsed["holdings"]:
             holding.pop("_raw", None)
         if balance_data.get("_cache"):

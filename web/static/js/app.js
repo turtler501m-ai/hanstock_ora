@@ -956,6 +956,7 @@ function updateHoldingSortHeaders() {
         { key: 'value', title: '평가금액' },
         { key: 'rt', title: '수익률' },
         { key: 'pnl', title: '평가손익' },
+        { key: '', title: '귀속 전략' },
     ];
     headerMap.forEach((item, index) => {
         const th = headers[index];
@@ -978,7 +979,7 @@ function renderHoldingRows() {
     }
     tbodyHoldings.innerHTML = '';
     if (!holdingsCache.length) {
-        setTableMessage('#table-holdings tbody', 7, '보유 종목이 없습니다');
+        setTableMessage('#table-holdings tbody', 8, '보유 종목이 없습니다');
         updateHoldingSortHeaders();
         return;
     }
@@ -1002,6 +1003,9 @@ function renderHoldingRows() {
             <td>${formatCurrency(holding.value || Number(holding.qty || 0) * Number(holding.price || 0))}</td>
             <td class="${rtClass}">${formatPercent(holding.rt)}</td>
             <td class="${rtClass}">${formatCurrency(holding.pnl)}</td>
+            <td>${(holding.strategy_names || []).length
+                ? (holding.strategy_names || []).map((name) => pill(name, 'hold')).join(' ')
+                : '<span class="time-muted">귀속 미확인</span>'}</td>
             <td>
                 <button type="button" class="button-ghost queue-order"
                     data-symbol="${escapeHtml(holding.symbol)}"
@@ -1119,7 +1123,7 @@ async function renderBalance() {
         ];
 
         if (!balance.holdings.length) {
-            setTableMessage('#table-holdings tbody', 7, '보유 종목이 없습니다');
+            setTableMessage('#table-holdings tbody', 8, '보유 종목이 없습니다');
         }
 
         balance.holdings.forEach((holding, idx) => {
@@ -1187,7 +1191,7 @@ async function renderBalance() {
         setElementText('val-pnl', '불러오기 실패');
         setElementText('val-return', '-');
         setStatus(`계좌 API 오류: ${err.message}`);
-        setTableMessage('#table-holdings tbody', 7, err.message);
+        setTableMessage('#table-holdings tbody', 8, err.message);
     }
 }
 
@@ -1612,7 +1616,7 @@ async function renderAiStrategies() {
             const operationReason = operation.reason_label || operation.reason || operationSummary;
             tr.innerHTML = `
                 <td style="text-align:center;">
-                    <input type="radio" name="active-ai-strategy" class="strategy-select-radio" data-id="${escapeHtml(strategy.id)}" ${strategy.selected ? 'checked' : ''}>
+                    <input type="checkbox" class="strategy-select-checkbox" data-id="${escapeHtml(strategy.id)}" ${strategy.selected ? 'checked' : ''}>
                 </td>
                 <td>
                     <div class="symbol-name">${escapeHtml(strategyDisplayName(strategy))}</div>
@@ -1651,14 +1655,14 @@ async function renderAiStrategies() {
             tbody.appendChild(tr);
         });
 
-        tbody.querySelectorAll('.strategy-select-radio').forEach((input) => {
+        tbody.querySelectorAll('.strategy-select-checkbox').forEach((input) => {
             input.addEventListener('change', async () => {
                 const id = input.getAttribute('data-id');
-                await postJson(`/api/ai-strategies/${id}/select`, { selected: true });
-                localStorage.setItem('hanstock_ai_ranker', id);
+                await postJson(`/api/ai-strategies/${id}/select`, { selected: input.checked });
+                if (input.checked) localStorage.setItem('hanstock_ai_ranker', id);
                 await Promise.all([syncStrategiesToDropdown(), renderStrategyContext(), renderAiStrategies()]);
                 await renderStrategyAudit(id);
-                setStatus('Active AI 전략을 변경했습니다.', true);
+                setStatus(`AI 전략 ${input.checked ? '선택' : '해제'}: ${id}`, true);
             });
         });
 
@@ -2313,7 +2317,7 @@ function removeQueuedHoldingRow(button, payload) {
     }
     const tbody = document.querySelector('#table-holdings tbody');
     if (tbody && !tbody.querySelector('tr')) {
-        setTableMessage('#table-holdings tbody', 7, 'Sell request is now tracked in the orders tab');
+        setTableMessage('#table-holdings tbody', 8, 'Sell request is now tracked in the orders tab');
     }
 }
 
@@ -3527,6 +3531,7 @@ async function renderScheduleInfo() {
         const strategyId = getActiveStrategyId();
         const query = strategyId ? `?strategy_id=${encodeURIComponent(strategyId)}` : '';
         const data = await fetchJson(`/api/scheduler/status${query}`);
+        await renderSchedulerStrategyChecklist(data.strategy_dispatch?.schedules || []);
         
         // 1. Config / Settings
         const cronTzEl = document.getElementById('sched-cron-tz');
@@ -3733,6 +3738,7 @@ async function renderScheduleInfo() {
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 150px;">주문ID</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 100px;">종목코드</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 120px;">종목명</th>
+                                                <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 130px;">전략</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 80px;">구분</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: right; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 80px;">수량</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: right; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 120px;">가격</th>
@@ -3756,6 +3762,7 @@ async function renderScheduleInfo() {
                                             <tr style="background: rgba(255,255,255,0.02); border-bottom: 1px solid var(--border);">
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 100px;">종목코드</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted);">종목명</th>
+                                                <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 130px;">전략</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 100px;">분류</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 100px;">결정</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: right; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 80px;">수량</th>
@@ -3775,7 +3782,7 @@ async function renderScheduleInfo() {
                         const plansTbody = card.querySelector('.table-plans tbody');
                         if (plansTbody) {
                             if (roundData.results.length === 0) {
-                                plansTbody.innerHTML = '<tr><td colspan="7" class="text-center" style="padding: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">생성된 계획이 없습니다.</td></tr>';
+                                plansTbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">생성된 계획이 없습니다.</td></tr>';
                             } else {
                                 roundData.results.forEach(row => {
                                     const tr = document.createElement('tr');
@@ -3805,6 +3812,7 @@ async function renderScheduleInfo() {
                                     tr.innerHTML = `
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(row.symbol || '-')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;"><div class="symbol-name" style="font-weight: 500;">${escapeHtml(row.name || '-')}</div></td>
+                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(row.strategy_name || row.strategy_id || '기본 분할매매', 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(toKorPlanCategory(row.category), 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(toKorDecision(decision), kind)}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right;">${formatNumber(row.qty || row.signal_qty)}</td>
@@ -3820,7 +3828,7 @@ async function renderScheduleInfo() {
                         const ordersTbody = card.querySelector('.table-orders tbody');
                         if (ordersTbody) {
                             if (roundData.approved.length === 0 && roundData.approvalErrors.length === 0) {
-                                ordersTbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">승인 대기 주문이 없거나 자동 승인이 생략되었습니다.</td></tr>';
+                                ordersTbody.innerHTML = '<tr><td colspan="9" class="text-center" style="padding: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">승인 대기 주문이 없거나 자동 승인이 생략되었습니다.</td></tr>';
                             } else {
                                 // 1. Render approvalErrors first so they appear at the very top
                                 roundData.approvalErrors.forEach(err => {
@@ -3846,6 +3854,7 @@ async function renderScheduleInfo() {
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(err.approval_id || '-')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(symbolVal)}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;"><div class="symbol-name" style="font-weight: 500;">${escapeHtml(nameVal)}</div></td>
+                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(err.strategy_name || (matchingPlan && matchingPlan.strategy_name) || err.strategy_id || (matchingPlan && matchingPlan.strategy_id) || '기본 분할매매', 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${actionVal !== '-' ? pill(toKorAction(actionVal), actionVal === 'sell' ? 'sell' : 'buy') : '-'}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right;">${qtyVal !== '-' ? formatNumber(qtyVal) : '-'}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right; font-weight: 500;">${priceVal !== '-' ? formatNumber(priceVal) + ' 원' : '-'}</td>
@@ -3881,6 +3890,7 @@ async function renderScheduleInfo() {
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(ordId || '-')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(symbolVal)}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;"><div class="symbol-name" style="font-weight: 500;">${escapeHtml(nameVal)}</div></td>
+                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(ord.strategy_name || (matchingPlan && matchingPlan.strategy_name) || ord.strategy_id || (matchingPlan && matchingPlan.strategy_id) || '기본 분할매매', 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${actionVal !== '-' ? pill(toKorAction(actionVal), actionVal === 'sell' ? 'sell' : 'buy') : '-'}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right;">${qtyVal !== '-' ? formatNumber(qtyVal) : '-'}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right; font-weight: 500;">${priceVal !== '-' ? formatNumber(priceVal) + ' 원' : '-'}</td>
@@ -3900,6 +3910,27 @@ async function renderScheduleInfo() {
     } catch (err) {
         console.error('Failed to load schedule status:', err);
     }
+}
+
+async function renderSchedulerStrategyChecklist(schedules = []) {
+    const container = document.getElementById('scheduler-strategy-checklist');
+    if (!container) return;
+    const data = await fetchJson('/api/ai-strategies');
+    const scheduled = new Set(schedules.filter((row) => row.enabled).map((row) => String(row.strategy_id)));
+    const strategies = (data.strategies || []).filter((row) => row.status !== 'retired');
+    container.innerHTML = strategies.map((strategy) => {
+        const checked = strategy.selected || scheduled.has(String(strategy.id));
+        return `<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" class="scheduler-strategy-checkbox" value="${escapeHtml(strategy.id)}" ${checked ? 'checked' : ''}>
+            <span>${escapeHtml(strategyDisplayName(strategy))}</span>
+        </label>`;
+    }).join('') || '<span class="time-muted">실행 가능한 전략이 없습니다.</span>';
+}
+
+function getScheduledStrategyIds() {
+    return Array.from(document.querySelectorAll('.scheduler-strategy-checkbox:checked'))
+        .map((input) => String(input.value || '').trim())
+        .filter(Boolean);
 }
 
 window.toggleRoundCollapse = function(round) {
@@ -3975,10 +4006,12 @@ async function triggerSchedule(mode) {
     }
     
     try {
+        const strategyIds = getScheduledStrategyIds();
         const strategyId = getActiveStrategyId();
         const res = await postJson('/api/scheduler/run', {
             mode: mode,
-            strategy_id: strategyId || null,
+            strategy_id: strategyIds.length ? null : (strategyId || null),
+            strategy_ids: strategyIds,
             allowed_categories: ['position', 'candidate', 'ai_rebalance'],
         });
         if (res.status === 'started') {

@@ -68,6 +68,20 @@ class AiStrategyLifecycleTests(unittest.TestCase):
         self.assertEqual(listed["approval_gate"]["label"], "필수 검증 미완료: 정적검증, 백테스트, 모의운영")
         self.assertEqual(listed["operation_status"]["label"], "승인/검증 필요")
 
+    def test_selecting_strategy_keeps_other_selected_strategies(self):
+        strategies = load_ai_strategies()
+        primary = next(item for item in strategies if item["id"] == "lifecycle_rule")
+        second = dict(primary)
+        second.update({"id": "lifecycle_rule_two", "name": "Lifecycle Rule Two", "selected": False})
+        save_ai_strategies([primary, second])
+
+        dashboard.select_ai_strategy("lifecycle_rule_two", dashboard.SelectStrategyPayload(selected=True))
+
+        selected_ids = {
+            item["id"] for item in load_ai_strategies() if item.get("selected")
+        }
+        self.assertEqual(selected_ids, {"lifecycle_rule", "lifecycle_rule_two"})
+
     def test_strategy_apis_normalize_non_finite_validation_values(self):
         strategy = load_ai_strategies()[0]
         strategy["last_validation_result"] = json.dumps(

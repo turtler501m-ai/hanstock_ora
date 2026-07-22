@@ -119,6 +119,7 @@ def load_recent_scheduler_results(days: int = 30) -> dict | None:
                     continue
                 
                 round_num = idx + 1
+                run_strategy_id = str(res_data.get("strategy_id") or row["strategy_id"] or "seven_split")
                 recorded_at_str = row["recorded_at"]
                 normalized_recorded_at = recorded_at_str.replace("T", " ")
                 date_part = normalized_recorded_at[:10]
@@ -128,6 +129,7 @@ def load_recent_scheduler_results(days: int = 30) -> dict | None:
                 # plans / results
                 for item in res_data.get("results", []):
                     item_copy = dict(item)
+                    item_copy.setdefault("strategy_id", run_strategy_id)
                     item_copy["time"] = display_time
                     item_copy["run_date"] = date_part
                     item_copy["run_recorded_at"] = recorded_at_str
@@ -141,6 +143,7 @@ def load_recent_scheduler_results(days: int = 30) -> dict | None:
                 # approved / auto_approved
                 for item in res_data.get("auto_approved", []):
                     item_copy = dict(item)
+                    item_copy.setdefault("strategy_id", run_strategy_id)
                     item_copy["time"] = display_time
                     item_copy["run_date"] = date_part
                     item_copy["run_recorded_at"] = recorded_at_str
@@ -154,6 +157,7 @@ def load_recent_scheduler_results(days: int = 30) -> dict | None:
                 # approval errors
                 for item in res_data.get("auto_approval_errors", []):
                     item_copy = dict(item)
+                    item_copy.setdefault("strategy_id", run_strategy_id)
                     item_copy["time"] = display_time
                     item_copy["run_date"] = date_part
                     item_copy["run_recorded_at"] = recorded_at_str

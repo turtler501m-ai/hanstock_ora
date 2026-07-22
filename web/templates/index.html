@@ -213,6 +213,7 @@
                                     <th>평가금액</th>
                                     <th>수익률</th>
                                     <th>평가손익</th>
+                                    <th>귀속 전략</th>
                                     <th>매도</th>
                                 </tr>
                             </thead>
@@ -428,6 +429,10 @@
                     <section class="card glass panel-schedule-trigger">
                         <h2>스케쥴 즉시 실행</h2>
                         <p class="section-help">지정한 모드로 스케쥴러를 즉시 기동하여 신호를 추출하거나 주문을 실행합니다.</p>
+                        <div class="panel-sub" style="margin-bottom: 1rem;">
+                            <h3>실행할 전략 (복수 선택)</h3>
+                            <div id="scheduler-strategy-checklist" style="display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:8px;"></div>
+                        </div>
                         
                         <div class="trigger-controls">
                             <div class="trigger-item">
@@ -1665,7 +1670,7 @@
         });
     </script>
     <script src="/static/js/environment_badge.js?v=1"></script>
-    <script src="/static/js/app.js?v=43"></script>
+    <script src="/static/js/app.js?v=44"></script>
 
     <!-- Plunge Bounce Strategy Scripts -->
     <script>

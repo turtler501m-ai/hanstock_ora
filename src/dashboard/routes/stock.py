@@ -261,14 +261,14 @@ def _compact_scheduler_status_result(last_result: dict | None, item_limit: int =
     plan_keys = {
         "symbol", "name", "category", "decision", "approval_id", "action",
         "qty", "signal_qty", "price", "signal_price", "reason", "skip_reason",
-        "time", "run_date", "run_recorded_at", "round",
+        "time", "run_date", "run_recorded_at", "round", "strategy_id", "strategy_name",
     }
     approved_keys = {
         "id", "approval_id", "symbol", "name", "action", "qty", "price",
         "status", "response_msg", "message", "time", "run_date", "run_recorded_at",
-        "round",
+        "round", "strategy_id", "strategy_name",
     }
-    error_keys = {"approval_id", "message", "time", "run_date", "run_recorded_at", "round"}
+    error_keys = {"approval_id", "message", "time", "run_date", "run_recorded_at", "round", "strategy_id", "strategy_name"}
 
     compact_result = {
         "results": [
@@ -700,8 +700,6 @@ def select_ai_strategy(id: str, payload: SelectStrategyPayload):
         if strategy["id"] == id:
             strategy["selected"] = payload.selected
             found = strategy
-        elif payload.selected:
-            strategy["selected"] = False
 
     if not found:
         raise HTTPException(status_code=404, detail="Strategy not found")
@@ -2041,6 +2039,16 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
         pass
     active_strategy_name = STRATEGY_DISPLAY_NAMES.get(active_strategy_id, active_strategy_name or active_strategy_id)
 
+    if isinstance(last_result, dict) and isinstance(last_result.get("result"), dict):
+        result_data = last_result["result"]
+        for collection in ("results", "auto_approved", "auto_approval_errors"):
+            for item in result_data.get(collection) or []:
+                if not isinstance(item, dict):
+                    continue
+                sid = str(item.get("strategy_id") or result_data.get("strategy_id") or "seven_split")
+                item["strategy_id"] = sid
+                item["strategy_name"] = strategy_name_by_id.get(sid) or _strategy_display_name(sid)
+
     strategy_dispatch = {
         "enabled_count": 0,
         "schedule_count": 0,
@@ -2113,34 +2121,46 @@ def trigger_scheduler_run(payload: dict = Body(...)):
             raise HTTPException(status_code=400, detail="No valid order categories were provided")
 
     # 실행 대상 전략: payload.strategy_id가 있으면 사용, 없으면 현재 선택된 전략을 강제.
+    raw_strategy_ids = payload.get("strategy_ids")
+    strategy_ids = []
+    if isinstance(raw_strategy_ids, list):
+        strategy_ids = list(dict.fromkeys(
+            str(value).strip() for value in raw_strategy_ids if str(value).strip()
+        ))
     force_strategy_id = payload.get("strategy_id")
     if force_strategy_id is not None:
         force_strategy_id = str(force_strategy_id).strip() or None
-    if force_strategy_id is None:
+    if force_strategy_id is None and not strategy_ids:
         try:
             from src.db.repository import load_ai_strategies
-            active = next((s for s in load_ai_strategies() if s.get("selected")), None)
-            # model이 "none"(룰 전용)인 경우 scheduler.py와 동일하게 seven_split로 폴백되도록 None 유지.
-            if active and active.get("model") and active.get("model") != "none":
-                force_strategy_id = active.get("model")
+            strategy_ids = [
+                str(s.get("id")) for s in load_ai_strategies()
+                if s.get("selected") and s.get("id")
+            ]
         except Exception:
-            force_strategy_id = None
+            strategy_ids = []
+
+    if force_strategy_id and not strategy_ids:
+        strategy_ids = [force_strategy_id]
+    if not strategy_ids:
+        strategy_ids = ["seven_split"]
 
     if not _dashboard_scheduler_service.claim(
         mode=mode,
-        strategy_id=force_strategy_id,
+        strategy_id=",".join(strategy_ids),
     ):
         raise HTTPException(status_code=409, detail="스케줄러가 이미 실행 중입니다.")
 
     t = threading.Thread(
-        target=_bg_run_scheduled_cycle,
-        args=(mode, include_ai_rebalance, auto_approve, force_strategy_id, allowed_categories),
+        target=_bg_run_multiple_scheduled_cycles,
+        args=(mode, include_ai_rebalance, auto_approve, strategy_ids, allowed_categories),
         daemon=True
     )
     t.start()
     return {
         "status": "started",
         "mode": mode,
-        "strategy_id": force_strategy_id,
+        "strategy_id": strategy_ids[0] if len(strategy_ids) == 1 else None,
+        "strategy_ids": strategy_ids,
         "allowed_categories": sorted(allowed_categories) if allowed_categories else None,
     }
