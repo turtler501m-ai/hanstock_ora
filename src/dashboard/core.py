@@ -304,9 +304,9 @@ async def _disable_dashboard_cache(request, call_next):
     response = await call_next(request)
     path = request.url.path
     if (
-        path == "/"
-        or path == "/static/js/app.js"
+        path in {"/", "/mistock", "/static/js/app.js", "/static/js/mistock_app.js"}
         or path.startswith("/api/performance")
+        or path.startswith("/api/mistock/")
     ):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
