@@ -4,15 +4,15 @@ After=network.target
 
 [Service]
 Type=simple
-User=turtler800
-WorkingDirectory=/home/turtler800/hanstock
-ExecStart=/home/turtler800/hanstock/.venv/bin/uvicorn src.dashboard:app --host 127.0.0.1 --port 8000
+User=ubuntu
+WorkingDirectory=/home/ubuntu/hanstock
+ExecStart=/home/ubuntu/hanstock/.venv/bin/uvicorn src.dashboard:app --host 0.0.0.0 --port 8000 --log-level error
 Restart=always
 RestartSec=5
-Environment=PATH=/home/turtler800/hanstock/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-EnvironmentFile=/home/turtler800/hanstock/.env
-StandardOutput=append:/home/turtler800/hanstock/logs/dashboard-server.log
-StandardError=append:/home/turtler800/hanstock/logs/dashboard-server.err.log
+Environment=PATH=/home/ubuntu/hanstock/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=/home/ubuntu/hanstock/.env
+StandardOutput=append:/home/ubuntu/hanstock/logs/dashboard-server.log
+StandardError=append:/home/ubuntu/hanstock/logs/dashboard-server.err.log
 
 [Install]
 WantedBy=multi-user.target

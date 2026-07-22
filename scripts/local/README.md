@@ -38,6 +38,10 @@
 ## VM 배포와 접속
 
 ```powershell
+.\deploy-oci.ps1
+.\deploy-oci.ps1 -SkipPush
+.\connect-oci.ps1
+.\check-oci.ps1
 .\deploy-vm.ps1
 .\deploy-vm.ps1 -SkipPush
 .\deploy-vm.ps1 -FreshClone
@@ -57,6 +61,16 @@ project: project-c48329d1-72a5-4699-8ff
 user: turtler801
 key: ~/.ssh/google_compute_engine
 repo: ~/hanstock
+```
+
+Oracle VM 기본 대상:
+
+```text
+host: 168.110.102.249 (http://168.110.102.249:8000)
+user: ubuntu
+key: ~/.ssh/id_ed25519
+repo: ~/hanstock
+source: https://github.com/turtler501m-ai/hanstock_ora.git
 ```
 
 > 참고: 이 gcloud 계정은 신규 프로젝트의 `compute.instances.get` 권한이 없어

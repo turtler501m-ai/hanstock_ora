@@ -10,6 +10,7 @@ param(
     [string]$Project = $(if ($env:HANSTOCK_GCP_PROJECT) { $env:HANSTOCK_GCP_PROJECT } else { "project-c48329d1-72a5-4699-8ff" }),
     [string]$KeyPath = $(if ($env:HANSTOCK_SSH_KEY) { $env:HANSTOCK_SSH_KEY } else { (Join-Path $env:USERPROFILE ".ssh\google_compute_engine") }),
     [string]$BackupRoot = $(if ($env:HANSTOCK_VM_BACKUP_ROOT) { $env:HANSTOCK_VM_BACKUP_ROOT } else { "~/hanstock_backups" }),
+    [string]$RepoUrl = $(if ($env:HANSTOCK_REPO_URL) { $env:HANSTOCK_REPO_URL } else { "https://github.com/turtler501m-ai/hanstock_ora.git" }),
     [switch]$FreshClone,
     [switch]$SkipPush
 )
@@ -102,7 +103,6 @@ if (-not $SkipPush) {
     git push origin $Branch
 }
 
-$repoUrl = "https://github.com/turtler501m-ai/hanstock.git"
 $remoteCommand = @'
 set -e
 BRANCH="__BRANCH__"
@@ -161,13 +161,14 @@ fi
 $remoteCommand = $remoteCommand.
     Replace("__BRANCH__", $Branch).
     Replace("__REPO_PATH__", $RepoPath).
-    Replace("__REPO_URL__", $repoUrl).
+    Replace("__REPO_URL__", $RepoUrl).
     Replace("__BACKUP_ROOT__", $BackupRoot).
     Replace("__FRESH_CLONE__", $(if ($FreshClone) { "1" } else { "0" }))
 $remoteCommand = $remoteCommand -replace "`r`n", "`n" -replace "`r", "`n"
 
 Write-Host "[deploy] target: $target"
 Write-Host "[deploy] repo: $RepoPath"
+Write-Host "[deploy] remote: $RepoUrl"
 Write-Host "[deploy] branch: $Branch"
 if ($FreshClone) {
     Write-Host "[deploy] fresh clone: enabled"
