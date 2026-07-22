@@ -59,9 +59,14 @@ class AiStrategyLifecycleTests(unittest.TestCase):
         self.assertTrue(body["safety"]["require_backtest_pass"])
 
         list_body = dashboard.get_ai_strategies()
-        listed = list_body["strategies"][0]
+        listed = next(strategy for strategy in list_body["strategies"] if strategy["id"] == "lifecycle_rule")
         self.assertFalse(listed["approval_gate"]["ok"])
         self.assertFalse(listed["operation_status"]["ready"])
+        self.assertEqual(listed["display_name"], "Lifecycle Rule")
+        self.assertEqual(listed["status_label"], "초안")
+        self.assertEqual(listed["selected_label"], "현재 사용")
+        self.assertEqual(listed["approval_gate"]["label"], "필수 검증 미완료: 정적검증, 백테스트, 모의운영")
+        self.assertEqual(listed["operation_status"]["label"], "승인/검증 필요")
 
     def test_strategy_apis_normalize_non_finite_validation_values(self):
         strategy = load_ai_strategies()[0]

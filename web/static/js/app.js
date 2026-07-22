@@ -171,14 +171,14 @@ const aiModelStatusKind = (status) => {
 
 const strategyStatusLabel = (status) => {
     const labels = {
-        draft: 'Draft',
-        verified: 'Verified',
-        backtested: 'Backtested',
-        paper_running: 'Paper running',
-        paper_passed: 'Paper passed',
-        approved: 'Approved',
-        review_required: 'Review',
-        retired: 'Retired',
+        draft: '초안',
+        verified: '검증완료',
+        backtested: '백테스트완료',
+        paper_running: '모의운영중',
+        paper_passed: '모의운영통과',
+        approved: '승인완료',
+        review_required: '검토필요',
+        retired: '사용중지',
     };
     return labels[String(status || '').toLowerCase()] || status || '-';
 };
@@ -190,6 +190,21 @@ const strategyStatusKind = (status) => {
     if (key === 'retired') return 'sell';
     return 'hold';
 };
+
+function strategyDisplayName(strategy) {
+    return strategy?.display_name || strategy?.name || strategy?.id || '-';
+}
+
+function strategyOperationLabel(operation) {
+    if (operation?.label) return operation.label;
+    if (operation?.ready) {
+        if (operation.mode === 'live') return '실전운영 가능';
+        if (operation.mode === 'dry_run') return '모의주문 가능';
+        return '데모운영 가능';
+    }
+    if (operation?.mode === 'inactive') return '선택 안됨';
+    return '승인/검증 필요';
+}
 
 function buildCandidateStrategyMarkup(row) {
     const ruleScore = Number(row.rule_score ?? row.score ?? 0);
@@ -1592,18 +1607,19 @@ async function renderAiStrategies() {
             const builtIn = ['gpt_5_mini_default', 'rule_only_default'].includes(strategy.id);
             const gate = strategy.approval_gate || {};
             const operation = strategy.operation_status || {};
-            const validationSummary = strategyGateText(gate);
-            const operationSummary = strategyOperationText(operation);
+            const validationSummary = gate.label || strategyGateText(gate);
+            const operationSummary = strategyOperationLabel(operation);
+            const operationReason = operation.reason_label || operation.reason || operationSummary;
             tr.innerHTML = `
                 <td style="text-align:center;">
                     <input type="radio" name="active-ai-strategy" class="strategy-select-radio" data-id="${escapeHtml(strategy.id)}" ${strategy.selected ? 'checked' : ''}>
                 </td>
                 <td>
-                    <div class="symbol-name">${escapeHtml(strategy.name)}</div>
+                    <div class="symbol-name">${escapeHtml(strategyDisplayName(strategy))}</div>
                     <div class="symbol-code">${escapeHtml(strategy.id)} · ${escapeHtml(String(strategy.profile_hash || '').slice(0, 8))}</div>
                 </td>
                 <td>
-                    ${pill(strategyStatusLabel(strategy.status), strategyStatusKind(strategy.status))}
+                    ${pill(strategy.status_label || strategyStatusLabel(strategy.status), strategyStatusKind(strategy.status))}
                     ${pill(operationSummary, strategyOperationKind(operation))}
                 </td>
                 <td>${escapeHtml(model)}</td>
@@ -3540,8 +3556,8 @@ async function renderScheduleInfo() {
         const activeStrategyEl = document.getElementById('sched-active-strategy');
         if (activeStrategyEl) {
             const dispatch = data.strategy_dispatch || {};
-            const dispatchText = `dispatch ${dispatch.enabled_count || 0}/${dispatch.schedule_count || 0}, universe ${dispatch.universe_count || 0}`;
-            activeStrategyEl.textContent = `${data.active_strategy_name} (${data.active_strategy_id}) | ${dispatchText}`;
+            const dispatchText = dispatch.summary || `사용 ${dispatch.enabled_count || 0}개 / 전체 ${dispatch.schedule_count || 0}개 / 감시종목 ${dispatch.universe_count || 0}개`;
+            activeStrategyEl.textContent = `${data.active_strategy_name || '-'} (${data.active_strategy_id || '-'}) · ${dispatchText}`;
         }
         
         // 2. Dynamic status of current/last execution state
