@@ -1401,6 +1401,17 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
     strategy_id = str(mistock_result.get("strategy_id") or "mistock_nasdaq_rule_v1")
     strategy = mistock_db.row("SELECT name FROM ai_strategies WHERE id = ?", (strategy_id,))
     strategy_name = str((strategy or {}).get("name") or strategy_id)
+
+    def stock_fields(symbol: object) -> dict:
+        ticker = normalize_symbol(str(symbol or ""))
+        name = symbol_name(ticker)
+        return {
+            "symbol": ticker,
+            "name": name,
+            "display_name": f"{name} ({ticker})" if ticker and name != ticker else ticker,
+            "market": "US",
+            "asset_type": "미국 주식",
+        }
     
     # 1. Map 'sold' items
     for s in mistock_result.get("sold", []):
@@ -1408,10 +1419,9 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
         ok = s_res.get("ok", True)
         msg1 = s_res.get("message") or s_res.get("msg1") or ("매도 완료" if ok else "매도 실패")
         row = {
+            **stock_fields(s["symbol"]),
             "strategy_id": strategy_id,
             "strategy_name": strategy_name,
-            "symbol": s["symbol"],
-            "name": symbol_name(s["symbol"]),
             "action": "sell",
             "decision": "execute",
             "qty": s["qty"],
@@ -1422,6 +1432,7 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
         }
         results.append(row)
         auto_approved.append({
+            **stock_fields(s["symbol"]),
             "strategy_id": strategy_id,
             "strategy_name": strategy_name,
             "symbol": s["symbol"],
@@ -1438,6 +1449,7 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
         ok = p_res.get("ok", True)
         msg1 = p_res.get("message") or p_res.get("msg1") or ("pending approval executed" if ok else "pending approval failed")
         auto_approved.append({
+            **stock_fields(p.get("symbol")),
             "strategy_id": p.get("strategy_id") or strategy_id,
             "strategy_name": strategy_name,
             "approval_id": p.get("id"),
@@ -1455,10 +1467,9 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
         ok = b_res.get("ok", True)
         msg1 = b_res.get("message") or b_res.get("msg1") or ("매수 완료" if ok else "매수 실패")
         row = {
+            **stock_fields(b["symbol"]),
             "strategy_id": strategy_id,
             "strategy_name": strategy_name,
-            "symbol": b["symbol"],
-            "name": symbol_name(b["symbol"]),
             "action": "buy",
             "decision": "execute",
             "qty": b["qty"],
@@ -1469,6 +1480,7 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
         }
         results.append(row)
         auto_approved.append({
+            **stock_fields(b["symbol"]),
             "strategy_id": strategy_id,
             "strategy_name": strategy_name,
             "symbol": b["symbol"],
@@ -1485,10 +1497,9 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
         if p["symbol"] in executed_symbols:
             continue
         row = {
+            **stock_fields(p["symbol"]),
             "strategy_id": strategy_id,
             "strategy_name": strategy_name,
-            "symbol": p["symbol"],
-            "name": symbol_name(p["symbol"]),
             "action": "buy",
             "decision": "queue",
             "qty": p["quantity"],

@@ -894,6 +894,21 @@ class MistockDashboardTests(unittest.TestCase):
         self.assertEqual(result["processed_count"], 0)
         self.assertEqual(mistock_db.get_setting("auto_approval"), "true")
 
+    def test_schedule_result_expands_us_stock_identity(self):
+        mapped = mistock.map_mistock_to_kis_format({
+            "strategy_id": "mistock_nasdaq_rule_v1",
+            "status": "success",
+            "plan": [{
+                "symbol": "SBUX", "quantity": 1, "price": 95.0, "reason": "test",
+            }],
+        })
+
+        row = mapped["results"][0]
+        self.assertEqual(row["name"], "Starbucks")
+        self.assertEqual(row["display_name"], "Starbucks (SBUX)")
+        self.assertEqual(row["market"], "US")
+        self.assertEqual(row["asset_type"], "미국 주식")
+
 
 if __name__ == "__main__":
     unittest.main()

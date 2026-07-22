@@ -3614,7 +3614,10 @@ async function renderScheduleInfo() {
                                     
                                     tr.innerHTML = `
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(row.symbol || '-')}</td>
-                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;"><div class="symbol-name" style="font-weight: 500;">${escapeHtml(row.name || '-')}</div></td>
+                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">
+                                            <div class="symbol-name" style="font-weight: 500;">${escapeHtml(row.name || row.symbol || '-')}</div>
+                                            <div class="time-muted" style="font-size:0.72rem; margin-top:2px;">${escapeHtml([row.market || 'US', row.asset_type || '미국 주식', row.symbol].filter(Boolean).join(' · '))}</div>
+                                        </td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(row.strategy_name || row.strategy_id || '미스톡 기본 전략', 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(row.category || 'ai_rebalance', 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(toKorDecision(decision), kind)}</td>
@@ -3656,7 +3659,10 @@ async function renderScheduleInfo() {
                                     tr.innerHTML = `
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(err.approval_id || '-')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(symbolVal)}</td>
-                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;"><div class="symbol-name" style="font-weight: 500;">${escapeHtml(nameVal)}</div></td>
+                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">
+                                            <div class="symbol-name" style="font-weight: 500;">${escapeHtml(nameVal)}</div>
+                                            <div class="time-muted" style="font-size:0.72rem; margin-top:2px;">${escapeHtml(symbolVal !== '-' ? `US · 미국 주식 · ${symbolVal}` : '-')}</div>
+                                        </td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(err.strategy_name || (matchingPlan && matchingPlan.strategy_name) || err.strategy_id || (matchingPlan && matchingPlan.strategy_id) || '미스톡 기본 전략', 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${actionVal !== '-' ? pill(toKorAction(actionVal), actionVal === 'sell' ? 'sell' : 'buy') : '-'}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right;">${qtyVal !== '-' ? formatNumber(qtyVal) : '-'}</td>
@@ -3692,7 +3698,10 @@ async function renderScheduleInfo() {
                                     tr.innerHTML = `
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(ordId || '-')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(symbolVal)}</td>
-                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;"><div class="symbol-name" style="font-weight: 500;">${escapeHtml(nameVal)}</div></td>
+                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">
+                                            <div class="symbol-name" style="font-weight: 500;">${escapeHtml(nameVal)}</div>
+                                            <div class="time-muted" style="font-size:0.72rem; margin-top:2px;">${escapeHtml(symbolVal !== '-' ? `US · 미국 주식 · ${symbolVal}` : '-')}</div>
+                                        </td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(ord.strategy_name || (matchingPlan && matchingPlan.strategy_name) || ord.strategy_id || (matchingPlan && matchingPlan.strategy_id) || '미스톡 기본 전략', 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${actionVal !== '-' ? pill(toKorAction(actionVal), actionVal === 'sell' ? 'sell' : 'buy') : '-'}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right;">${qtyVal !== '-' ? formatNumber(qtyVal) : '-'}</td>
