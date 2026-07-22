@@ -890,7 +890,7 @@ function renderRisk(balance) {
         ? Math.min(999, Math.abs(pnl) / capital * 100 / latestConfig.max_daily_loss_pct * 100)
         : 0;
 
-    document.getElementById('risk-exposure').textContent = formatCurrency(exposure);
+    setElementText('val-stock-eval', formatCurrency(exposure));
     document.getElementById('risk-cash-ratio').textContent = `${formatNumber(cashRatio * 100, 1)}%`;
     document.getElementById('risk-concentration').textContent = `${formatNumber(concentration * 100, 1)}%`;
     document.getElementById('risk-loss-usage').textContent = lossUsage > 0 ? `${formatNumber(lossUsage, 1)}% 사용` : '정상';

@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=29">
+    <link rel="stylesheet" href="/static/css/style.css?v=30">
 </head>
 
 <body>
@@ -75,7 +75,7 @@
                     </div>
                     <div class="card glass">
                         <h3>주식 평가금</h3>
-                        <div class="value" id="risk-exposure">-</div>
+                        <div class="value" id="val-stock-eval">-</div>
                     </div>
                     <div class="card glass">
                         <h3>계좌번호</h3>
@@ -110,7 +110,7 @@
                 <section class="risk-grid">
                     <div class="card glass risk-card">
                         <span class="label">평가손익</span>
-                        <strong id="val-pnl">-</strong>
+                        <strong id="val-pnl" class="valuation-pnl-value">-</strong>
                     </div>
                     <div class="card glass risk-card">
                         <span class="label">평가수익률</span>
@@ -1670,7 +1670,7 @@
         });
     </script>
     <script src="/static/js/environment_badge.js?v=1"></script>
-    <script src="/static/js/app.js?v=44"></script>
+    <script src="/static/js/app.js?v=45"></script>
 
     <!-- Plunge Bounce Strategy Scripts -->
     <script>

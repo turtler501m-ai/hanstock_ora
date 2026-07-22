@@ -274,6 +274,12 @@ h1 .highlight {
     font-variant-numeric: tabular-nums;
 }
 
+.risk-card .valuation-pnl-value {
+    font-size: clamp(0.82rem, 1vw, 1.15rem);
+    letter-spacing: -0.03em;
+    text-overflow: clip;
+}
+
 .pnl-summary-card {
     cursor: pointer;
 }

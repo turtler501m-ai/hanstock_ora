@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=28">
+    <link rel="stylesheet" href="/static/css/style.css?v=30">
     <style>
         /* Custom Mistock Theme overrides (Cyberpunk Purple / Indigo / Fuchsia) */
         :root {
@@ -138,10 +138,6 @@
             <section class="dashboard-section active" id="dashboard-tab-overview">
                 <section class="summary-grid">
                     <div class="card glass">
-                        <h3>계좌번호</h3>
-                        <div class="value" id="val-account">-</div>
-                    </div>
-                    <div class="card glass">
                         <h3>총자산</h3>
                         <div class="value" id="val-total">-</div>
                     </div>
@@ -163,20 +159,8 @@
                         <div class="value" id="val-stock-eval">-</div>
                     </div>
                     <div class="card glass">
-                        <h3>설정 운용자금</h3>
-                        <div class="value" id="val-principal">-</div>
-                    </div>
-                    <div class="card glass">
-                        <h3>누적 실현손익</h3>
-                        <div class="value" id="val-realized">-</div>
-                    </div>
-                    <div class="card glass">
-                        <h3>평가 손익</h3>
-                        <div class="value" id="val-pnl">-</div>
-                    </div>
-                    <div class="card glass">
-                        <h3>평가 수익률</h3>
-                        <div class="value" id="val-return">-</div>
+                        <h3>계좌번호</h3>
+                        <div class="value" id="val-account">-</div>
                     </div>
                 </section>
 
@@ -224,8 +208,16 @@
 
                 <section class="risk-grid">
                     <div class="card glass risk-card">
-                        <span class="label">주식 평가금</span>
-                        <strong id="risk-exposure">-</strong>
+                        <span class="label">평가손익</span>
+                        <strong id="val-pnl" class="valuation-pnl-value">-</strong>
+                    </div>
+                    <div class="card glass risk-card">
+                        <span class="label">평가수익률</span>
+                        <strong id="val-return">-</strong>
+                    </div>
+                    <div class="card glass risk-card">
+                        <span class="label">누적 실현손익</span>
+                        <strong id="val-realized">-</strong>
                     </div>
                     <div class="card glass risk-card">
                         <span class="label">현금 비중</span>
@@ -1178,7 +1170,7 @@
         });
     </script>
     <script src="/static/js/environment_badge.js?v=1"></script>
-    <script src="/static/js/mistock_app.js?v=9"></script>
+    <script src="/static/js/mistock_app.js?v=10"></script>
 
 </body>
 
