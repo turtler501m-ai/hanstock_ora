@@ -414,6 +414,13 @@ def get_balance() -> dict[str, Any]:
             if config.trading_env == "demo" and cash <= 0 and stock_eval <= 0 and broker_total_eval <= 0:
                 cash = _configured_capital_usd(exchange_rate)
                 balance_source = "demo_config_fallback"
+            if config.trading_env == "demo":
+                configured_cap = _configured_capital_usd(exchange_rate)
+                if configured_cap > 0:
+                    effective_total = cash + stock_eval
+                    if effective_total > configured_cap:
+                        cash = max(0.0, configured_cap - stock_eval)
+                        balance_source = "kis_config_capped"
             total_eval = cash + stock_eval
             return {
                 "cash": cash,
