@@ -21,6 +21,7 @@ def init_db() -> None:
 
 from src.db.strategy_repository import _default_strategy_profile, strategy_profile_hash
 WATCHLIST_FILE = Path(".runtime/watchlist.json")
+CUSTOM_STRATEGY_PREFIXES = ("\uc0ac\uc6a9\uc790\uc804\ub7b5", "\U0001f50c", "\U0001f9e0", "\u2699", "\U0001f4c8", "\U0001f4ca", "\U0001f6e1")
 
 STOCK_NAMES: dict[str, str] = {
     "005930": "삼성전자", "000660": "SK하이닉스", "035420": "NAVER", "035720": "카카오", 
@@ -472,7 +473,7 @@ def sync_custom_rules_to_db(conn) -> None:
     custom_dir = Path("src/strategy/custom_rules")
     if not custom_dir.exists():
         return
-        
+
     project_root = str(Path("src").resolve().parent)
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
@@ -487,45 +488,60 @@ def sync_custom_rules_to_db(conn) -> None:
                 continue
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            
+
             for name, obj in inspect.getmembers(module, inspect.isclass):
-                if obj.__module__ == module_name and "Strategy" in name:
-                    strat_id = py_file.stem
-                    doc = obj.__doc__ or ""
-                    doc_lines = [line.strip() for line in doc.split("\n") if line.strip()]
-                    strat_name = doc_lines[0] if doc_lines else name
-                    if not (strat_name.startswith("🤖") or strat_name.startswith("⚙️") or strat_name.startswith("📊") or strat_name.startswith("⚖️") or strat_name.startswith("🧠") or strat_name.startswith("🔌")):
-                        strat_name = f"🔌 {strat_name}"
-                    
-                    description = " ".join(doc_lines[1:]) if len(doc_lines) > 1 else doc
-                    if not description:
-                        description = f"Dynamically loaded custom strategy from {py_file.name}"
-                        
-                    # Check if strategy exists in DB
-                    c = conn.execute("SELECT id FROM ai_strategies WHERE id = ?", (strat_id,))
-                    row = c.fetchone()
-                    
-                    profile = _default_strategy_profile({
-                        "id": strat_id,
-                        "provider": "none",
-                        "model": strat_id,
-                        "weight": 0.0,
-                    })
-                    profile_json = json.dumps(profile, ensure_ascii=False, sort_keys=True)
-                    profile_hash = strategy_profile_hash(profile)
-                    
-                    if not row:
-                        conn.execute(
-                            """
-                            INSERT INTO ai_strategies (
-                                id, name, provider, model, weight, description, selected,
-                                status, profile_json, strategy_version, profile_hash
-                            )
-                            VALUES (?, ?, 'none', ?, 0.0, ?, 0, 'verified', ?, 1, ?)
-                            """,
-                            (strat_id, strat_name, strat_id, description, profile_json, profile_hash)
+                if obj.__module__ != module_name or "Strategy" not in name:
+                    continue
+
+                strat_id = py_file.stem
+                doc = obj.__doc__ or ""
+                doc_lines = [line.strip() for line in doc.split("\n") if line.strip()]
+                strat_name = doc_lines[0] if doc_lines else name
+                if not strat_name.startswith(CUSTOM_STRATEGY_PREFIXES):
+                    strat_name = f"\uc0ac\uc6a9\uc790\uc804\ub7b5 {strat_name}"
+
+                description = " ".join(doc_lines[1:]) if len(doc_lines) > 1 else doc
+                if not description:
+                    description = f"{py_file.name}\uc5d0\uc11c \ubd88\ub7ec\uc628 \uc0ac\uc6a9\uc790 \uc815\uc758 \uc804\ub7b5\uc785\ub2c8\ub2e4."
+
+                c = conn.execute("SELECT id FROM ai_strategies WHERE id = ?", (strat_id,))
+                row = c.fetchone()
+
+                profile = _default_strategy_profile({
+                    "id": strat_id,
+                    "provider": "none",
+                    "model": strat_id,
+                    "weight": 0.0,
+                })
+                profile_json = json.dumps(profile, ensure_ascii=False, sort_keys=True)
+                profile_hash = strategy_profile_hash(profile)
+
+                if not row:
+                    conn.execute(
+                        """
+                        INSERT INTO ai_strategies (
+                            id, name, provider, model, weight, description, selected,
+                            status, profile_json, strategy_version, profile_hash
                         )
-                        logger.info(f"Registered new custom strategy: {strat_id} ({strat_name})")
+                        VALUES (?, ?, 'none', ?, 0.0, ?, 0, 'verified', ?, 1, ?)
+                        """,
+                        (strat_id, strat_name, strat_id, description, profile_json, profile_hash),
+                    )
+                    logger.info(f"Registered new custom strategy: {strat_id} ({strat_name})")
+                else:
+                    conn.execute(
+                        """
+                        UPDATE ai_strategies
+                        SET name = ?,
+                            provider = 'none',
+                            model = ?,
+                            description = ?,
+                            profile_json = ?,
+                            profile_hash = ?
+                        WHERE id = ?
+                        """,
+                        (strat_name, strat_id, description, profile_json, profile_hash, strat_id),
+                    )
         except (sqlite3.Error, OSError, ValueError, TypeError) as e:
             logger.warning(f"Error loading custom strategy file {py_file.name}: {e}")
 
