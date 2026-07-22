@@ -451,7 +451,7 @@ python -m pytest tests/ -v --tb=short -q 2>&1 | tail -30
 VM에 SSH 접속 가능하다면:
 ```bash
 # deploy-vm.ps1가 처리하므로 수동 확인만
-ssh -i ~/.ssh/google_compute_engine turtler801@34.69.241.175 \
+ssh -i ~/.ssh/id_ed25519 ubuntu@168.110.102.249 \
   "grep -E 'MISTOCK_STRATEGY|MISTOCK_STOP|MISTOCK_TAKE' ~/hanstock/.env || echo 'not set yet'"
 ```
 
@@ -470,7 +470,7 @@ powershell -File scripts/local/deploy-vm.ps1
 - [ ] **Step 3: VM에서 파라미터 검증**
 
 ```bash
-ssh -i ~/.ssh/google_compute_engine turtler801@34.69.241.175 \
+ssh -i ~/.ssh/id_ed25519 ubuntu@168.110.102.249 \
   "cd ~/hanstock && python3 -c \"
 from dotenv import load_dotenv; load_dotenv(override=True)
 from src.mistock.config import config

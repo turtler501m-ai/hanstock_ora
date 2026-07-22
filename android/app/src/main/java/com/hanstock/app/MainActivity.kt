@@ -40,8 +40,8 @@ class MainActivity : FragmentActivity() {
 
     private var webView: WebView? = null
     
-    // Default URL is configured to point to GCP VM server (hanstock-server5: 34.58.63.128)
-    private val defaultUrl = "http://34.58.63.128:8000"
+    // Default URL is configured through BuildConfig; the current backend runs on OCI.
+    private val defaultUrl = "http://168.110.102.249:8000"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
