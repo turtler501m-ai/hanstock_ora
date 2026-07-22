@@ -1177,7 +1177,7 @@ class DashboardCoreTests(unittest.TestCase):
         self.assertEqual(result["universe_source"], "shared")
         self.assertEqual([item["symbol"] for item in result["symbols"]], ["005930", "000660"])
 
-    def test_watchlist_keeps_isolated_strategy_empty_without_universe(self):
+    def test_watchlist_view_inherits_shared_symbols_for_empty_isolated_strategy(self):
         with patch("src.db.repository.load_watchlist_data", return_value={
             "symbols": ["005930"],
             "ai_auto_add": False,
@@ -1188,9 +1188,9 @@ class DashboardCoreTests(unittest.TestCase):
         ):
             result = dashboard.get_watchlist("plunge_bounce_strategy")
 
-        self.assertFalse(result["inherited"])
-        self.assertEqual(result["universe_source"], "strategy")
-        self.assertEqual(result["symbols"], [])
+        self.assertTrue(result["inherited"])
+        self.assertEqual(result["universe_source"], "shared")
+        self.assertEqual([item["symbol"] for item in result["symbols"]], ["005930"])
 
     def test_watchlist_scan_uses_threshold_from_same_request(self):
         saved = []

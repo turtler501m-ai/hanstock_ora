@@ -979,8 +979,9 @@ def get_watchlist(strategy_id: str | None = None):
         from src.db.repository import load_strategy_universe_symbols
 
         symbols = load_strategy_universe_symbols(strategy_id)
-        isolated_strategy_ids = getattr(trader, "_ISOLATED_STRATEGY_IDS", set())
-        if not symbols and strategy_id not in isolated_strategy_ids:
+        # Dashboard reads inherit the shared list when a strategy-specific list is
+        # empty. Execution isolation remains enforced by the trading engine.
+        if not symbols:
             symbols = data.get("symbols", [])
             inherited = True
     else:
