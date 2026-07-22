@@ -157,6 +157,21 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strategy_schedules (
+                strategy_id TEXT PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                interval_minutes INTEGER NOT NULL DEFAULT 60,
+                start_hm TEXT NOT NULL DEFAULT '2100',
+                end_hm TEXT NOT NULL DEFAULT '0600',
+                weekdays TEXT NOT NULL DEFAULT '1-5/2-6',
+                mode TEXT NOT NULL DEFAULT 'execute',
+                auto_approve INTEGER NOT NULL DEFAULT 0,
+                last_run_at TEXT
+            )
+            """
+        )
         for symbol, name in DEFAULT_WATCHLIST:
             conn.execute(
                 "INSERT OR IGNORE INTO watchlist (symbol, name, created_at) VALUES (?, ?, ?)",
@@ -201,6 +216,17 @@ def init_db() -> None:
                 conn.execute(f"ALTER TABLE approvals ADD COLUMN {col_name} {col_type}")
             except sqlite3.OperationalError:
                 pass
+        for table in ("trades", "approvals"):
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN strategy_id TEXT")
+            except sqlite3.OperationalError:
+                pass
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO strategy_schedules (strategy_id, enabled, auto_approve)
+            SELECT id, selected, 0 FROM ai_strategies
+            """
+        )
         try:
             from src.db.repository import sync_custom_rules_to_db
             sync_custom_rules_to_db(conn)

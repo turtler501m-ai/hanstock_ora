@@ -68,25 +68,35 @@ def _order_delay_seconds() -> float:
         return 1.2
 
 
-def _execute_pending_scheduler_approvals() -> list[dict]:
+def _place_order(symbol: str, action: str, qty: float, price: float, reason: str, strategy_id: str | None):
+    kwargs = {"reason": reason}
+    if strategy_id:
+        kwargs["strategy_id"] = strategy_id
+    return mistock_trader.place_order(symbol, action, qty, price, **kwargs)
+
+
+def _execute_pending_scheduler_approvals(strategy_id: str | None = None) -> list[dict]:
     pending = mistock_db.rows(
         """
         SELECT *
         FROM approvals
         WHERE status = 'pending'
           AND source = 'scheduler'
+          AND (? IS NULL OR strategy_id = ?)
         ORDER BY CASE action WHEN 'sell' THEN 0 ELSE 1 END, id
         LIMIT 50
-        """
+        """,
+        (strategy_id, strategy_id),
     )
     processed = []
     for idx, item in enumerate(pending):
-        result = mistock_trader.place_order(
+        result = _place_order(
             item["symbol"],
             item["action"],
             float(item["qty"]),
             float(item["price"]),
-            reason=item.get("reason") or "scheduler pending approval",
+            item.get("reason") or "scheduler pending approval",
+            item.get("strategy_id") or strategy_id,
         )
         status = "executed" if result.get("ok") else "failed"
         mistock_db.execute(
@@ -112,7 +122,7 @@ def _execute_pending_scheduler_approvals() -> list[dict]:
             time.sleep(_order_delay_seconds())
     return processed
 
-def run_mistock_scheduled_cycle(mode: str = "execute") -> dict:
+def run_mistock_scheduled_cycle(mode: str = "execute", strategy_id: str | None = None) -> dict:
     """
     [미장 자동매매 스케줄러]
     미국 주식 시장(미장) 유니버스 스캔, 신호 분석 및 주문 집행(KIS 모의투자 또는 실거래)을 수행합니다.
@@ -140,7 +150,7 @@ def run_mistock_scheduled_cycle(mode: str = "execute") -> dict:
     market_open = is_us_market_open()
     pending_approved = []
     if mode == "execute" and auto_approve and broker_submission_available and market_open:
-        pending_approved = _execute_pending_scheduler_approvals()
+        pending_approved = _execute_pending_scheduler_approvals(strategy_id)
     
     # 3. 매도 신호 처리 및 주문 집행/대기등록
     sell_sigs = [sig for sig in mistock_trader.signals() if sig["action"] == "sell" and float(sig["signal_qty"]) > 0]
@@ -150,7 +160,7 @@ def run_mistock_scheduled_cycle(mode: str = "execute") -> dict:
         price = float(sig["signal_price"])
         if mode == "execute" and (auto_approve or flags["order_submission_enabled"]) and broker_submission_available and market_open:
             logger.info(f"[MISTOCK SCHEDULER] Sell signal for {sig['symbol']}. Qty={qty}, Price={price}")
-            res = mistock_trader.place_order(sig["symbol"], "sell", qty, price, reason=sig["reason"])
+            res = _place_order(sig["symbol"], "sell", qty, price, sig["reason"], strategy_id)
             sold_items.append({"symbol": sig["symbol"], "qty": qty, "price": price, "result": res})
             if idx < len(sell_sigs) - 1:
                 time.sleep(_order_delay_seconds())
@@ -164,10 +174,10 @@ def run_mistock_scheduled_cycle(mode: str = "execute") -> dict:
             now = mistock_db.now_text()
             mistock_db.execute(
                 """
-                INSERT INTO approvals (created_at, updated_at, symbol, name, action, qty, price, reason, source, status, response_msg)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '')
+                INSERT INTO approvals (created_at, updated_at, symbol, name, action, qty, price, reason, source, status, response_msg, strategy_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '', ?)
                 """,
-                (now, now, sig["symbol"], symbol_name(sig["symbol"]), "sell", qty, price, sig.get("reason") or "보유 종목 매도 신호", "scheduler"),
+                (now, now, sig["symbol"], symbol_name(sig["symbol"]), "sell", qty, price, sig.get("reason") or "보유 종목 매도 신호", "scheduler", strategy_id),
             )
                  
     # 4. 매수 주문 조립 및 집행/대기등록
@@ -205,7 +215,7 @@ def run_mistock_scheduled_cycle(mode: str = "execute") -> dict:
                 qty = float(ord["quantity"])
                 price = float(ord["price"])
                 logger.info(f"[MISTOCK SCHEDULER] Placing buy order for {ord['symbol']}. Qty={qty}, Price={price}")
-                res = mistock_trader.place_order(ord["symbol"], "buy", qty, price, reason=ord["reason"])
+                res = _place_order(ord["symbol"], "buy", qty, price, ord["reason"], strategy_id)
                 bought_items.append({"symbol": ord["symbol"], "qty": qty, "price": price, "result": res})
                 # 잔고 부족 응답이면 이후 주문도 실패할 것이므로 즉시 중단한다
                 msg = (res.get("msg1") or res.get("message") or "")
@@ -225,10 +235,10 @@ def run_mistock_scheduled_cycle(mode: str = "execute") -> dict:
                 now = mistock_db.now_text()
                 mistock_db.execute(
                     """
-                    INSERT INTO approvals (created_at, updated_at, symbol, name, action, qty, price, reason, source, status, response_msg)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '')
+                    INSERT INTO approvals (created_at, updated_at, symbol, name, action, qty, price, reason, source, status, response_msg, strategy_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '', ?)
                     """,
-                    (now, now, ord["symbol"], symbol_name(ord["symbol"]), "buy", qty, price, ord.get("reason") or "매수 계획", "scheduler"),
+                    (now, now, ord["symbol"], symbol_name(ord["symbol"]), "buy", qty, price, ord.get("reason") or "매수 계획", "scheduler", strategy_id),
                 )
             
     order_failures = [
@@ -237,6 +247,7 @@ def run_mistock_scheduled_cycle(mode: str = "execute") -> dict:
         if not (item.get("result") or {}).get("ok", False)
     ]
     result = {
+        "strategy_id": strategy_id or "mistock_nasdaq_rule_v1",
         "status": "success" if not order_failures else "failed",
         "ok": not order_failures,
         "scanned": scan["scanned"],
@@ -326,10 +337,33 @@ def main() -> int:
         default="execute",
         help="execute orders immediately or queue analysis only",
     )
+    parser.add_argument(
+        "--strategy-id",
+        action="append",
+        dest="strategy_ids",
+        help="strategy id to run; repeat for multiple strategies",
+    )
     args = parser.parse_args()
     try:
-        run_mistock_scheduled_cycle(mode=args.mode)
-        return 0
+        strategy_ids = list(dict.fromkeys(args.strategy_ids or []))
+        if not strategy_ids:
+            strategy_ids = [
+                str(row["strategy_id"])
+                for row in mistock_db.rows(
+                    "SELECT strategy_id FROM strategy_schedules WHERE enabled = 1 ORDER BY strategy_id"
+                )
+            ]
+        if not strategy_ids:
+            strategy_ids = ["mistock_nasdaq_rule_v1"]
+        failed = False
+        for strategy_id in strategy_ids:
+            result = run_mistock_scheduled_cycle(mode=args.mode, strategy_id=strategy_id)
+            failed = failed or not bool(result.get("ok"))
+            mistock_db.execute(
+                "UPDATE strategy_schedules SET last_run_at = ? WHERE strategy_id = ?",
+                (datetime.now(KST).isoformat(), strategy_id),
+            )
+        return 1 if failed else 0
     except Exception as e:
         logger.error(f"Mistock scheduler execution failed: {e}")
         return 1

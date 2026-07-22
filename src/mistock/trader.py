@@ -686,7 +686,7 @@ def notify_slack_order(symbol: str, action: str, qty: float, price: float, reaso
         logger.error(f"Failed to send Slack order notification: {e}")
 
 
-def place_order(symbol: str, action: str, qty: float, price: float, reason: str = "") -> dict[str, Any]:
+def place_order(symbol: str, action: str, qty: float, price: float, reason: str = "", strategy_id: str | None = None) -> dict[str, Any]:
     from src.online_access import require_online_access
 
     require_online_access("Mistock order execution")
@@ -742,13 +742,13 @@ def place_order(symbol: str, action: str, qty: float, price: float, reason: str 
                 ok = True
                 status = "demo_local_filled"
                 msg = f"KIS demo overseas order unsupported; local shadow fill applied: {msg}"
-            save_trade(symbol, symbol_name(symbol), action, qty, price, reason, ok, status, msg)
+            save_trade(symbol, symbol_name(symbol), action, qty, price, reason, ok, status, msg, strategy_id)
             notify_slack_order(symbol, action, qty, price, reason or msg, ok)
             return {"ok": ok, "status": status, "msg1": msg, "res": res}
         except Exception as e:
             from src.utils.logger import logger
             logger.error(f"Failed to place KIS US order: {e}")
-            save_trade(symbol, symbol_name(symbol), action, qty, price, reason, False, "failed", str(e))
+            save_trade(symbol, symbol_name(symbol), action, qty, price, reason, False, "failed", str(e), strategy_id)
             notify_slack_order(symbol, action, qty, price, str(e), False)
             return {"ok": False, "status": "failed", "message": str(e)}
 
@@ -779,7 +779,7 @@ def revise_order(symbol: str, order_no: str, qty: float, price: float) -> dict[s
         return {"ok": False, "status": "failed", "message": str(exc)}
 
 
-def save_trade(symbol: str, name: str, action: str, qty: float, price: float, reason: str, ok: bool, order_status: str, response_msg: str) -> None:
+def save_trade(symbol: str, name: str, action: str, qty: float, price: float, reason: str, ok: bool, order_status: str, response_msg: str, strategy_id: str | None = None) -> None:
     # 수수료/세금 예상 계산 (미장 기본 수수료 0.1%, 매도시 SEC Fee 등 0.03% 추가)
     fee = (qty * price * 0.001) if ok else 0.0
     tax = (qty * price * 0.0003) if (ok and action.lower() == "sell") else 0.0
@@ -787,13 +787,13 @@ def save_trade(symbol: str, name: str, action: str, qty: float, price: float, re
     
     db.execute(
         """
-        INSERT INTO trades (ts, symbol, name, action, qty, price, reason, ok, env, dry_run, order_status, response_msg, broker_result, fee, tax, exchange_rate)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO trades (ts, symbol, name, action, qty, price, reason, ok, env, dry_run, order_status, response_msg, broker_result, fee, tax, exchange_rate, strategy_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             db.now_text(), symbol, name, action, qty, price, reason, int(ok), config.trading_env,
             int(config.dry_run), order_status, response_msg, json.dumps({"env": config.trading_env}, ensure_ascii=False),
-            fee, tax, exchange_rate,
+            fee, tax, exchange_rate, strategy_id,
         ),
     )
 

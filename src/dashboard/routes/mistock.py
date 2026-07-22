@@ -304,6 +304,31 @@ def mistock_update_env(payload: dict = Body(...)):
 @router.get("/api/mistock/balance")
 def mistock_balance():
     balance = mistock_trader.get_balance()
+    strategy_names = {
+        str(row["id"]): str(row.get("name") or row["id"])
+        for row in mistock_db.rows("SELECT id, name FROM ai_strategies")
+    }
+    ownership = {}
+    for row in mistock_db.rows(
+        """
+        SELECT symbol, strategy_id,
+               SUM(CASE WHEN action = 'buy' THEN qty WHEN action = 'sell' THEN -qty ELSE 0 END) AS net_qty
+        FROM trades
+        WHERE ok = 1 AND COALESCE(strategy_id, '') <> ''
+        GROUP BY symbol, strategy_id
+        HAVING net_qty > 0
+        ORDER BY net_qty DESC, strategy_id
+        """
+    ):
+        sid = str(row["strategy_id"])
+        ownership.setdefault(str(row["symbol"]), []).append({
+            "id": sid, "name": strategy_names.get(sid, sid), "qty": float(row["net_qty"] or 0),
+        })
+    for holding in balance.get("holdings", []):
+        strategies = ownership.get(str(holding.get("symbol") or ""), [])
+        holding["strategies"] = strategies
+        holding["strategy_ids"] = [item["id"] for item in strategies]
+        holding["strategy_names"] = [item["name"] for item in strategies]
     active_symbols = {
         str(row["symbol"])
         for row in mistock_db.rows(
@@ -564,9 +589,15 @@ def mistock_delete_ai_strategy(strategy_id: str):
 @router.post("/api/mistock/ai-strategies/{strategy_id}/select")
 def mistock_select_ai_strategy(strategy_id: str, payload: dict = Body(default={})):
     selected = 1 if payload.get("selected", True) else 0
-    if selected:
-        mistock_db.execute("UPDATE ai_strategies SET selected = 0", ())
     mistock_db.execute("UPDATE ai_strategies SET selected = ? WHERE id = ?", (selected, strategy_id))
+    mistock_db.execute(
+        """
+        INSERT INTO strategy_schedules (strategy_id, enabled, auto_approve)
+        VALUES (?, ?, 0)
+        ON CONFLICT(strategy_id) DO UPDATE SET enabled = excluded.enabled
+        """,
+        (strategy_id, selected),
+    )
     return {"ok": True, "id": strategy_id, "selected": bool(selected)}
 
 
@@ -904,10 +935,10 @@ def mistock_create_approval(payload: dict = Body(...)):
     now = mistock_db.now_text()
     approval_id = mistock_db.execute(
         """
-        INSERT INTO approvals (created_at, updated_at, symbol, name, action, qty, price, reason, source, status, response_msg)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '')
+        INSERT INTO approvals (created_at, updated_at, symbol, name, action, qty, price, reason, source, status, response_msg, strategy_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', '', ?)
         """,
-        (now, now, symbol, name, action, qty, price, str(payload.get("reason") or ""), str(payload.get("source") or "mistock_dashboard")),
+        (now, now, symbol, name, action, qty, price, str(payload.get("reason") or ""), str(payload.get("source") or "mistock_dashboard"), str(payload.get("strategy_id") or "") or None),
     )
     if (
         not is_online_access_blocked()
@@ -965,7 +996,10 @@ def _execute_approval(approval_id: int, *, approve: bool) -> dict:
         raise HTTPException(status_code=409, detail="Online access is blocked. Approval remains pending.")
     if not _is_mistock_order_window_open():
         raise HTTPException(status_code=409, detail="US market is not open. Approval remains pending.")
-    result = mistock_trader.place_order(item["symbol"], item["action"], item["qty"], item["price"], item.get("reason") or "")
+    result = mistock_trader.place_order(
+        item["symbol"], item["action"], item["qty"], item["price"], item.get("reason") or "",
+        strategy_id=item.get("strategy_id"),
+    )
     status = "executed" if result.get("ok") else "failed"
     mistock_db.execute(
         "UPDATE approvals SET status = ?, updated_at = ?, response_msg = ? WHERE id = ?",
@@ -1308,6 +1342,41 @@ def _bg_run_mistock_scheduled_cycle(mode: str):
             })
 
 
+def _bg_run_mistock_scheduled_cycles(mode: str, strategy_ids: list[str]):
+    global _mistock_scheduler_run_state
+    runs = []
+    errors = []
+    try:
+        from src.mistock.scheduler import run_mistock_scheduled_cycle
+        for strategy_id in strategy_ids:
+            try:
+                result = run_mistock_scheduled_cycle(mode=mode, strategy_id=strategy_id)
+                recorded_at = datetime.now(timezone(timedelta(hours=9))).isoformat()
+                save_mistock_daily_run(recorded_at, mode, result)
+                mistock_db.execute(
+                    "UPDATE strategy_schedules SET last_run_at = ? WHERE strategy_id = ?",
+                    (recorded_at, strategy_id),
+                )
+                runs.append({"strategy_id": strategy_id, "result": result})
+            except Exception as exc:
+                errors.append({"strategy_id": strategy_id, "message": str(exc)})
+        aggregate = {
+            "status": "failed" if errors and not runs else "success",
+            "ok": bool(runs), "strategy_ids": strategy_ids, "runs": runs, "errors": errors,
+        }
+        with _mistock_scheduler_running_lock:
+            _mistock_scheduler_run_state.replace({
+                **_mistock_scheduler_run_state, "is_running": False,
+                "completed_at": datetime.now(timezone(timedelta(hours=9))).isoformat(),
+                "result": aggregate, "error": None, "owner_pid": None,
+            })
+    except Exception as exc:
+        with _mistock_scheduler_running_lock:
+            _mistock_scheduler_run_state.replace({
+                **_mistock_scheduler_run_state, "is_running": False,
+                "completed_at": datetime.now(timezone(timedelta(hours=9))).isoformat(),
+                "result": None, "error": str(exc), "owner_pid": None,
+            })
 def map_mistock_to_kis_format(mistock_result: dict) -> dict:
     if not mistock_result:
         return {}
@@ -1317,6 +1386,9 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
         
     results = []
     auto_approved = []
+    strategy_id = str(mistock_result.get("strategy_id") or "mistock_nasdaq_rule_v1")
+    strategy = mistock_db.row("SELECT name FROM ai_strategies WHERE id = ?", (strategy_id,))
+    strategy_name = str((strategy or {}).get("name") or strategy_id)
     
     # 1. Map 'sold' items
     for s in mistock_result.get("sold", []):
@@ -1324,6 +1396,8 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
         ok = s_res.get("ok", True)
         msg1 = s_res.get("message") or s_res.get("msg1") or ("매도 완료" if ok else "매도 실패")
         row = {
+            "strategy_id": strategy_id,
+            "strategy_name": strategy_name,
             "symbol": s["symbol"],
             "name": symbol_name(s["symbol"]),
             "action": "sell",
@@ -1336,6 +1410,8 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
         }
         results.append(row)
         auto_approved.append({
+            "strategy_id": strategy_id,
+            "strategy_name": strategy_name,
             "symbol": s["symbol"],
             "action": "sell",
             "status": "executed" if ok else "failed",
@@ -1350,6 +1426,8 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
         ok = p_res.get("ok", True)
         msg1 = p_res.get("message") or p_res.get("msg1") or ("pending approval executed" if ok else "pending approval failed")
         auto_approved.append({
+            "strategy_id": p.get("strategy_id") or strategy_id,
+            "strategy_name": strategy_name,
             "approval_id": p.get("id"),
             "symbol": p.get("symbol"),
             "action": p.get("action"),
@@ -1365,6 +1443,8 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
         ok = b_res.get("ok", True)
         msg1 = b_res.get("message") or b_res.get("msg1") or ("매수 완료" if ok else "매수 실패")
         row = {
+            "strategy_id": strategy_id,
+            "strategy_name": strategy_name,
             "symbol": b["symbol"],
             "name": symbol_name(b["symbol"]),
             "action": "buy",
@@ -1377,6 +1457,8 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
         }
         results.append(row)
         auto_approved.append({
+            "strategy_id": strategy_id,
+            "strategy_name": strategy_name,
             "symbol": b["symbol"],
             "action": "buy",
             "status": "executed" if ok else "failed",
@@ -1391,6 +1473,8 @@ def map_mistock_to_kis_format(mistock_result: dict) -> dict:
         if p["symbol"] in executed_symbols:
             continue
         row = {
+            "strategy_id": strategy_id,
+            "strategy_name": strategy_name,
             "symbol": p["symbol"],
             "name": symbol_name(p["symbol"]),
             "action": "buy",
@@ -1631,7 +1715,7 @@ def mistock_scheduler_status():
     if run_state_to_return.get("result"):
         run_state_to_return["result"] = map_mistock_to_kis_format(run_state_to_return["result"])
 
-    active_strategy_id = "mistock-default-v1"
+    active_strategy_id = "mistock_nasdaq_rule_v1"
     active_strategy_name = "미스톡 기본 Seven Split"
     try:
         active = mistock_db.row("SELECT * FROM ai_strategies WHERE selected = 1 ORDER BY last_used_at DESC, id DESC LIMIT 1")
@@ -1641,21 +1725,32 @@ def mistock_scheduler_status():
     except Exception:
         pass
 
+    schedule_rows = mistock_db.rows(
+        """
+        SELECT s.*, a.name
+        FROM strategy_schedules s
+        LEFT JOIN ai_strategies a ON a.id = s.strategy_id
+        WHERE s.enabled = 1
+        ORDER BY s.strategy_id
+        """
+    )
+    if not schedule_rows:
+        schedule_rows = [{
+            "strategy_id": active_strategy_id, "name": active_strategy_name, "enabled": 1,
+            "interval_minutes": 60, "start_hm": "2100", "end_hm": "0600",
+            "weekdays": "1-5/2-6", "mode": "execute", "auto_approve": 0,
+        }]
     strategy_dispatch = {
-        "enabled_count": 1,
-        "schedule_count": 1,
+        "enabled_count": len(schedule_rows),
+        "schedule_count": len(schedule_rows),
         "universe_count": len(mistock_config.universe_list or []),
         "schedules": [{
-            "strategy_id": active_strategy_id,
-            "enabled": True,
-            "interval_minutes": 60,
-            "start_hm": "2100",
-            "end_hm": "0600",
-            "weekdays": "1-5/2-6",
-            "mode": "execute",
-            "auto_approve": mistock_db.get_setting("auto_approval", "false") == "true",
+            **row,
+            "display_name": row.get("name") or row.get("strategy_id"),
+            "enabled": bool(row.get("enabled")),
+            "auto_approve": bool(row.get("auto_approve")),
             "universe_count": len(mistock_config.universe_list or []),
-        }],
+        } for row in schedule_rows],
     }
         
     return {
@@ -1695,6 +1790,21 @@ def mistock_scheduler_run(payload: dict = Body(default={})):
             status_code=400,
             detail=f"지원하지 않는 미장 스케줄러 모드입니다: '{mode}'. 'execute', 'analysis_only', 'daily_auto' 중 하나를 선택해 주세요."
         )
+    raw_strategy_ids = payload.get("strategy_ids")
+    strategy_ids = []
+    if isinstance(raw_strategy_ids, list):
+        strategy_ids = list(dict.fromkeys(
+            str(value).strip() for value in raw_strategy_ids if str(value).strip()
+        ))
+    if not strategy_ids and payload.get("strategy_id"):
+        strategy_ids = [str(payload["strategy_id"]).strip()]
+    if not strategy_ids:
+        strategy_ids = [
+            str(row["id"])
+            for row in mistock_db.rows("SELECT id FROM ai_strategies WHERE selected = 1 ORDER BY id")
+        ]
+    if not strategy_ids:
+        strategy_ids = ["mistock_nasdaq_rule_v1"]
         
     started_state = {
         "is_running": True,
@@ -1710,8 +1820,8 @@ def mistock_scheduler_run(payload: dict = Body(default={})):
             raise HTTPException(status_code=409, detail="스케줄러가 이미 실행 중입니다.")
         
     t = threading.Thread(
-        target=_bg_run_mistock_scheduled_cycle,
-        args=(run_mode,),
+        target=_bg_run_mistock_scheduled_cycles,
+        args=(run_mode, strategy_ids),
         daemon=True
     )
     t.start()
@@ -1720,6 +1830,8 @@ def mistock_scheduler_run(payload: dict = Body(default={})):
         "status": "started",
         "running": True,
         "mode": mode,
+        "strategy_id": strategy_ids[0] if len(strategy_ids) == 1 else None,
+        "strategy_ids": strategy_ids,
         "result": {"scanned": 0, "candidates": 0}
     }
 

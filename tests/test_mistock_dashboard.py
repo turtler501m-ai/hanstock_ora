@@ -1,7 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from src.dashboard import app
 from src.dashboard.routes import mistock
@@ -26,6 +26,10 @@ class MistockDashboardTests(unittest.TestCase):
         object.__setattr__(mistock_config, "trade_db_path", Path(self.tmp.name) / "mistock.sqlite")
 
     def tearDown(self):
+        mistock._mistock_scheduler_run_state.replace({
+            "is_running": False, "mode": None, "started_at": None,
+            "completed_at": None, "result": None, "error": None, "owner_pid": None,
+        })
         object.__setattr__(mistock_config, "trade_db_path", self.original_db_path)
         object.__setattr__(mistock_config, "trading_env", self.original_trading_env)
         object.__setattr__(mistock_config, "total_capital", self.original_total_capital)
@@ -835,6 +839,50 @@ class MistockDashboardTests(unittest.TestCase):
         self.assertIn("GOOG", added)
         self.assertIn("COST", added)
         self.assertIn("PEP", added)
+
+    def test_mistock_strategy_selection_supports_multiple(self):
+        mistock_db.init_db()
+        created = mistock.mistock_create_ai_strategy({"name": "Second", "model": "rule_based"})
+        second_id = created["strategy"]["id"]
+
+        mistock.mistock_select_ai_strategy(second_id, {"selected": True})
+
+        selected = {
+            row["id"] for row in mistock.mistock_ai_strategies()["strategies"] if row.get("selected")
+        }
+        self.assertIn("mistock_nasdaq_rule_v1", selected)
+        self.assertIn(second_id, selected)
+
+    def test_mistock_scheduler_accepts_multiple_strategy_ids(self):
+        mistock_db.init_db()
+        mistock._mistock_scheduler_run_state.replace({
+            "is_running": False, "mode": None, "started_at": None,
+            "completed_at": None, "result": None, "error": None, "owner_pid": None,
+        })
+        with patch.object(mistock.threading, "Thread") as thread:
+            thread.return_value = MagicMock()
+            response = mistock.mistock_scheduler_run({
+                "mode": "analysis_only", "strategy_ids": ["alpha", "beta", "alpha"],
+            })
+
+        self.assertEqual(response["strategy_ids"], ["alpha", "beta"])
+        self.assertEqual(thread.call_args.kwargs["args"], ("analysis_only", ["alpha", "beta"]))
+
+    def test_mistock_balance_exposes_strategy_ownership(self):
+        mistock_db.init_db()
+        mistock_trader.save_trade(
+            "AAPL", "Apple", "buy", 2, 100, "strategy test", True, "filled", "ok",
+            "mistock_nasdaq_rule_v1",
+        )
+        with patch.object(mistock_trader, "get_balance", return_value={
+            "cash": 1000.0,
+            "holdings": [{"symbol": "AAPL", "name": "Apple", "qty": 2, "price": 100}],
+        }):
+            balance = mistock.mistock_balance()
+
+        holding = balance["holdings"][0]
+        self.assertEqual(holding["strategy_ids"], ["mistock_nasdaq_rule_v1"])
+        self.assertEqual(holding["strategies"][0]["qty"], 2.0)
 
 
 if __name__ == "__main__":

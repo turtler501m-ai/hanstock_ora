@@ -983,6 +983,7 @@ function updateHoldingSortHeaders() {
         { key: 'value', title: '평가금액' },
         { key: 'rt', title: '수익률' },
         { key: 'pnl', title: '평가손익' },
+        { key: '', title: '귀속 전략' },
     ];
     headerMap.forEach((item, index) => {
         const th = headers[index];
@@ -1005,7 +1006,7 @@ function renderHoldingRows() {
     }
     tbodyHoldings.innerHTML = '';
     if (!holdingsCache.length) {
-        setTableMessage('#table-holdings tbody', 7, '보유 종목이 없습니다');
+        setTableMessage('#table-holdings tbody', 8, '보유 종목이 없습니다');
         updateHoldingSortHeaders();
         return;
     }
@@ -1021,6 +1022,9 @@ function renderHoldingRows() {
         const sourceBadge = holding.source === 'local_shadow'
             ? '<small class="time-muted">로컬 체결 보정</small>'
             : '';
+        const strategyBadges = (holding.strategy_names || []).length
+            ? holding.strategy_names.map((name) => pill(name, 'hold')).join(' ')
+            : '<span class="time-muted">귀속 미확인</span>';
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td>
@@ -1032,6 +1036,7 @@ function renderHoldingRows() {
             <td>${formatCurrency(holding.value || Number(holding.qty || 0) * Number(holding.price || 0))}</td>
             <td class="${rtClass}">${formatPercent(holding.rt)}</td>
             <td class="${rtClass}">${formatCurrency(holding.pnl)}</td>
+            <td>${strategyBadges}</td>
             <td>
                 <button type="button" class="button-ghost queue-order"
                     data-symbol="${escapeHtml(holding.symbol)}"
@@ -1041,6 +1046,7 @@ function renderHoldingRows() {
                     data-price="0"
                     data-reason="dashboard sell current holding"
                     data-source="dashboard_holding_sell"
+                    data-strategy-id="${escapeHtml((holding.strategy_ids || [])[0] || '')}"
                     ${canSell ? '' : 'disabled'}
                     title="${canSell ? '매도가능수량 전량 매도' : '매도가능수량 없음'}"
                     style="padding:3px 8px;font-size:0.75rem;">전량</button>
@@ -1130,7 +1136,7 @@ async function renderBalance() {
         ];
 
         if (!balance.holdings.length) {
-            setTableMessage('#table-holdings tbody', 7, '보유 종목이 없습니다');
+            setTableMessage('#table-holdings tbody', 8, '보유 종목이 없습니다');
         }
 
         balance.holdings.forEach((holding, idx) => {
@@ -1188,7 +1194,7 @@ async function renderBalance() {
         setElementText('val-pnl', '불러오기 실패');
         setElementText('val-return', '-');
         setStatus(`계좌 API 오류: ${err.message}`);
-        setTableMessage('#table-holdings tbody', 7, err.message);
+        setTableMessage('#table-holdings tbody', 8, err.message);
     }
 }
 
@@ -1513,7 +1519,7 @@ async function renderAiStrategies() {
             const builtIn = ['gpt_5_mini_default', 'rule_only_default', 'mistock_nasdaq_rule_v1'].includes(strategy.id);
             tr.innerHTML = `
                 <td style="text-align:center;">
-                    <input type="radio" name="active-ai-strategy" class="strategy-select-radio" data-id="${escapeHtml(strategy.id)}" ${strategy.selected ? 'checked' : ''}>
+                    <input type="checkbox" class="strategy-select-checkbox" data-id="${escapeHtml(strategy.id)}" ${strategy.selected ? 'checked' : ''}>
                 </td>
                 <td>
                     <div class="symbol-name">${escapeHtml(strategy.name)}</div>
@@ -1549,10 +1555,10 @@ async function renderAiStrategies() {
             tbody.appendChild(tr);
         });
 
-        tbody.querySelectorAll('.strategy-select-radio').forEach((input) => {
+        tbody.querySelectorAll('.strategy-select-checkbox').forEach((input) => {
             input.addEventListener('change', async () => {
                 const id = input.getAttribute('data-id');
-                await postJson(`/api/mistock/ai-strategies/${id}/select`, { selected: true });
+                await postJson(`/api/mistock/ai-strategies/${id}/select`, { selected: input.checked });
                 localStorage.setItem('mistock_ai_ranker', id);
                 await Promise.all([syncStrategiesToDropdown(), renderStrategyContext(), renderAiStrategies()]);
                 await renderStrategyAudit(id);
@@ -2185,7 +2191,7 @@ function removeQueuedHoldingRow(button, payload) {
     }
     const tbody = document.querySelector('#table-holdings tbody');
     if (tbody && !tbody.querySelector('tr')) {
-        setTableMessage('#table-holdings tbody', 7, 'Sell request is now tracked in the orders tab');
+        setTableMessage('#table-holdings tbody', 8, 'Sell request is now tracked in the orders tab');
     }
 }
 
@@ -3331,6 +3337,7 @@ window.addEventListener('load', () => {
 async function renderScheduleInfo() {
     try {
         const data = await fetchJson('/api/mistock/scheduler/status');
+        await renderSchedulerStrategyChecklist(data.strategy_dispatch?.schedules || []);
         
         // 1. Config / Settings
         const cronTzEl = document.getElementById('sched-cron-tz');
@@ -3534,6 +3541,7 @@ async function renderScheduleInfo() {
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 150px;">주문ID</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 100px;">종목코드</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 120px;">종목명</th>
+                                                <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 130px;">전략</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 80px;">구분</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: right; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 80px;">수량</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: right; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 120px;">가격</th>
@@ -3557,6 +3565,7 @@ async function renderScheduleInfo() {
                                             <tr style="background: rgba(255,255,255,0.02); border-bottom: 1px solid var(--border);">
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 100px;">종목코드</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted);">종목명</th>
+                                                <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 130px;">전략</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 100px;">분류</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: left; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 100px;">결정</th>
                                                 <th style="padding: 0.6rem 0.75rem; text-align: right; font-size: 0.85rem; font-weight: 500; color: var(--text-muted); width: 80px;">수량</th>
@@ -3576,7 +3585,7 @@ async function renderScheduleInfo() {
                         const plansTbody = card.querySelector('.table-plans tbody');
                         if (plansTbody) {
                             if (roundData.results.length === 0) {
-                                plansTbody.innerHTML = '<tr><td colspan="7" class="text-center" style="padding: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">생성된 계획이 없습니다.</td></tr>';
+                                plansTbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">생성된 계획이 없습니다.</td></tr>';
                             } else {
                                 roundData.results.forEach(row => {
                                     const tr = document.createElement('tr');
@@ -3606,6 +3615,7 @@ async function renderScheduleInfo() {
                                     tr.innerHTML = `
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(row.symbol || '-')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;"><div class="symbol-name" style="font-weight: 500;">${escapeHtml(row.name || '-')}</div></td>
+                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(row.strategy_name || row.strategy_id || '미스톡 기본 전략', 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(row.category || 'ai_rebalance', 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(toKorDecision(decision), kind)}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right;">${formatNumber(row.qty || row.signal_qty)}</td>
@@ -3621,7 +3631,7 @@ async function renderScheduleInfo() {
                         const ordersTbody = card.querySelector('.table-orders tbody');
                         if (ordersTbody) {
                             if (roundData.approved.length === 0 && roundData.approvalErrors.length === 0) {
-                                ordersTbody.innerHTML = '<tr><td colspan="8" class="text-center" style="padding: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">승인 대기 주문이 없거나 자동 승인이 생략되었습니다.</td></tr>';
+                                ordersTbody.innerHTML = '<tr><td colspan="9" class="text-center" style="padding: 1.5rem; font-size: 0.9rem; color: var(--text-muted);">승인 대기 주문이 없거나 자동 승인이 생략되었습니다.</td></tr>';
                             } else {
                                 // 1. Render approvalErrors first so they appear at the very top
                                 roundData.approvalErrors.forEach(err => {
@@ -3647,6 +3657,7 @@ async function renderScheduleInfo() {
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(err.approval_id || '-')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(symbolVal)}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;"><div class="symbol-name" style="font-weight: 500;">${escapeHtml(nameVal)}</div></td>
+                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(err.strategy_name || (matchingPlan && matchingPlan.strategy_name) || err.strategy_id || (matchingPlan && matchingPlan.strategy_id) || '미스톡 기본 전략', 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${actionVal !== '-' ? pill(toKorAction(actionVal), actionVal === 'sell' ? 'sell' : 'buy') : '-'}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right;">${qtyVal !== '-' ? formatNumber(qtyVal) : '-'}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right; font-weight: 500;">${priceVal !== '-' ? '$' + formatNumber(priceVal) : '-'}</td>
@@ -3682,6 +3693,7 @@ async function renderScheduleInfo() {
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(ordId || '-')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(symbolVal)}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;"><div class="symbol-name" style="font-weight: 500;">${escapeHtml(nameVal)}</div></td>
+                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(ord.strategy_name || (matchingPlan && matchingPlan.strategy_name) || ord.strategy_id || (matchingPlan && matchingPlan.strategy_id) || '미스톡 기본 전략', 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${actionVal !== '-' ? pill(toKorAction(actionVal), actionVal === 'sell' ? 'sell' : 'buy') : '-'}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right;">${qtyVal !== '-' ? formatNumber(qtyVal) : '-'}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right; font-weight: 500;">${priceVal !== '-' ? '$' + formatNumber(priceVal) : '-'}</td>
@@ -3701,6 +3713,25 @@ async function renderScheduleInfo() {
     } catch (err) {
         console.error('Failed to load schedule status:', err);
     }
+}
+
+async function renderSchedulerStrategyChecklist(schedules = []) {
+    const container = document.getElementById('scheduler-strategy-checklist');
+    if (!container) return;
+    const data = await fetchJson('/api/mistock/ai-strategies');
+    const enabled = new Set(schedules.filter((item) => item.enabled).map((item) => String(item.strategy_id)));
+    container.innerHTML = (data.strategies || []).map((strategy) => `
+        <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" class="scheduler-strategy-checkbox" value="${escapeHtml(strategy.id)}"
+                ${(strategy.selected || enabled.has(String(strategy.id))) ? 'checked' : ''}>
+            <span>${escapeHtml(strategy.name || strategy.id)}</span>
+        </label>
+    `).join('') || '<span class="time-muted">등록된 전략이 없습니다.</span>';
+}
+
+function getScheduledStrategyIds() {
+    return Array.from(document.querySelectorAll('.scheduler-strategy-checkbox:checked'))
+        .map((input) => input.value).filter(Boolean);
 }
 
 window.toggleRoundCollapse = function(round) {
@@ -3764,7 +3795,10 @@ async function triggerSchedule(mode) {
     }
     
     try {
-        const res = await postJson('/api/mistock/scheduler/run', { mode: mode });
+        const res = await postJson('/api/mistock/scheduler/run', {
+            mode: mode,
+            strategy_ids: getScheduledStrategyIds(),
+        });
         if (res.status === 'started') {
             if (logBox) {
                 logBox.textContent += `[${new Date().toLocaleTimeString()}] 스케쥴러 백그라운드 태스크가 성공적으로 등록되었습니다. 실시간 기동 중입니다.\n`;
