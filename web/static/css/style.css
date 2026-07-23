@@ -263,8 +263,7 @@ h1 .highlight {
     margin-bottom: 0.4rem;
 }
 
-.summary-grid .card .value,
-.risk-card strong {
+.summary-grid .card .value {
     display: block;
     font-size: clamp(1.08rem, 1.35vw, 1.55rem);
     line-height: 1.25;
@@ -274,9 +273,18 @@ h1 .highlight {
     font-variant-numeric: tabular-nums;
 }
 
+.risk-card strong {
+    display: block;
+    font-size: clamp(0.76rem, 0.9vw, 1.02rem);
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    font-variant-numeric: tabular-nums;
+}
+
 .risk-card .valuation-pnl-value {
-    font-size: clamp(0.82rem, 1vw, 1.15rem);
-    letter-spacing: -0.03em;
+    font-size: clamp(0.7rem, 0.82vw, 0.94rem);
     text-overflow: clip;
 }
 

@@ -14,7 +14,7 @@ MORNING_MONITOR_SPEC="${HANSTOCK_MISTOCK_MORNING_MONITOR_SPEC:-30 0-5 * * 2-6}" 
 CRON_TZ_VALUE="${HANSTOCK_CRON_TZ:-Asia/Seoul}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-RUN="cd $ROOT_DIR && $ROOT_DIR/scripts/vm/mistock-auto.sh"
+RUN="cd $ROOT_DIR && bash $ROOT_DIR/scripts/vm/mistock-auto.sh"
 MONITOR_RUN="cd $ROOT_DIR && PYTHONPATH=. .venv/bin/python3 src/mistock/monitor.py >> logs/mistock_monitor.log 2>&1"
 
 existing="$(mktemp)"
