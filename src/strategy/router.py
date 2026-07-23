@@ -11,6 +11,7 @@ from src.utils.logger import logger
 
 _RATE_LIMIT_BACKOFF_SECONDS = float(os.environ.get("KIS_ORDER_RATE_LIMIT_BACKOFF_SECONDS", "10.0"))
 _RATE_LIMIT_MAX_RETRIES = int(os.environ.get("KIS_ORDER_RATE_LIMIT_RETRIES", "2"))
+_ORDER_MIN_INTERVAL_SECONDS = float(os.environ.get("KIS_ORDER_MIN_INTERVAL_SECONDS", "0.0"))
 
 
 def _is_kis_rate_limit_message(message: str) -> bool:
@@ -26,6 +27,7 @@ class OrderRouter:
         self.enable_live = config.enable_live_trading
         self.require_approval = config.require_approval
         self.approval_service = approval_service or ApprovalService(ApprovalRepository(connect_db))
+        self._last_order_at = 0.0
 
     def _execution_context(self) -> ExecutionContext:
         return ExecutionContext(
@@ -59,7 +61,13 @@ class OrderRouter:
         attempts = max(1, _RATE_LIMIT_MAX_RETRIES + 1)
         result: dict = {}
         for attempt in range(1, attempts + 1):
+            if _ORDER_MIN_INTERVAL_SECONDS > 0 and self._last_order_at > 0:
+                elapsed = time.monotonic() - self._last_order_at
+                wait = _ORDER_MIN_INTERVAL_SECONDS - elapsed
+                if wait > 0:
+                    time.sleep(wait)
             result = self.api.place_order(symbol, action, price, qty)
+            self._last_order_at = time.monotonic()
             ok = result.get("rt_cd") == "0"
             msg = str(result.get("msg1", ""))
             logger.info(f"[ROUTER] Live Execution {'OK' if ok else 'FAILED'}: {msg}")

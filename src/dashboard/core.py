@@ -199,6 +199,8 @@ ENV_FIELDS = [
     {"key": "MAX_SINGLE_WEIGHT", "label": "Max Single Weight", "type": "float"},
     {"key": "CASH_BUFFER", "label": "Cash Buffer", "type": "float"},
     {"key": "MAX_DAILY_LOSS_PCT", "label": "Max Daily Loss %", "type": "float"},
+    {"key": "HANSTOCK_EXCLUDED_SYMBOLS", "label": "Hanstock Excluded Symbols", "type": "text", "hint": "Comma-separated domestic stock codes excluded from automated scans and orders."},
+    {"key": "KIS_ORDER_MIN_INTERVAL_SECONDS", "label": "KIS Order Min Interval Seconds", "type": "float", "hint": "Minimum wait between broker order submissions."},
     {"key": "SCAN_UNIVERSE_SIZE", "label": "Scan Universe Size", "type": "int"},
     {"key": "KIS_CIRCUIT_COOLDOWN_SECONDS", "label": "KIS API 李⑤떒 ?湲곗큹", "type": "int", "hint": "KIS API ?ㅻ쪟 ???ъ떆?꾧퉴吏 湲곕떎由??쒓컙(珥??낅땲?? ??????쒕쾭 ?ъ떆?????곸슜?⑸땲??"},
     {"key": "TRADE_DB_PATH", "label": "Trade DB Path", "type": "text"},
@@ -1225,6 +1227,7 @@ STRATEGY_ENV_BINDINGS = {
     "MAX_SINGLE_WEIGHT": ("max_single_weight", "MAX_SINGLE_WEIGHT", float),
     "CASH_BUFFER": ("cash_buffer", "CASH_BUFFER", float),
     "MAX_DAILY_LOSS_PCT": ("max_daily_loss_pct", "MAX_DAILY_LOSS_PCT", float),
+    "HANSTOCK_EXCLUDED_SYMBOLS": ("hanstock_excluded_symbols", None, str),
     "SCAN_UNIVERSE_SIZE": ("scan_universe_size", "SCAN_UNIVERSE_SIZE", int),
 }
 
@@ -1262,7 +1265,8 @@ def _apply_strategy_env_updates(updates: dict[str, str]) -> None:
             config_attr, trader_attr, caster = binding
             parsed = caster(value)
             setattr(trader.config, config_attr, parsed)
-            setattr(trader, trader_attr, parsed)
+            if trader_attr:
+                setattr(trader, trader_attr, parsed)
             continue
         ai_binding = AI_ENV_BINDINGS.get(key)
         if ai_binding:

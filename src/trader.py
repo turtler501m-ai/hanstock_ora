@@ -26,6 +26,7 @@ from src.strategy.seven_split import (
     generate_signal, build_scan_universe, find_candidates, build_orders,
     generate_ai_weight_plan, generate_portfolio_optimizer_plan,
     calc_strategy_profile,
+    is_excluded_symbol,
 )
 from src.strategy.indicators import calc_bollinger, calc_macd, calc_rsi, calc_sma
 from src.strategy.risk import RiskEngine
@@ -683,6 +684,9 @@ def build_ai_rebalance_rows(api, balance_data: dict, total_eval: int) -> list[di
     ai_plan = generate_ai_weight_plan(holdings, total_eval)
     rows = []
     for position in ai_plan.get("positions", []):
+        if is_excluded_symbol(position.get("symbol", "")):
+            logger.info(f"[EXCLUDE] Skipping AI rebalance for excluded symbol {position.get('symbol', '')}")
+            continue
         action = position.get("rebalance_action", "hold")
         qty = int(position.get("rebalance_qty", 0) or 0)
         if action not in {"buy", "sell"} or qty <= 0:
@@ -767,6 +771,9 @@ def build_runtime_plan(
     if not isolated_strategy_run:
         for stock in stocks:
             sym = stock.get("pdno", "")
+            if is_excluded_symbol(sym):
+                logger.info(f"[EXCLUDE] Skipping holding signal for excluded symbol {sym}")
+                continue
             name = stock.get("prdt_name", sym)
             rt = float(stock.get("evlu_pfls_rt", 0) or 0)
             daily = api.get_daily(sym, n=60)

@@ -25,6 +25,15 @@ def sync_watchlist_runtime() -> None:
 # 최초 기동 동기화
 sync_watchlist_runtime()
 
+
+def excluded_symbols() -> set[str]:
+    raw = str(getattr(config, "hanstock_excluded_symbols", "") or "")
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+def is_excluded_symbol(symbol: str) -> bool:
+    return str(symbol or "").strip() in excluded_symbols()
+
 KOSPI_UNIVERSE = [
     # 반도체/IT/빅테크
     "005930", "000660", "035420", "035720", "018260", "009150", "066570", 
@@ -617,7 +626,8 @@ def build_scan_universe(api: "KIStockAPI", held_symbols: set[str]) -> list[str]:
 
     # WATCHLIST 항상 포함, 중복 제거, 보유 종목 제외
     merged = list(dict.fromkeys(WATCHLIST + base))
-    universe = [code for code in merged if code not in held_symbols]
+    excluded = excluded_symbols()
+    universe = [code for code in merged if code not in held_symbols and code not in excluded]
     logger.info(f"[SCAN] 최종 스캔 대상: {len(universe)}종목 (WATCHLIST {len(WATCHLIST)} + 동적 {len(base)}종목 병합)")
     return universe
 
@@ -693,8 +703,11 @@ def find_candidates(
                     strategy_description = active.get("description") or ""
         except Exception:
             pass
-    scan_list = [code for code in (universe if universe is not None else WATCHLIST)
-                 if code not in held_symbols]
+    excluded = excluded_symbols()
+    scan_list = [
+        code for code in (universe if universe is not None else WATCHLIST)
+        if code not in held_symbols and code not in excluded
+    ]
     if not scan_list:
         return {"candidates": [], "scan_summary": [], "scanned": 0, "min_score": min_score}
 
@@ -1034,6 +1047,7 @@ def build_orders(
     cash: int,
     optimizer: str = "score_tilted_inverse_vol",
 ) -> list[dict]:
+    candidates = [c for c in candidates if not is_excluded_symbol(c.get("ticker", ""))]
     available_slots = config.max_positions - held_count
     if available_slots <= 0:
         logger.info(f"[INFO] Max positions reached ({config.max_positions}); no new buy orders")

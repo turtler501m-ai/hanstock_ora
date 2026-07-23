@@ -35,6 +35,20 @@ class TraderCoreTests(unittest.TestCase):
         self.assertEqual(len(orders), 1)
         self.assertLessEqual(orders[0]["estimated_cost"], 1_000_000)
 
+    def test_build_orders_excludes_configured_symbols(self):
+        with patch("src.strategy.seven_split.config.hanstock_excluded_symbols", "252670"):
+            orders = build_orders(
+                [
+                    {"ticker": "252670", "score": 5, "reasons": ["blocked"]},
+                    {"ticker": "005930", "score": 2, "reasons": ["ok"]},
+                ],
+                lambda _symbol: {"ask1": 70000, "current": 70000},
+                held_count=0,
+                cash=1_000_000,
+            )
+
+        self.assertEqual([order["ticker"] for order in orders], ["005930"])
+
     def test_build_scan_universe_prefers_configured_condition_search(self):
         api = Mock()
         api.get_condition_search_result.return_value = ["005930", "000660", "005930"]
@@ -192,6 +206,38 @@ class TraderCoreTests(unittest.TestCase):
         self.assertEqual(rows[0]["action"], "sell")
         self.assertEqual(rows[0]["qty"], 2)
 
+    def test_ai_rebalance_rows_exclude_configured_symbols(self):
+        from src import trader
+
+        class _FakeAPI:
+            def get_daily(self, _symbol, n=120):
+                return []
+
+        balance = {
+            "output1": [{
+                "pdno": "252670",
+                "hldg_qty": "10",
+                "prpr": "100",
+                "evlu_amt": "1000",
+            }]
+        }
+        ai_plan = {
+            "ai_active": False,
+            "positions": [{
+                "symbol": "252670",
+                "name": "Blocked",
+                "price": 100,
+                "rebalance_action": "sell",
+                "rebalance_qty": 1,
+            }],
+        }
+
+        with patch.object(trader, "generate_ai_weight_plan", return_value=ai_plan), \
+                patch("src.strategy.seven_split.config.hanstock_excluded_symbols", "252670"):
+            rows = trader.build_ai_rebalance_rows(_FakeAPI(), balance, 1_000_000)
+
+        self.assertEqual(rows, [])
+
     def test_runtime_plan_can_include_ai_rebalance_rows(self):
         from unittest.mock import patch
         from src import trader
@@ -310,6 +356,18 @@ class TraderCoreTests(unittest.TestCase):
         universe = build_scan_universe(_FakeAPI(), held_symbols=held)
         for code in held:
             self.assertNotIn(code, universe)
+
+    def test_build_scan_universe_excludes_configured_symbols(self):
+        class _FakeAPI:
+            def get_volume_rank(self, top_n=50):
+                return ["252670", "005930"]
+
+        with patch("src.strategy.seven_split.config.hanstock_excluded_symbols", "252670,252710"):
+            universe = build_scan_universe(_FakeAPI(), held_symbols=set())
+
+        self.assertNotIn("252670", universe)
+        self.assertNotIn("252710", universe)
+        self.assertIn("005930", universe)
 
     def test_isolated_strategy_without_universe_does_not_use_shared_scan_universe(self):
         from src import trader
