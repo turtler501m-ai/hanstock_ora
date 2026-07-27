@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     max_positions: int = 3
     max_single_weight: float = 0.30
     cash_buffer: float = 0.20
-    max_daily_loss_pct: float = 3.0
+    max_daily_loss_pct: float = 30.0
     # Comma-separated Korean stock symbols to exclude from automated orders and scans.
     hanstock_excluded_symbols: str = ""
     
