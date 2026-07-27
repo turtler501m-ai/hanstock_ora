@@ -733,7 +733,6 @@ def find_candidates(
     if not scan_list:
         return {"candidates": [], "scan_summary": [], "scanned": 0, "min_score": min_score}
 
-    logger.info(f"[SCAN] yfinance 배치 다운로드 시작: {len(scan_list)}종목")
     candidates: list[dict] = []
     scan_summary: list[dict] = []  # 기준 미달 포함 전체 분석 결과
     symbols = [get_yfinance_ticker(code) for code in scan_list]
@@ -744,29 +743,36 @@ def find_candidates(
 
     batch = None
     scan_error: str | None = None
-    try:
-        batch = yf.download(
-            symbols,
-            period="9mo",
-            progress=False,
-            auto_adjust=True,
-            group_by="ticker",
-            threads=True,
-            timeout=config.yfinance_timeout_seconds,
-        )
-        if getattr(batch, "empty", True):
-            scan_error = f"yfinance가 {len(scan_list)}종목에 대해 데이터를 반환하지 않았습니다. 잠시 후 다시 시도해 주세요."
-            logger.info(f"[WARN] yfinance returned empty batch for {len(scan_list)} symbols")
+    scan_source = str(getattr(config, "candidate_scan_source", "yfinance") or "yfinance").strip().lower()
+    kis_first_sources = {"kis", "kis_api", "real", "real_check", "kis_cache"}
+    if scan_source in kis_first_sources:
+        scan_error = f"candidate scan source is {scan_source}; using KIS API/cache"
+        logger.info(f"[SCAN] KIS API/cache scan selected: {len(scan_list)} symbols (source={scan_source})")
+    else:
+        logger.info(f"[SCAN] yfinance 배치 다운로드 시작: {len(scan_list)}종목")
+        try:
+            batch = yf.download(
+                symbols,
+                period="9mo",
+                progress=False,
+                auto_adjust=True,
+                group_by="ticker",
+                threads=True,
+                timeout=config.yfinance_timeout_seconds,
+            )
+            if getattr(batch, "empty", True):
+                scan_error = f"yfinance가 {len(scan_list)}종목에 대해 데이터를 반환하지 않았습니다. 잠시 후 다시 시도해 주세요."
+                logger.info(f"[WARN] yfinance returned empty batch for {len(scan_list)} symbols")
+                batch = None
+            else:
+                logger.info(f"[SCAN] yfinance 수신 완료: {len(batch)}행")
+        except Exception as e:
+            scan_error = f"yfinance 다운로드 오류: {type(e).__name__} — {e}"
+            logger.info(f"[WARN] Candidate batch scan failed: {e}")
             batch = None
-        else:
-            logger.info(f"[SCAN] yfinance 수신 완료: {len(batch)}행")
-    except Exception as e:
-        scan_error = f"yfinance 다운로드 오류: {type(e).__name__} — {e}"
-        logger.info(f"[WARN] Candidate batch scan failed: {e}")
-        batch = None
 
     if batch is None:
-        logger.info("[SCAN] yfinance 통신 차단 상태 감지. KIS API 및 로컬 DB 차트 캐시 기반 하이브리드 스캔 모드를 가동합니다.")
+        logger.info(f"[SCAN] KIS API/local DB chart cache scan mode activated ({scan_error})")
         from src.db.repository import save_daily_charts, load_daily_charts
         
         KST = timezone(timedelta(hours=9))

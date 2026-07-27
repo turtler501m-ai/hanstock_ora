@@ -3,6 +3,7 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import Mock, patch
 
 import pandas as pd
+from src.config import config
 from src.db.repository import save_daily_charts, load_daily_charts, connect_db, init_db
 from src.strategy.seven_split import find_candidates
 
@@ -62,6 +63,37 @@ class TestHybridScanner(unittest.TestCase):
         
         self.assertIn("scanned", res)
         # 005930이 정상적으로 1종목 scanned 완료되었는지 검증
+        self.assertEqual(res["scanned"], 1)
+
+    def test_kis_scan_source_skips_yfinance_and_uses_api(self):
+        mock_data = []
+        start_date = datetime(2026, 1, 1)
+        for i in range(70):
+            d_str = (start_date + timedelta(days=i)).strftime("%Y%m%d")
+            mock_data.append({
+                "date": d_str,
+                "open": 50000 + i * 10,
+                "high": 50500 + i * 10,
+                "low": 49500 + i * 10,
+                "close": 50100 + i * 10,
+                "volume": 100000,
+            })
+
+        api = Mock()
+        api.get_daily.return_value = mock_data
+        with patch.object(config, "candidate_scan_source", "kis"), patch(
+            "src.strategy.seven_split.yf.download"
+        ) as yfinance_download:
+            res = find_candidates(
+                held_symbols=set(),
+                universe=["005930"],
+                min_score=0,
+                ranker="rule_only",
+                api=api,
+            )
+
+        yfinance_download.assert_not_called()
+        api.get_daily.assert_called_once_with("005930", n=120)
         self.assertEqual(res["scanned"], 1)
 
 if __name__ == "__main__":
