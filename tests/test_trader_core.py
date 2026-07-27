@@ -76,7 +76,7 @@ class TraderCoreTests(unittest.TestCase):
     def test_generate_signal_stop_loss_uses_configured_ten_percent_floor(self):
         with patch("src.strategy.seven_split.config.stop_loss_pct", -10.0):
             signal = generate_signal(
-                {"prpr": "10000", "hldg_qty": "7", "evlu_pfls_rt": "-10.0"},
+                {"prpr": "10000", "hldg_qty": "7", "evlu_pfls_rt": "-9.96"},
                 [],
             )
 

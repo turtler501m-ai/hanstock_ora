@@ -1202,8 +1202,9 @@ def generate_signal(stock: dict, daily_data: list, strategy_model: str = "") -> 
         "macd_bear_cross": profile["macd_bear_cross"],
     }
 
-    if rt <= config.stop_loss_pct:
-        return {"action": "sell", "qty": qty, "price": 0, "reason": f"stop loss {rt:.1f}%", "indicators": indicators}
+    rounded_rt = round(rt, 1)
+    if rounded_rt <= config.stop_loss_pct:
+        return {"action": "sell", "qty": qty, "price": 0, "reason": f"stop loss {rounded_rt:.1f}%", "indicators": indicators}
     if rt >= 200 and rsi >= config.rsi_sell:
         return {"action": "sell", "qty": split_qty, "price": int(current), "reason": f"large profit split sell {rt:.1f}% RSI={rsi}", "indicators": indicators}
     if rt >= config.take_profit and rsi >= config.rsi_sell:
