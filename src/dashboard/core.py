@@ -158,7 +158,8 @@ FINRL_DIR = BASE_DIR / "vendor" / "FinRL"
 BALANCE_CACHE = trader.RUNTIME_DIR / "balance_snapshot.json"
 CANDIDATE_CACHE = trader.RUNTIME_DIR / "candidate_snapshot.json"
 AUTO_APPROVAL_STATE = trader.RUNTIME_DIR / "auto_approval.json"
-AUTO_APPROVAL_EXCLUDED_SOURCES = {"narrative_momentum"}
+DEFAULT_AUTO_APPROVAL_STATE = AUTO_APPROVAL_STATE
+AUTO_APPROVAL_EXCLUDED_SOURCES = {"narrative_momentum", "autonomous_strategy"}
 QUANTCONNECT_MNQ_DIR = BASE_DIR / "src" / "integrations" / "quantconnect" / "mnq_paper_auto"
 QUANTCONNECT_MNQ_RESULTS = trader.RUNTIME_DIR / "quantconnect_mnq_results.json"
 QUANTCONNECT_AUTH_CACHE = trader.RUNTIME_DIR / "quantconnect_auth_cache.json"
@@ -1040,6 +1041,16 @@ def _approval_by_id(approval_id: int) -> dict | None:
 
 
 def _auto_approval_enabled() -> bool:
+    # Tests and isolated callers replace the state path. In that case the
+    # injected store is authoritative and must not leak the operational DB.
+    if AUTO_APPROVAL_STATE != DEFAULT_AUTO_APPROVAL_STATE:
+        if not AUTO_APPROVAL_STATE.exists():
+            return False
+        try:
+            state = json.loads(AUTO_APPROVAL_STATE.read_text(encoding="utf-8"))
+            return bool(state.get("enabled"))
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            return False
     try:
         from src.db.repository import load_auto_approval_state
         return load_auto_approval_state()
@@ -2725,6 +2736,19 @@ def _approve_pending_approval(approval_id: int, approval_label: str = "수동승
             status_code=409,
             detail="Online access is blocked. Approval remains pending.",
         )
+    pending = _load_pending_approval(approval_id)
+    if pending.get("managed_order_id"):
+        from src.strategy.autonomy.ai_stock_integration import (
+            approve_managed_ai_stock_order,
+        )
+
+        try:
+            return approve_managed_ai_stock_order(approval_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=f"managed AI-stock approval failed closed: {exc}",
+            ) from exc
     item = _claim_pending_approval(approval_id)
     result: dict = {}
     status = "failed"
@@ -3647,18 +3671,43 @@ def _run_scheduled_cycles_for_strategies(
     allowed_categories: set[str] | None = None,
 ) -> dict:
     from src.scheduler import run_scheduled_cycle
+    from src.config import config
+
+    try:
+        from src.db.repository import load_ai_strategies
+
+        registered_ai_ids = {
+            str(item.get("id"))
+            for item in load_ai_strategies()
+            if item.get("id")
+        }
+    except Exception:
+        registered_ai_ids = set()
 
     runs = []
     errors = []
     for strategy_id in strategy_ids:
         try:
-            result = run_scheduled_cycle(
-                mode,
-                include_ai_rebalance=include_ai_rebalance,
-                auto_approve=auto_approve,
-                force_strategy_id=strategy_id,
-                allowed_categories=allowed_categories,
-            )
+            if (
+                bool(getattr(config, "autonomy_enabled", False))
+                and strategy_id in registered_ai_ids
+                and mode != "analysis_only"
+            ):
+                from src.ai_stock.automation_service import run_strategy
+
+                result = run_strategy(
+                    market="KR",
+                    strategy_id=strategy_id,
+                    run_type=f"dashboard_{mode}",
+                )
+            else:
+                result = run_scheduled_cycle(
+                    mode,
+                    include_ai_rebalance=include_ai_rebalance,
+                    auto_approve=auto_approve,
+                    force_strategy_id=strategy_id,
+                    allowed_categories=allowed_categories,
+                )
             runs.append({"strategy_id": strategy_id, "result": result})
         except Exception as exc:
             errors.append({"strategy_id": strategy_id, "message": str(exc)})

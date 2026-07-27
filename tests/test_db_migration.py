@@ -66,7 +66,7 @@ class DbMigrationTests(unittest.TestCase):
         self.assertEqual(found[0]["name"], "Test Strategy")
         self.assertEqual(found[0]["weight"], 0.5)
         self.assertTrue(found[0]["selected"])
-        self.assertEqual(found[0]["status"], "approved")
+        self.assertEqual(found[0]["status"], "draft")
         self.assertEqual(found[0]["strategy_version"], 1)
         self.assertIn("profile", found[0])
         self.assertIn("profile_hash", found[0])

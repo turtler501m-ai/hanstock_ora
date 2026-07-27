@@ -233,58 +233,13 @@ def _execute_order(
     strategy_id: str,
     approval_id: int | None,
 ) -> dict[str, Any]:
-    """Execute through existing market-specific order paths only."""
-    qty = int(plan.get("quantity") or 0)
-    price = int(plan.get("entry_price") or 0)
-    if qty <= 0 or price <= 0:
-        return {"ok": False, "status": "failed", "message": "invalid qty/price"}
+    """Compatibility symbol: legacy direct broker execution is disabled."""
+    return {
+        "ok": False,
+        "status": "blocked",
+        "message": "legacy direct execution disabled; use autonomy runtime",
+    }
 
-    if market == "KR":
-        if approval_id is not None:
-            try:
-                from src.dashboard.core import _approve_pending_approval
-
-                return _approve_pending_approval(int(approval_id), "AI스톡 자동승인")
-            except Exception as exc:
-                return {"ok": False, "status": "failed", "message": str(exc), "approval_id": approval_id}
-        try:
-            from src.api.kis_api import KIStockAPI
-            from src.strategy.router import OrderRouter
-
-            reason = f"AI스톡 자동주문 final={candidate.get('final_score')}"
-            return OrderRouter(KIStockAPI()).route(
-                str(candidate.get("symbol") or ""),
-                str(candidate.get("name") or candidate.get("symbol") or ""),
-                "buy",
-                qty,
-                price,
-                reason,
-                {"source": "ai_stock", "candidate_id": candidate.get("candidate_id")},
-                strategy_id=strategy_id,
-            )
-        except Exception as exc:
-            return {"ok": False, "status": "failed", "message": str(exc)}
-
-    if approval_id is not None:
-        try:
-            from src.dashboard.routes.mistock import _execute_approval
-
-            return _execute_approval(int(approval_id), approve=True)
-        except Exception as exc:
-            return {"ok": False, "status": "failed", "message": str(exc), "approval_id": approval_id}
-    try:
-        from src.mistock import trader as mistock_trader
-
-        reason = f"AI스톡 자동주문 final={candidate.get('final_score')}"
-        return mistock_trader.place_order(
-            str(candidate.get("symbol") or ""),
-            "buy",
-            float(qty),
-            float(price),
-            reason,
-        )
-    except Exception as exc:
-        return {"ok": False, "status": "failed", "message": str(exc)}
 
 
 def _approval_db(market: str) -> str:
@@ -326,7 +281,20 @@ def run_strategy(*, market: str, strategy_id: str = "ai_stock_default_v1",
 
     market = require_storable_market(market)
     scan = discovery_service.run_scan(market=market, strategy_id=strategy_id, options={})
+    from src.config import config
+
     policy = repo.get_policy(strategy_id, market) or {}
+    if bool(getattr(config, "autonomy_enabled", False)) and not policy:
+        policy = repo.upsert_policy(
+            strategy_id,
+            market,
+            {
+                "enabled": 1,
+                "automation_level": AUTOMATION_APPROVE,
+                "auto_approve": 1,
+                "auto_execute": 0,
+            },
+        )
     level = int(policy.get("automation_level", AUTOMATION_PLAN) or AUTOMATION_PLAN)
 
     summary = {"scan_id": scan["scan_id"], "automation_level": level,
@@ -336,6 +304,64 @@ def run_strategy(*, market: str, strategy_id: str = "ai_stock_default_v1",
         # 정책 비활성화는 1차 스캔은 남기되 관찰/확인/계획/승인/주문 전 과정을 건너뛴다.
         summary["blocked"].append("policy_disabled")
         return {"scan": scan["summary"], "automation": summary}
+
+    if (
+        bool(getattr(config, "autonomy_enabled", False))
+        and level >= AUTOMATION_PLAN
+    ):
+        try:
+            from src.strategy.autonomy.ai_stock_integration import (
+                run_ai_stock_autonomy_cycle,
+            )
+
+            autonomy = run_ai_stock_autonomy_cycle(
+                market=market,
+                strategy_id=strategy_id,
+                scan_id=int(scan["scan_id"]),
+                run_type=run_type,
+            )
+            summary["planned"] = len(autonomy["managed_orders"])
+            summary["approved"] = len(autonomy["approvals"])
+            repo.log_execution_run({
+                "strategy_id": strategy_id,
+                "market": market,
+                "scan_id": scan["scan_id"],
+                "run_type": run_type,
+                "automation_level": level,
+                "status": "completed",
+                "policy_snapshot": {
+                    **policy,
+                    "execution_path": "autonomy",
+                    "cycle_key": autonomy["cycle_key"],
+                },
+            })
+            return {
+                "scan": scan["summary"],
+                "automation": summary,
+                "autonomy": autonomy,
+            }
+        except Exception as exc:
+            reason = f"autonomy:{type(exc).__name__}:{exc}"
+            summary["blocked"].append(reason)
+            repo.log_execution_run({
+                "strategy_id": strategy_id,
+                "market": market,
+                "scan_id": scan["scan_id"],
+                "run_type": run_type,
+                "automation_level": level,
+                "status": "blocked",
+                "blocked_stage": "autonomy",
+                "blocked_reason": reason,
+                "policy_snapshot": {
+                    **policy,
+                    "execution_path": "autonomy",
+                },
+            })
+            return {
+                "scan": scan["summary"],
+                "automation": summary,
+                "autonomy": {"enabled": True, "error": str(exc)},
+            }
 
     if level < AUTOMATION_WATCH:
         return {"scan": scan["summary"], "automation": summary}
@@ -396,14 +422,14 @@ def run_strategy(*, market: str, strategy_id: str = "ai_stock_default_v1",
             order_result = None
             order_ok = False
             if gate["proceed"]:
-                order_result = _execute_order(market, cand, plan, strategy_id, approval_id)
-                order_ok = bool(order_result.get("ok") is True or order_result.get("status") in {"executed", "submitted"})
-                if not order_ok:
-                    gate = {
-                        **gate,
-                        "proceed": False,
-                        "blocked_reason": [*gate["blocked_reason"], "order_failed"],
-                    }
+                gate = {
+                    **gate,
+                    "proceed": False,
+                    "blocked_reason": [
+                        *gate["blocked_reason"],
+                        "legacy_auto_execute_disabled_use_autonomy_runtime",
+                    ],
+                }
             repo.update_execution_plan_status(
                 int(plan["id"]),
                 status="submitted" if order_ok else "blocked",

@@ -221,6 +221,18 @@ def init_db() -> None:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN strategy_id TEXT")
             except sqlite3.OperationalError:
                 pass
+        for col_name, col_type in (
+            ("strategy_version", "INTEGER"),
+            ("profile_hash", "TEXT"),
+            ("managed_order_id", "INTEGER"),
+            ("decision_id", "INTEGER"),
+            ("position_id", "INTEGER"),
+            ("client_order_key", "TEXT"),
+        ):
+            try:
+                conn.execute(f"ALTER TABLE approvals ADD COLUMN {col_name} {col_type}")
+            except sqlite3.OperationalError:
+                pass
         try:
             conn.execute("ALTER TABLE scanned_candidates ADD COLUMN strategy_id TEXT")
         except sqlite3.OperationalError:

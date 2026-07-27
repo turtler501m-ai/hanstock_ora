@@ -47,7 +47,13 @@ def _default_strategy_profile(strategy: dict) -> dict:
         },
         "risk": {
             "max_ai_weight": weight,
-            "max_risk_per_trade_pct": 1.0,
+            "max_risk_per_trade_pct": 0.5,
+            "max_total_open_risk_pct": 2.0,
+            "max_sector_exposure_pct": 20.0,
+            "max_liquidity_participation_pct": 0.5,
+            "max_strategy_exposure_pct": 30.0,
+            "max_data_age_seconds": 60,
+            "min_cash_reserve_pct": 20.0,
             "max_daily_ai_orders": 3,
             "paper_trading_required_days": 20,
         },
@@ -66,7 +72,25 @@ def _parse_strategy_profile(strategy: dict) -> dict:
     if not isinstance(raw_profile, dict):
         raw_profile = {}
     profile = _default_strategy_profile(strategy)
+    default_risk = dict(profile["risk"])
+    default_backtest = dict(profile["backtest"])
     profile.update(raw_profile)
+    profile["risk"] = {
+        **default_risk,
+        **(
+            raw_profile.get("risk")
+            if isinstance(raw_profile.get("risk"), dict)
+            else {}
+        ),
+    }
+    profile["backtest"] = {
+        **default_backtest,
+        **(
+            raw_profile.get("backtest")
+            if isinstance(raw_profile.get("backtest"), dict)
+            else {}
+        ),
+    }
     profile["model"] = str(profile.get("model") or strategy.get("model") or "none")
     profile["ai_weight"] = max(0.0, min(1.0, float(profile.get("ai_weight", strategy.get("weight", 0.0)) or 0.0)))
     return profile
@@ -84,7 +108,9 @@ def normalize_ai_strategy(strategy: dict) -> dict:
     item["weight"] = max(0.0, min(1.0, float(item.get("weight", 0.0) or 0.0)))
     item["selected"] = bool(item.get("selected", False))
     item["strategy_version"] = int(item.get("strategy_version") or 1)
-    item["status"] = str(item.get("status") or ("approved" if item.get("selected") else "verified"))
+    # Selection is not lifecycle approval.  Migrated/legacy records without an
+    # explicit status must pass the normal verification lifecycle.
+    item["status"] = str(item.get("status") or "draft")
     profile = _parse_strategy_profile(item)
     item["profile"] = profile
     item["profile_json"] = json.dumps(profile, ensure_ascii=False, sort_keys=True)
@@ -276,6 +302,66 @@ def record_ai_strategy_event(
             conn.commit()
     except (sqlite3.Error, OSError, ValueError, TypeError) as e:
         logger.warning(f"Failed to record AI strategy event: {e}")
+
+
+def halt_ai_strategy(
+    strategy_id: str,
+    *,
+    target_status: str,
+    reason: str,
+    payload: dict | None = None,
+) -> dict:
+    """Atomically halt a strategy, deselect it, and record the audit event."""
+    if target_status not in {"review_required", "suspended"}:
+        raise ValueError("target_status must be review_required or suspended")
+    init_db()
+    with connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("BEGIN IMMEDIATE")
+        current = conn.execute(
+            "SELECT * FROM ai_strategies WHERE id=?", (str(strategy_id),)
+        ).fetchone()
+        if not current:
+            conn.rollback()
+            raise ValueError("strategy not found")
+        previous = str(current["status"] or "draft")
+        rank = {"review_required": 1, "suspended": 2, "retired": 3}
+        effective = (
+            previous
+            if rank.get(previous, 0) >= rank[target_status]
+            else target_status
+        )
+        conn.execute(
+            "UPDATE ai_strategies SET status=?, selected=0 WHERE id=?",
+            (effective, str(strategy_id)),
+        )
+        event_payload = {
+            **(payload or {}),
+            "reason": str(reason),
+            "previous_status": previous,
+            "new_status": effective,
+        }
+        conn.execute(
+            """
+            INSERT INTO ai_strategy_events
+            (ts, strategy_id, strategy_version, event_type, payload)
+            VALUES (?, ?, ?, 'autonomy_health_halt', ?)
+            """,
+            (
+                datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
+                str(strategy_id),
+                current["strategy_version"],
+                json.dumps(event_payload, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        return {
+            "strategy_id": str(strategy_id),
+            "previous_status": previous,
+            "new_status": effective,
+            "changed": previous != effective or bool(current["selected"]),
+            "selected": False,
+        }
 
 
 def get_ai_strategy_events(strategy_id: str, limit: int = 100) -> list[dict]:
@@ -516,4 +602,4 @@ def review_ai_strategy_performance(strategy_id: str, days: int = 30) -> dict:
     }
     record_ai_strategy_event(strategy_id, "performance_review", result, target.get("strategy_version"))
     return result
-__all__ = ['KST', 'AI_STRATEGIES_FILE', '_default_strategy_profile', '_parse_strategy_profile', 'strategy_profile_hash', 'normalize_ai_strategy', 'load_ai_strategies', 'save_ai_strategies', 'record_ai_strategy_event', 'get_ai_strategy_events', 'get_ai_strategy_performance', 'review_ai_strategy_performance']
+__all__ = ['KST', 'AI_STRATEGIES_FILE', '_default_strategy_profile', '_parse_strategy_profile', 'strategy_profile_hash', 'normalize_ai_strategy', 'load_ai_strategies', 'save_ai_strategies', 'record_ai_strategy_event', 'halt_ai_strategy', 'get_ai_strategy_events', 'get_ai_strategy_performance', 'review_ai_strategy_performance']

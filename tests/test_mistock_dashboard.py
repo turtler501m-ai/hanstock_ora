@@ -662,7 +662,7 @@ class MistockDashboardTests(unittest.TestCase):
         self.assertEqual(result["preset"], "aggressive")
         self.assertEqual(len(selected), 1)
         self.assertEqual(selected[0]["id"], result["strategy"]["id"])
-        self.assertEqual(selected[0]["status"], "approved")
+        self.assertEqual(selected[0]["status"], "paper_passed")
         self.assertEqual(selected[0]["profile"]["market"], "NASDAQ")
         self.assertEqual(selected[0]["profile"]["universe"], "NASDAQ100")
         context = mistock.mistock_strategy_context()

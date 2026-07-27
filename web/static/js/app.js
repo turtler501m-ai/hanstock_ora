@@ -1611,6 +1611,7 @@ async function renderAiStrategies() {
             const builtIn = ['gpt_5_mini_default', 'rule_only_default'].includes(strategy.id);
             const gate = strategy.approval_gate || {};
             const operation = strategy.operation_status || {};
+            const autonomy = strategy.autonomy || {};
             const validationSummary = gate.label || strategyGateText(gate);
             const operationSummary = strategyOperationLabel(operation);
             const operationReason = operation.reason_label || operation.reason || operationSummary;
@@ -1625,6 +1626,7 @@ async function renderAiStrategies() {
                 <td>
                     ${pill(strategy.status_label || strategyStatusLabel(strategy.status), strategyStatusKind(strategy.status))}
                     ${pill(operationSummary, strategyOperationKind(operation))}
+                    ${pill(autonomy.enabled ? '자율 ON' : '자율 OFF', autonomy.enabled ? 'buy' : 'hold')}
                 </td>
                 <td>${escapeHtml(model)}</td>
                 <td>${pill(`${formatNumber(weight * 100, 0)}%`, weight > 0 ? 'buy' : 'hold')}</td>
@@ -1633,6 +1635,7 @@ async function renderAiStrategies() {
                         <button type="button" class="button-ghost btn-quick-apply-strategy compact-button" data-id="${escapeHtml(strategy.id)}">적용</button>
                         <button type="button" class="button-ghost btn-quick-validate-strategy compact-button" data-id="${escapeHtml(strategy.id)}">자동검증</button>
                         <button type="button" class="button-ghost btn-performance-strategy compact-button" data-id="${escapeHtml(strategy.id)}">성과</button>
+                        <button type="button" class="button-ghost btn-autonomy-run-strategy compact-button" data-id="${escapeHtml(strategy.id)}" ${autonomy.enabled && autonomy.applicable ? '' : 'disabled'}>자율 실행</button>
                         <button type="button" class="button-ghost btn-evolve-strategy compact-button" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3);" data-id="${escapeHtml(strategy.id)}">🌱 자가진화</button>
                     </div>
                     <details class="strategy-advanced-actions">
@@ -1742,6 +1745,16 @@ async function renderAiStrategies() {
         bindStrategyAction('.btn-performance-strategy', async (id) => {
             await renderStrategyAudit(id);
             setStatus('전략 성과와 이벤트를 불러왔습니다.', true);
+        });
+        bindStrategyAction('.btn-autonomy-run-strategy', async (id) => {
+            const result = await postJson(`/api/ai-strategies/${encodeURIComponent(id)}/autonomy/run`, {
+                market: 'KR'
+            });
+            const autonomy = result.autonomy || {};
+            const orderCount = (autonomy.managed_orders || []).length;
+            const approvalCount = (autonomy.approvals || []).length;
+            await renderStrategyAudit(id);
+            setStatus(`자율전략 실행 완료 · 관리주문 ${orderCount}건 · 승인대기 ${approvalCount}건`, Boolean(result.ok));
         });
         bindStrategyAction('.btn-evolve-strategy', async (id) => {
             const result = await postJson(`/api/ai-strategies/${id}/evolve`, {});

@@ -95,6 +95,11 @@
       ]).then(function (res) {
         renderStrategies(res[0].data.strategies || [], res[1].data.policies || []);
       }).catch(err("#p-strategies"));
+    } else if (name === "autonomy") {
+      api("/api/ai-stock/autonomy-audit?market=" + m).then(function (env) {
+        showBanner(env);
+        renderAutonomyAudit(env.data);
+      }).catch(err("#p-autonomy"));
     } else if (name === "execution") {
       api("/api/ai-stock/timing-signals?market=" + m).then(function (env) {
         renderTiming(env.data.signals || []);
@@ -381,6 +386,85 @@
       table.appendChild(tr);
     });
     wrap.appendChild(table);
+    root.appendChild(wrap);
+  }
+
+  function renderAutonomyAudit(data) {
+    var root = $("#p-autonomy"); root.innerHTML = "";
+    var summary = data.summary || {};
+    var mode = summary.runtime_mode || {};
+    var statusClass = summary.overall_status === "complete" ? "implemented" : "partial";
+    var banner = el("div", "ai-autonomy-summary");
+    banner.appendChild(el("span", "autonomy-status " + statusClass, summary.judgement || "-"));
+    banner.appendChild(el("strong", null, summary.reason || "-"));
+    root.appendChild(banner);
+
+    var cards = el("div", "ai-audit-grid");
+    [
+      ["자율 런타임", mode.autonomy_enabled ? "ON" : "OFF"],
+      ["자율 환경", mode.autonomy_trading_env || "-"],
+      ["승인", mode.autonomy_require_approval ? "필수" : "자동"],
+      ["전역 DRY_RUN", mode.dry_run ? "true" : "false"],
+      ["전역 실거래", mode.enable_live_trading ? "ON" : "OFF"],
+      ["Live 하드스톱", mode.live_hard_stop_adapter || "-"]
+    ].forEach(function (item) {
+      var card = el("div", "ai-audit-card");
+      card.appendChild(el("span", null, item[0]));
+      card.appendChild(el("strong", null, String(item[1])));
+      cards.appendChild(card);
+    });
+    root.appendChild(cards);
+
+    var blockers = summary.blockers || [];
+    if (blockers.length) {
+      var block = el("div", "ai-risk-panel");
+      block.appendChild(el("strong", null, "완료 판단 차단"));
+      block.appendChild(el("span", null, blockers.join(" · ")));
+      root.appendChild(block);
+    }
+
+    var table = el("table", "ai-table");
+    var head = el("tr");
+    ["K01 영역", "상태", "구현 근거", "남은 갭"].forEach(function (h) {
+      head.appendChild(el("th", null, h));
+    });
+    table.appendChild(head);
+    (data.coverage || []).forEach(function (item) {
+      var tr = el("tr");
+      tr.appendChild(el("td", null, item.area || item.title || "-"));
+      var st = el("td");
+      st.appendChild(el("span", "autonomy-status " + (item.status || "partial"), statusLabel(item.status)));
+      tr.appendChild(st);
+      tr.appendChild(el("td", null, item.evidence || "-"));
+      tr.appendChild(el("td", null, item.gap || "-"));
+      table.appendChild(tr);
+    });
+    root.appendChild(table);
+
+    renderAuditCounts(root, data.status_counts || {});
+    var details = el("details");
+    details.appendChild(el("summary", null, "최근 자율전략 원본 레코드"));
+    var pre = el("pre", "ai-json");
+    pre.textContent = JSON.stringify(data.records || {}, null, 2);
+    details.appendChild(pre);
+    root.appendChild(details);
+  }
+
+  function statusLabel(status) {
+    return { implemented: "구현", partial: "부분", blocked: "차단" }[status] || (status || "-");
+  }
+
+  function renderAuditCounts(root, counts) {
+    var wrap = el("div", "ai-run-panel");
+    wrap.appendChild(el("h3", null, "저장소 현황"));
+    var grid = el("div", "ai-audit-grid");
+    Object.keys(counts).forEach(function (name) {
+      var card = el("div", "ai-audit-card");
+      card.appendChild(el("span", null, name));
+      card.appendChild(el("strong", null, JSON.stringify(counts[name])));
+      grid.appendChild(card);
+    });
+    wrap.appendChild(grid);
     root.appendChild(wrap);
   }
 

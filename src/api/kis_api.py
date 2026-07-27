@@ -327,6 +327,141 @@ class KIStockAPI:
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
     )
+    def cancel_order(
+        self,
+        order_no: str,
+        *,
+        qty: int = 0,
+        order_division: str = "00",
+        original_order_branch: str = "",
+        exchange_id: str = "KRX",
+        cancel_all: bool = True,
+    ) -> dict:
+        """Cancel a domestic cash order in the configured demo/real account."""
+        require_online_access("KIS order cancellation")
+        real_orders_enabled = (
+            not config.dry_run
+            and config.trading_env == "real"
+            and config.enable_live_trading
+        )
+        if config.dry_run or not (
+            config.trading_env == "demo" or real_orders_enabled
+        ):
+            return {"rt_cd": "0", "msg1": "DRY_RUN"}
+        order_no = str(order_no or "").strip()
+        if not order_no:
+            raise ValueError("order_no is required")
+        body = {
+            "CANO": config.kistock_account[:8],
+            "ACNT_PRDT_CD": (
+                config.kistock_account[8:]
+                if len(config.kistock_account) > 8
+                else "01"
+            ),
+            "KRX_FWDG_ORD_ORGNO": str(original_order_branch or ""),
+            "ORGN_ODNO": order_no,
+            "ORD_DVSN": str(order_division or "00"),
+            "RVSE_CNCL_DVSN_CD": "02",
+            "ORD_QTY": str(max(0, int(qty))),
+            "ORD_UNPR": "0",
+            "QTY_ALL_ORD_YN": "Y" if cancel_all else "N",
+            "EXCG_ID_DVSN_CD": str(exchange_id or "KRX"),
+        }
+        tr_id = "VTTC0803U" if config.trading_env == "demo" else "TTTC0803U"
+        try:
+            _kis_throttle()
+            headers = self._headers(tr_id)
+            hashkey = self._hashkey(body)
+            if hashkey:
+                headers["hashkey"] = hashkey
+            response = HTTP.post(
+                f"{self.base_url}/uapi/domestic-stock/v1/trading/order-rvsecncl",
+                headers=headers,
+                json=body,
+                timeout=15,
+            )
+            data = self._response_json(response, "Order cancellation")
+            self._record_result(data)
+            return data
+        except Exception:
+            self._fail()
+            raise
+
+    def get_order_snapshot(
+        self,
+        order_no: str,
+        *,
+        order_date: str | None = None,
+    ) -> dict:
+        """Return one normalized domestic order snapshot for reconciliation."""
+        order_no = str(order_no or "").strip()
+        if not order_no:
+            raise ValueError("order_no is required")
+        day = str(order_date or datetime.now().strftime("%Y%m%d")).replace("-", "")
+        rows = self.get_trade_history(day, day)
+        row = next(
+            (
+                item
+                for item in rows
+                if str(item.get("odno") or item.get("ODNO") or "").strip()
+                == order_no
+            ),
+            None,
+        )
+        if row is None:
+            return {
+                "status": "unknown",
+                "outcome_unknown": True,
+                "broker_order_id": order_no,
+                "message": "KIS order was not found in the requested history window",
+            }
+        requested = _row_int(row, "ord_qty", "ORD_QTY")
+        filled = _row_int(
+            row, "tot_ccld_qty", "TOT_CCLD_QTY", "ccld_qty", "CCLD_QTY"
+        )
+        remaining_keys = ("rmn_qty", "RMN_QTY", "ord_psbl_qty")
+        has_remaining = any(row.get(key) not in (None, "") for key in remaining_keys)
+        remaining = _row_int(row, *remaining_keys)
+        average = _row_float(
+            row, "avg_prvs", "AVG_PRVS", "avg_ccld_unpr", "AVG_CCLD_UNPR"
+        )
+        canceled = str(
+            row.get("cncl_yn")
+            or row.get("CNCL_YN")
+            or row.get("rvse_cncl_dvsn_name")
+            or ""
+        ).strip().upper()
+        rejected = str(
+            row.get("rjct_qty") or row.get("RJCT_QTY") or "0"
+        ).strip()
+        if filled > 0 and requested > 0 and filled >= requested:
+            status = "filled"
+        elif canceled in {"Y", "취소"} or (
+            has_remaining and remaining == 0 and filled < requested
+        ):
+            status = "canceled"
+        elif rejected not in {"", "0"} and filled == 0:
+            status = "rejected"
+        elif filled > 0:
+            status = "partially_filled"
+        else:
+            status = "submitted"
+        return {
+            "status": status,
+            "broker_order_id": order_no,
+            "cumulative_filled_qty": filled,
+            "average_fill_price": average,
+            "requested_qty": requested,
+            "remaining_qty": remaining,
+            "payload": dict(row),
+            "message": str(row.get("ord_dvsn_name") or status),
+        }
+
+    @retry(
+        retry=retry_if_not_exception_type(NON_RETRYABLE_KIS_ERRORS),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+    )
     def get_trade_history(self, start_date: str, end_date: str) -> list:
         try:
             _kis_throttle()
@@ -391,6 +526,7 @@ class KIStockAPI:
             self._fail()
             raise
 
+
     @retry(
         retry=retry_if_not_exception_type(NON_RETRYABLE_KIS_ERRORS),
         stop=stop_after_attempt(3),
@@ -431,3 +567,23 @@ class KIStockAPI:
         except Exception:
             self._fail()
             raise
+
+
+def _row_int(row: dict, *keys: str) -> int:
+    for key in keys:
+        if row.get(key) not in (None, ""):
+            try:
+                return max(0, int(float(str(row[key]).replace(",", ""))))
+            except (TypeError, ValueError):
+                continue
+    return 0
+
+
+def _row_float(row: dict, *keys: str) -> float:
+    for key in keys:
+        if row.get(key) not in (None, ""):
+            try:
+                return max(0.0, float(str(row[key]).replace(",", "")))
+            except (TypeError, ValueError):
+                continue
+    return 0.0

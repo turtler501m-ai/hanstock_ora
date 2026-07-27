@@ -488,8 +488,15 @@ def _mistock_easy_strategy_preset(preset: str) -> dict:
         "ai_weight": item["weight"],
         "risk": {
             "max_risk_per_trade_pct": item["risk_pct"],
+            "max_total_open_risk_pct": 2.0,
+            "max_sector_exposure_pct": 20.0,
+            "max_liquidity_participation_pct": 0.5,
+            "max_strategy_exposure_pct": 30.0,
+            "max_data_age_seconds": 60,
+            "min_cash_reserve_pct": 20.0,
             "paper_trading_required_days": 0,
         },
+        "market_regime_filter": ["neutral", "bull", "low_volatility"],
         "backtest": {
             "commission_bps": 3,
             "slippage_bps": 5,
@@ -532,7 +539,7 @@ def mistock_apply_ai_strategy_preset(preset: str):
             strategy_version, profile_hash, last_verified_at, last_backtested_at, last_used_at,
             last_validation_result
         )
-        VALUES (?, ?, 'none', 'none', ?, ?, 1, 'approved', ?, 1, ?, ?, ?, ?, ?)
+        VALUES (?, ?, 'none', 'none', ?, ?, 1, 'paper_passed', ?, 1, ?, ?, ?, ?, ?)
         """,
         (
             strategy_id,

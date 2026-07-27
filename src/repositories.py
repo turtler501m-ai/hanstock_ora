@@ -25,7 +25,7 @@ class ApprovalRecord:
     name: str
     action: str
     qty: int
-    price: int
+    price: float
     reason: str
     source: str
     status: str
@@ -34,6 +34,10 @@ class ApprovalRecord:
     strategy_version: int | None = None
     profile_hash: str = ""
     source_candidate_id: int | None = None
+    managed_order_id: int | None = None
+    decision_id: int | None = None
+    position_id: int | None = None
+    client_order_key: str = ""
 
 
 def _approval_record_from_row(row: sqlite3.Row) -> ApprovalRecord:
@@ -45,7 +49,7 @@ def _approval_record_from_row(row: sqlite3.Row) -> ApprovalRecord:
         name=str(row["name"]),
         action=str(row["action"]),
         qty=int(row["qty"]),
-        price=int(row["price"]),
+        price=float(row["price"]),
         reason=str(row["reason"] or ""),
         source=str(row["source"] or ""),
         status=str(row["status"]),
@@ -54,6 +58,10 @@ def _approval_record_from_row(row: sqlite3.Row) -> ApprovalRecord:
         strategy_version=int(row["strategy_version"]) if "strategy_version" in row.keys() and row["strategy_version"] is not None else None,
         profile_hash=str(row["profile_hash"] or "") if "profile_hash" in row.keys() else "",
         source_candidate_id=int(row["source_candidate_id"]) if "source_candidate_id" in row.keys() and row["source_candidate_id"] is not None else None,
+        managed_order_id=int(row["managed_order_id"]) if "managed_order_id" in row.keys() and row["managed_order_id"] is not None else None,
+        decision_id=int(row["decision_id"]) if "decision_id" in row.keys() and row["decision_id"] is not None else None,
+        position_id=int(row["position_id"]) if "position_id" in row.keys() and row["position_id"] is not None else None,
+        client_order_key=str(row["client_order_key"] or "") if "client_order_key" in row.keys() else "",
     )
 
 
@@ -87,6 +95,24 @@ class ApprovalRepository:
                 _ensure_column(conn, "approvals", "strategy_version", "INTEGER")
                 _ensure_column(conn, "approvals", "profile_hash", "TEXT")
                 _ensure_column(conn, "approvals", "source_candidate_id", "INTEGER")
+                _ensure_column(conn, "approvals", "managed_order_id", "INTEGER")
+                _ensure_column(conn, "approvals", "decision_id", "INTEGER")
+                _ensure_column(conn, "approvals", "position_id", "INTEGER")
+                _ensure_column(conn, "approvals", "client_order_key", "TEXT")
+                conn.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_approvals_managed_order_unique
+                    ON approvals(managed_order_id)
+                    WHERE managed_order_id IS NOT NULL
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_approvals_client_order_key_unique
+                    ON approvals(client_order_key)
+                    WHERE client_order_key IS NOT NULL AND client_order_key <> ''
+                    """
+                )
         finally:
             _close_connection(conn)
 
@@ -99,7 +125,7 @@ class ApprovalRepository:
         name: str,
         action: str,
         qty: int,
-        price: int,
+        price: float,
         reason: str,
         source: str,
         status: str = "pending",
@@ -108,18 +134,24 @@ class ApprovalRepository:
         strategy_version: int | None = None,
         profile_hash: str = "",
         source_candidate_id: int | None = None,
+        managed_order_id: int | None = None,
+        decision_id: int | None = None,
+        position_id: int | None = None,
+        client_order_key: str = "",
     ) -> int:
         conn = self._connect_fn()
         try:
             with conn:
                 cursor = conn.execute(
                     """
-                    INSERT INTO approvals
+                    INSERT OR IGNORE INTO approvals
                     (
                         created_at, updated_at, symbol, name, action, qty, price, reason, source,
-                        status, response_msg, strategy_id, strategy_version, profile_hash, source_candidate_id
+                        status, response_msg, strategy_id, strategy_version, profile_hash,
+                        source_candidate_id, managed_order_id, decision_id, position_id,
+                        client_order_key
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         created_at,
@@ -137,9 +169,29 @@ class ApprovalRepository:
                         strategy_version,
                         profile_hash,
                         source_candidate_id,
+                        managed_order_id,
+                        decision_id,
+                        position_id,
+                        client_order_key,
                     ),
                 )
-                return int(cursor.lastrowid)
+                if int(cursor.rowcount or 0) == 1:
+                    return int(cursor.lastrowid)
+                if managed_order_id is not None:
+                    existing = conn.execute(
+                        "SELECT id FROM approvals WHERE managed_order_id=?",
+                        (int(managed_order_id),),
+                    ).fetchone()
+                elif client_order_key:
+                    existing = conn.execute(
+                        "SELECT id FROM approvals WHERE client_order_key=?",
+                        (str(client_order_key),),
+                    ).fetchone()
+                else:
+                    existing = None
+                if existing is None:
+                    raise sqlite3.IntegrityError("approval insert was ignored")
+                return int(existing[0])
         finally:
             _close_connection(conn)
 
@@ -189,5 +241,29 @@ class ApprovalRepository:
                     (status, response_msg, updated_at, approval_id),
                 )
                 return cursor.rowcount > 0
+        finally:
+            _close_connection(conn)
+
+    def transition_approval_status(
+        self,
+        approval_id: int,
+        *,
+        expected_status: str,
+        status: str,
+        response_msg: str,
+        updated_at: str,
+    ) -> bool:
+        conn = self._connect_fn()
+        try:
+            with conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE approvals
+                    SET status=?, response_msg=?, updated_at=?
+                    WHERE id=? AND status=?
+                    """,
+                    (status, response_msg, updated_at, approval_id, expected_status),
+                )
+                return cursor.rowcount == 1
         finally:
             _close_connection(conn)

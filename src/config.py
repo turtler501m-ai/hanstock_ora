@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     openai_timeout_seconds: float = 20.0
     ai_candidate_limit: int = 5
 
+    # Autonomous strategy platform is a separate, explicit safety boundary.
+    autonomy_enabled: bool = False
+    autonomy_trading_env: str = "demo"
+    autonomy_require_approval: bool = True
+    autonomy_enable_live_trading: bool = False
+    autonomy_live_opt_in: bool = False
+
     model_config = SettingsConfigDict(
         env_file=None if _TESTING else ".env",
         env_file_encoding="utf-8",

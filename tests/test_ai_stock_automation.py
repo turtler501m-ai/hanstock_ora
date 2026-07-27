@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """AI스톡 자동화 테스트 (§5.12·§6.6): 정책 게이트·스케줄 진입점."""
 import unittest
+from unittest.mock import patch
 
 from src.db.repository import init_db, connect_db
 from src.db import ai_stock_repository as repo
@@ -180,6 +181,48 @@ class AutomationTests(unittest.TestCase):
         result = run_strategy(market="KR", strategy_id="ai_stock_default_v1")
         self.assertEqual(result["automation"]["registered"], 0)
 
+    def test_run_strategy_routes_enabled_autonomy_to_managed_approvals(self):
+        autonomy_result = {
+            "enabled": True,
+            "cycle_key": "cycle-1",
+            "managed_orders": [{"id": 11}],
+            "approvals": [{"order_id": 11, "approval_id": 22}],
+        }
+        with patch(
+            "src.ai_stock.discovery_service.run_scan",
+            return_value={"scan_id": 999, "summary": {"status": "completed"}},
+        ), patch.object(
+            automation_service.repo,
+            "get_policy",
+            return_value={"enabled": 1, "automation_level": 6},
+        ), patch.object(
+            automation_service.repo, "log_execution_run"
+        ) as log_run, patch(
+            "src.config.config.autonomy_enabled", True
+        ), patch(
+            "src.strategy.autonomy.ai_stock_integration.run_ai_stock_autonomy_cycle",
+            return_value=autonomy_result,
+        ) as autonomy_run:
+            result = run_strategy(
+                market="KR",
+                strategy_id="ai_stock_default_v1",
+                run_type="scheduled",
+            )
+
+        self.assertEqual(result["autonomy"], autonomy_result)
+        self.assertEqual(result["automation"]["planned"], 1)
+        self.assertEqual(result["automation"]["approved"], 1)
+        autonomy_run.assert_called_once_with(
+            market="KR",
+            strategy_id="ai_stock_default_v1",
+            scan_id=999,
+            run_type="scheduled",
+        )
+        self.assertEqual(
+            log_run.call_args.args[0]["policy_snapshot"]["execution_path"],
+            "autonomy",
+        )
+
     def test_level5_updates_execution_plan_approval_fields(self):
         from src.ai_stock import discovery_service, watchlist_service, execution_plan_service
 
@@ -224,7 +267,7 @@ class AutomationTests(unittest.TestCase):
             automation_service._queue_approval = orig_queue
             repo.update_execution_plan_approval = orig_update
 
-    def test_level6_counts_executed_only_when_order_path_succeeds(self):
+    def test_level6_legacy_path_cannot_execute_even_when_hook_claims_success(self):
         from src.ai_stock import discovery_service, watchlist_service, execution_plan_service
 
         orig_guard = automation_service.live_trading_allowed
@@ -259,10 +302,14 @@ class AutomationTests(unittest.TestCase):
                 "max_risk_score": 100,
             })
             result = run_strategy(market="KR", strategy_id="ai_stock_default_v1")
-            self.assertGreaterEqual(result["automation"].get("executed", 0), 1)
-            self.assertTrue(calls)
+            self.assertEqual(result["automation"].get("executed", 0), 0)
+            self.assertEqual(calls, [])
             self.assertEqual(status_updates[0][0][0], 7)
-            self.assertEqual(status_updates[0][1]["status"], "submitted")
+            self.assertEqual(status_updates[0][1]["status"], "blocked")
+            self.assertTrue(any(
+                "legacy_auto_execute_disabled_use_autonomy_runtime" in item
+                for item in result["automation"]["blocked"]
+            ))
         finally:
             automation_service.live_trading_allowed = orig_guard
             automation_service._execute_order = orig_execute

@@ -45,6 +45,9 @@ class DBWrapper:
     def commit(self):
         self.conn.commit()
 
+    def rollback(self):
+        self.conn.rollback()
+
     def close(self):
         self.conn.close()
         
@@ -251,6 +254,24 @@ def init_db() -> None:
         _ensure_column(conn, "approvals", "strategy_version", "INTEGER")
         _ensure_column(conn, "approvals", "profile_hash", "TEXT")
         _ensure_column(conn, "approvals", "source_candidate_id", "INTEGER")
+        _ensure_column(conn, "approvals", "managed_order_id", "INTEGER")
+        _ensure_column(conn, "approvals", "decision_id", "INTEGER")
+        _ensure_column(conn, "approvals", "position_id", "INTEGER")
+        _ensure_column(conn, "approvals", "client_order_key", "TEXT")
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_approvals_managed_order_unique
+            ON approvals(managed_order_id)
+            WHERE managed_order_id IS NOT NULL
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_approvals_client_order_key_unique
+            ON approvals(client_order_key)
+            WHERE client_order_key IS NOT NULL AND client_order_key <> ''
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS scheduler_results (
@@ -349,7 +370,10 @@ def init_db() -> None:
             init_ai_stock_tables(conn)
             conn.commit()
         except (sqlite3.Error, OSError, ValueError, TypeError, ImportError) as ai_err:
-            logger.warning(f"Failed to init ai_stock tables: {ai_err}")
+            conn.rollback()
+            raise RuntimeError(
+                f"Failed to initialize required autonomous-strategy tables: {ai_err}"
+            ) from ai_err
 
 
 def _ensure_column(conn: DBWrapper, table: str, column: str, column_type: str) -> None:

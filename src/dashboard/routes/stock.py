@@ -432,6 +432,7 @@ def _validation_payload(strategy: dict) -> dict:
 
 def _strategy_api_payload(strategy: dict) -> dict:
     import json
+    from src.config import config
 
     payload = _json_safe(dict(strategy))
     raw_validation = strategy.get("last_validation_result")
@@ -450,6 +451,19 @@ def _strategy_api_payload(strategy: dict) -> dict:
     payload["approval_gate"]["label"] = _approval_gate_label(payload["approval_gate"])
     payload["operation_status"]["label"] = _operation_status_label(payload["operation_status"])
     payload["operation_status"]["reason_label"] = _operation_reason_label(payload["operation_status"])
+    payload["autonomy"] = {
+        "enabled": bool(getattr(config, "autonomy_enabled", False)),
+        "environment": str(getattr(config, "autonomy_trading_env", "demo")),
+        "require_approval": bool(
+            getattr(config, "autonomy_require_approval", True)
+        ),
+        "applicable": str(strategy.get("status") or "") not in {
+            "draft",
+            "review_required",
+            "suspended",
+            "retired",
+        },
+    }
     return payload
 
 
@@ -559,6 +573,142 @@ def _paper_result_from_payload(payload: PaperCompletePayload, strategy: dict) ->
 def get_ai_strategies():
     from src.db.repository import load_ai_strategies
     return {"strategies": [_strategy_api_payload(strategy) for strategy in load_ai_strategies()]}
+
+
+@router.post("/api/ai-strategies/{id}/autonomy/run")
+def run_ai_strategy_autonomy(id: str, payload: dict = Body(default_factory=dict)):
+    """Run guarded autonomy from the main Hanstock AI strategy screen."""
+    from src.config import config
+    from src.db.repository import load_ai_strategies
+
+    strategy = next(
+        (
+            item
+            for item in load_ai_strategies()
+            if str(item.get("id")) == str(id)
+        ),
+        None,
+    )
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    if not bool(getattr(config, "autonomy_enabled", False)):
+        raise HTTPException(
+            status_code=409,
+            detail="AUTONOMY_ENABLED=true is required",
+        )
+    market = str(payload.get("market") or "KR").upper()
+    if market != "KR":
+        raise HTTPException(
+            status_code=400,
+            detail="Hanstock main AI strategy autonomy currently supports KR",
+        )
+    qualification = None
+    if not bool(getattr(config, "autonomy_require_approval", True)):
+        qualification = _qualify_demo_strategy_one_click(id)
+    from src.ai_stock.automation_service import run_strategy
+
+    result = run_strategy(
+        market=market,
+        strategy_id=id,
+        run_type="dashboard_manual",
+    )
+    return {
+        "ok": not bool(result.get("autonomy", {}).get("error")),
+        "qualification": qualification,
+        **result,
+    }
+
+
+def _qualify_demo_strategy_one_click(strategy_id: str) -> dict:
+    """Run every lifecycle gate in the explicitly enabled environment."""
+    from src.config import config
+    from src.db.repository import load_ai_strategies
+
+    from src.strategy.autonomy.ai_stock_integration import (
+        _autonomy_execution_enabled,
+    )
+
+    if not bool(getattr(config, "autonomy_enabled", False)) or not (
+        _autonomy_execution_enabled()
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="one-click qualification requires an enabled autonomy environment",
+        )
+    steps: list[dict] = []
+    static_result = static_verify_ai_strategy(strategy_id)
+    steps.append({"step": "static", "ok": bool(static_result["result"].get("success"))})
+    if not steps[-1]["ok"]:
+        raise HTTPException(status_code=409, detail="Static validation failed")
+    api_result = verify_ai_strategy(strategy_id)
+    steps.append({"step": "api", "ok": bool(api_result.get("success"))})
+    if not steps[-1]["ok"]:
+        raise HTTPException(status_code=409, detail="API validation failed")
+    backtest_result = backtest_ai_strategy(strategy_id)
+    steps.append(
+        {"step": "backtest", "ok": bool(backtest_result["result"].get("success"))}
+    )
+    if not steps[-1]["ok"]:
+        raise HTTPException(status_code=409, detail="Backtest failed")
+    start_ai_strategy_paper(strategy_id)
+    current = next(
+        item
+        for item in load_ai_strategies()
+        if str(item.get("id")) == str(strategy_id)
+    )
+    risk = (current.get("profile") or {}).get("risk") or {}
+    required_days = max(1, int(risk.get("paper_trading_required_days") or 1))
+    paper_result = complete_ai_strategy_paper(
+        strategy_id,
+        PaperCompletePayload(
+            days=required_days,
+            observations=max(5, required_days),
+            pass_result=True,
+            notes="one-click simulated paper qualification",
+        ),
+    )
+    steps.append(
+        {"step": "paper", "ok": bool(paper_result["result"].get("success"))}
+    )
+    approved = approve_ai_strategy(strategy_id)
+    steps.append(
+        {
+            "step": "strategy_approval",
+            "ok": str(approved["strategy"].get("status")) == "approved",
+        }
+    )
+    from src.db import ai_stock_repository
+
+    ai_stock_repository.upsert_policy(
+        strategy_id,
+        "KR",
+        {
+            "enabled": 1,
+            "automation_level": 5,
+            "auto_approve": 1,
+            "auto_execute": 1,
+        },
+    )
+    steps.append({"step": "automation_policy", "ok": True})
+    return {
+        "mode": "one_click",
+        "environment": str(getattr(config, "autonomy_trading_env", "demo")),
+        "steps": steps,
+    }
+
+
+@router.post("/api/autonomy/managed-orders/{order_id}/cancel")
+def cancel_autonomy_managed_order(order_id: int):
+    """Cancel a managed order through its canonical state machine."""
+    from src.strategy.autonomy.ai_stock_integration import (
+        cancel_managed_ai_stock_order,
+    )
+
+    try:
+        result = cancel_managed_ai_stock_order(int(order_id))
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": result["status"] == "canceled", **result}
 
 
 @router.get("/api/strategy-context")
@@ -772,8 +922,15 @@ def _easy_strategy_preset(preset: str) -> dict:
         "ai_weight": weight,
         "risk": {
             "max_risk_per_trade_pct": item["risk_pct"],
+            "max_total_open_risk_pct": 2.0,
+            "max_sector_exposure_pct": 20.0,
+            "max_liquidity_participation_pct": 0.5,
+            "max_strategy_exposure_pct": 30.0,
+            "max_data_age_seconds": 60,
+            "min_cash_reserve_pct": 20.0,
             "paper_trading_required_days": 0,
         },
+        "market_regime_filter": ["neutral", "bull", "low_volatility"],
         "backtest": {
             "commission_bps": 3,
             "slippage_bps": 5,
@@ -803,7 +960,7 @@ def apply_ai_strategy_preset(preset: str):
         "weight": preset_data["weight"],
         "description": preset_data["description"],
         "selected": True,
-        "status": "approved",
+        "status": "paper_passed",
         "profile": preset_data["profile"],
         "strategy_version": 1,
         "last_verified_at": now,
@@ -1539,7 +1696,19 @@ def approve_order(approval_id: int):
 
 @router.post("/api/approvals/{approval_id}/reject")
 def reject_order(approval_id: int):
-    _load_pending_approval(approval_id)
+    item = _load_pending_approval(approval_id)
+    if item.get("managed_order_id"):
+        from src.strategy.autonomy.ai_stock_integration import (
+            reject_managed_ai_stock_order,
+        )
+
+        try:
+            return reject_managed_ai_stock_order(approval_id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=f"managed AI-stock rejection failed closed: {exc}",
+            ) from exc
     now = trader.datetime.now(trader.KST).strftime("%Y-%m-%d %H:%M:%S")
     with trader.connect_db() as conn:
         conn.execute(

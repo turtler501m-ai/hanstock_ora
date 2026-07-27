@@ -19,7 +19,6 @@ def connect_db():
 def init_db() -> None:
     _root.init_db()
 
-from src.db.strategy_repository import _default_strategy_profile, strategy_profile_hash
 WATCHLIST_FILE = Path(".runtime/watchlist.json")
 CUSTOM_STRATEGY_PREFIXES = ("\uc0ac\uc6a9\uc790\uc804\ub7b5", "\U0001f50c", "\U0001f9e0", "\u2699", "\U0001f4c8", "\U0001f4ca", "\U0001f6e1")
 
@@ -464,6 +463,11 @@ def get_watchlist_extra_info(symbol: str) -> dict:
 
 
 def sync_custom_rules_to_db(conn) -> None:
+    from src.db.strategy_repository import (
+        _default_strategy_profile,
+        strategy_profile_hash,
+    )
+
     import importlib.util
     import inspect
     import sys

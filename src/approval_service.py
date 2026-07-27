@@ -25,13 +25,17 @@ class ApprovalCreateRequest:
     name: str
     action: str
     qty: int
-    price: int
+    price: float
     reason: str = ""
     source: str = ""
     strategy_id: str = ""
     strategy_version: int | None = None
     profile_hash: str = ""
     source_candidate_id: int | None = None
+    managed_order_id: int | None = None
+    decision_id: int | None = None
+    position_id: int | None = None
+    client_order_key: str = ""
 
 
 def _default_now() -> str:
@@ -68,6 +72,10 @@ class ApprovalService:
             strategy_version=request.strategy_version,
             profile_hash=request.profile_hash,
             source_candidate_id=request.source_candidate_id,
+            managed_order_id=request.managed_order_id,
+            decision_id=request.decision_id,
+            position_id=request.position_id,
+            client_order_key=request.client_order_key,
         )
 
     def queue_approval(
@@ -76,13 +84,17 @@ class ApprovalService:
         name: str,
         action: str,
         qty: int,
-        price: int,
+        price: float,
         reason: str,
         source: str = "scheduler",
         strategy_id: str = "",
         strategy_version: int | None = None,
         profile_hash: str = "",
         source_candidate_id: int | None = None,
+        managed_order_id: int | None = None,
+        decision_id: int | None = None,
+        position_id: int | None = None,
+        client_order_key: str = "",
     ) -> int:
         return self.create_approval(
             ApprovalCreateRequest(
@@ -97,6 +109,10 @@ class ApprovalService:
                 strategy_version=strategy_version,
                 profile_hash=profile_hash,
                 source_candidate_id=source_candidate_id,
+                managed_order_id=managed_order_id,
+                decision_id=decision_id,
+                position_id=position_id,
+                client_order_key=client_order_key,
             )
         )
 
@@ -137,9 +153,23 @@ class ApprovalService:
         *,
         response_msg: str = "Rejected by dashboard",
     ) -> ApprovalRecord:
-        self.get_pending_approval(approval_id)
-        return self.update_status(
+        return self.transition_pending(
             approval_id,
             status="rejected",
             response_msg=response_msg,
         )
+
+    def transition_pending(
+        self, approval_id: int, *, status: str, response_msg: str
+    ) -> ApprovalRecord:
+        self.get_pending_approval(approval_id)
+        changed = self._repository.transition_approval_status(
+            approval_id,
+            expected_status="pending",
+            status=status,
+            response_msg=response_msg,
+            updated_at=self._now_fn(),
+        )
+        if not changed:
+            raise ApprovalStatusError("approval status changed concurrently")
+        return self.get_approval(approval_id)
