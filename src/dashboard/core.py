@@ -3128,7 +3128,15 @@ def _history_fill_price(row: dict) -> int:
 
 
 def _history_fill_qty(row: dict) -> int:
-    return _history_int(row, "tot_ccld_qty", "ccld_qty", "cnqn", "ord_qty")
+    for key in ("tot_ccld_qty", "ccld_qty", "cnqn"):
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            return _to_int(value)
+    return _history_int(row, "ord_qty")
+
+
+def _history_remaining_qty(row: dict) -> int:
+    return _history_int(row, "rmn_qty", "RMN_QTY", "ord_psbl_qty")
 
 
 def _history_text(row: dict, *keys: str) -> str:
@@ -3343,8 +3351,9 @@ def _order_history_window(days: int = MIN_ORDER_HISTORY_SYNC_DAYS) -> tuple[str,
     return start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
 
 
-def _load_trackable_order_trades() -> list[dict]:
+def _load_trackable_order_trades(days: int = MIN_ORDER_HISTORY_SYNC_DAYS) -> list[dict]:
     trader.init_db()
+    cutoff = (trader.datetime.now(trader.KST) - trader.timedelta(days=max(1, int(days)))).strftime("%Y-%m-%d")
     with trader.connect_db() as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
@@ -3353,15 +3362,17 @@ def _load_trackable_order_trades() -> list[dict]:
             FROM trades
             WHERE broker_order_id IS NOT NULL
               AND broker_order_id != ''
-              AND COALESCE(order_status, '') IN ('submitted', 'partial', 'open')
+              AND COALESCE(order_status, '') IN ('submitted', 'partial', 'open', 'filled')
+              AND substr(COALESCE(ts, ''), 1, 10) >= ?
             ORDER BY ts ASC
-            """
+            """,
+            (cutoff,),
         ).fetchall()
     return [dict(row) for row in rows]
 
 
 def _sync_order_status_from_history(api, *, days: int = MIN_ORDER_HISTORY_SYNC_DAYS) -> dict:
-    tracked = _load_trackable_order_trades()
+    tracked = _load_trackable_order_trades(days)
     if not tracked:
         return {"ok": True, "checked_count": 0, "updated_count": 0, "orders": []}
 
@@ -3389,9 +3400,10 @@ def _sync_order_status_from_history(api, *, days: int = MIN_ORDER_HISTORY_SYNC_D
         requested_qty = _to_int(trade.get("qty"))
         filled_qty = _history_fill_qty(row)
         filled_price = _history_fill_price(row)
-        if filled_qty <= 0:
+        remaining_qty = _history_remaining_qty(row)
+        if remaining_qty > 0 and filled_qty <= 0:
             order_status = "open"
-        elif requested_qty > 0 and filled_qty < requested_qty:
+        elif remaining_qty > 0 or (requested_qty > 0 and filled_qty < requested_qty):
             order_status = "partial"
         else:
             order_status = "filled"

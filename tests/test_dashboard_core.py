@@ -890,6 +890,152 @@ class DashboardCoreTests(unittest.TestCase):
             dashboard._get_api = original_get_api
             dashboard._get_balance_data = original_get_balance_data
 
+    def test_cancel_retry_cancels_open_sell_order_and_creates_pending_retry(self):
+        original_db_path = dashboard.trader.config.trade_db_path
+        original_get_api = dashboard._get_api
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                db_path = f"{tmpdir}/trades.db"
+                dashboard.trader.config.trade_db_path = db_path
+                dashboard.trader.init_db()
+                approval_id = dashboard._create_approval_row({
+                    "symbol": "005360",
+                    "name": "Monami",
+                    "action": "sell",
+                    "qty": 10,
+                    "price": 1721,
+                    "reason": "sell retry",
+                    "source": "trader",
+                })
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute("UPDATE approvals SET status = 'failed' WHERE id = ?", (approval_id,))
+                dashboard.trader.save_trade(
+                    "005360",
+                    "Monami",
+                    "sell",
+                    10,
+                    1721,
+                    "sell retry",
+                    False,
+                    True,
+                    broker_result={},
+                    order_status="failed",
+                    source_approval_id=approval_id,
+                )
+                dashboard.trader.save_trade(
+                    "005360",
+                    "Monami",
+                    "sell",
+                    10,
+                    1782,
+                    "old open sell",
+                    True,
+                    True,
+                    broker_order_id="0001",
+                    order_status="filled",
+                    filled_qty=0,
+                )
+
+                class FakeAPI:
+                    def __init__(self):
+                        self.canceled = []
+
+                    def get_trade_history(self, start_date, end_date):
+                        return [{
+                            "ord_dt": "20260727",
+                            "ord_tmd": "130203",
+                            "odno": "0001",
+                            "sll_buy_dvsn_cd": "01",
+                            "pdno": "005360",
+                            "ord_qty": "10",
+                            "ord_unpr": "1782",
+                            "tot_ccld_qty": "0",
+                            "avg_prvs": "0",
+                            "rmn_qty": "10",
+                            "cncl_yn": "N",
+                            "ord_gno_brno": "00950",
+                        }]
+
+                    def cancel_order(self, order_no, **kwargs):
+                        self.canceled.append((order_no, kwargs))
+                        return {"rt_cd": "0", "msg1": "cancel ok", "output": {"odno": order_no}}
+
+                fake_api = FakeAPI()
+                dashboard._get_api = lambda: fake_api
+
+                result = dashboard.cancel_blocking_sell_and_retry_approval(approval_id)
+
+                self.assertEqual(result["status"], "pending")
+                self.assertEqual(result["qty"], 10)
+                self.assertEqual(result["canceled_order_id"], "0001")
+                self.assertEqual(fake_api.canceled[0][0], "0001")
+                self.assertEqual(fake_api.canceled[0][1]["original_order_branch"], "00950")
+                with sqlite3.connect(db_path) as conn:
+                    conn.row_factory = sqlite3.Row
+                    canceled = conn.execute(
+                        "SELECT order_status FROM trades WHERE broker_order_id = '0001'",
+                    ).fetchone()
+                    retry = conn.execute(
+                        "SELECT source, status, action, qty, price FROM approvals WHERE id = ?",
+                        (result["id"],),
+                    ).fetchone()
+                self.assertEqual(canceled["order_status"], "canceled")
+                self.assertEqual(retry["source"], "dashboard_retry")
+                self.assertEqual(retry["status"], "pending")
+                self.assertEqual(retry["action"], "sell")
+                self.assertEqual(retry["price"], 0)
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+            dashboard._get_api = original_get_api
+
+    def test_order_status_sync_reopens_filled_trade_when_history_has_remaining_qty(self):
+        original_db_path = dashboard.trader.config.trade_db_path
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                db_path = f"{tmpdir}/trades.db"
+                dashboard.trader.config.trade_db_path = db_path
+                dashboard.trader.init_db()
+                dashboard.trader.save_trade(
+                    "005360",
+                    "Monami",
+                    "sell",
+                    10,
+                    1782,
+                    "sell",
+                    True,
+                    True,
+                    broker_order_id="0001",
+                    order_status="filled",
+                    filled_qty=10,
+                )
+
+                class FakeAPI:
+                    def get_trade_history(self, start_date, end_date):
+                        return [{
+                            "ord_dt": "20260727",
+                            "ord_tmd": "130203",
+                            "odno": "0001",
+                            "sll_buy_dvsn_cd": "01",
+                            "pdno": "005360",
+                            "ord_qty": "10",
+                            "ord_unpr": "1782",
+                            "tot_ccld_qty": "0",
+                            "avg_prvs": "0",
+                            "rmn_qty": "10",
+                            "cncl_yn": "N",
+                        }]
+
+                result = dashboard._sync_order_status_from_history(FakeAPI(), days=3)
+
+                self.assertEqual(result["updated_count"], 1)
+                with sqlite3.connect(db_path) as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute("SELECT order_status, filled_qty FROM trades").fetchone()
+                self.assertEqual(row["order_status"], "open")
+                self.assertEqual(row["filled_qty"], 0)
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+
     def test_order_status_sync_marks_submitted_demo_order_filled(self):
         original_db_path = dashboard.trader.config.trade_db_path
         original_dry_run = dashboard.trader.DRY_RUN

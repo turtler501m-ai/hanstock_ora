@@ -2559,7 +2559,8 @@ async function renderApprovals() {
             const estimatedCost = Number(row.qty || 0) * Number(row.price || 0);
             const autoApprovalInProgress = Boolean(row.auto_approval_in_progress);
             const retryButton = row.retry_eligible
-                ? `<button type="button" class="retry-approval" data-id="${row.id}">재처리</button>`
+                ? `<button type="button" class="retry-approval" data-id="${row.id}">재처리</button>
+                   <button type="button" class="button-danger cancel-retry-approval" data-id="${row.id}">취소후재처리</button>`
                 : '';
             const responseText = escapeHtml(row.response_msg || row.order_status || '');
             const controls = status === 'pending' && autoApprovalInProgress
@@ -2603,6 +2604,9 @@ async function renderApprovals() {
         });
         document.querySelectorAll('.retry-approval').forEach((button) => {
             button.addEventListener('click', () => executeApprovalAction(button, 'retry'));
+        });
+        document.querySelectorAll('.cancel-retry-approval').forEach((button) => {
+            button.addEventListener('click', () => executeApprovalAction(button, 'cancel-retry'));
         });
     } catch (err) {
         setTableMessage('#table-approvals tbody', 9, err.message);

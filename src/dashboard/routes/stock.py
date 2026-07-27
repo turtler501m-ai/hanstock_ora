@@ -1602,6 +1602,48 @@ def _current_sellable_qty(symbol: str) -> int:
     return 0
 
 
+def _open_sell_order_from_history(api, symbol: str) -> dict | None:
+    start_date, end_date = _order_history_window(MIN_ORDER_HISTORY_SYNC_DAYS)
+    try:
+        history = api.get_trade_history(start_date, end_date)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"KIS order history request failed: {exc}") from exc
+    candidates = []
+    for row in history:
+        if _history_symbol(row) != str(symbol).strip():
+            continue
+        if _history_action(row) != "sell":
+            continue
+        remaining_qty = _history_remaining_qty(row)
+        if remaining_qty <= 0:
+            continue
+        canceled = _history_text(row, "cncl_yn", "CNCL_YN", "canceled", "cancel_yn").upper()
+        if canceled in {"Y", "취소"}:
+            continue
+        candidates.append(row)
+    if not candidates:
+        return None
+    candidates.sort(key=lambda row: (_history_timestamp(row), _broker_order_id_from_history(row)), reverse=True)
+    return candidates[0]
+
+
+def _create_retry_approval_from_item(item: dict, *, retry_qty: int, source_approval_id: int) -> int:
+    symbol = str(item.get("symbol") or "").strip()
+    return _create_approval_row({
+        "symbol": symbol,
+        "name": item.get("name") or symbol,
+        "action": "sell",
+        "qty": retry_qty,
+        "price": 0,
+        "reason": f"retry approval #{source_approval_id}: {item.get('reason') or ''}".strip(),
+        "source": "dashboard_retry",
+        "strategy_id": item.get("strategy_id"),
+        "strategy_version": item.get("strategy_version"),
+        "profile_hash": item.get("profile_hash"),
+        "source_candidate_id": item.get("source_candidate_id"),
+    })
+
+
 @router.post("/api/approvals/{approval_id}/retry")
 def retry_approval_order(approval_id: int):
     item = _approval_by_id(approval_id)
@@ -1626,19 +1668,7 @@ def retry_approval_order(approval_id: int):
     if retry_qty <= 0:
         raise HTTPException(status_code=409, detail="no remaining quantity to retry")
 
-    retry_id = _create_approval_row({
-        "symbol": symbol,
-        "name": item.get("name") or symbol,
-        "action": "sell",
-        "qty": retry_qty,
-        "price": 0,
-        "reason": f"retry approval #{approval_id}: {item.get('reason') or ''}".strip(),
-        "source": "dashboard_retry",
-        "strategy_id": item.get("strategy_id"),
-        "strategy_version": item.get("strategy_version"),
-        "profile_hash": item.get("profile_hash"),
-        "source_candidate_id": item.get("source_candidate_id"),
-    })
+    retry_id = _create_retry_approval_from_item(item, retry_qty=retry_qty, source_approval_id=approval_id)
     return {
         "id": retry_id,
         "status": "pending",
@@ -1646,6 +1676,65 @@ def retry_approval_order(approval_id: int):
         "symbol": symbol,
         "qty": retry_qty,
         "sellable_qty": sellable_qty,
+    }
+
+
+@router.post("/api/approvals/{approval_id}/cancel-retry")
+def cancel_blocking_sell_and_retry_approval(approval_id: int):
+    item = _approval_by_id(approval_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="approval not found")
+    trade = _latest_trade_by_approval_id(approval_id)
+    if not _approval_retry_eligible(item, trade):
+        raise HTTPException(status_code=409, detail="approval is not retryable")
+
+    symbol = str(item.get("symbol") or "").strip()
+    api = _get_api()
+    blocking_order = _open_sell_order_from_history(api, symbol)
+    if not blocking_order:
+        return retry_approval_order(approval_id)
+
+    order_no = _broker_order_id_from_history(blocking_order)
+    remaining_qty = _history_remaining_qty(blocking_order)
+    branch = _history_text(blocking_order, "ord_gno_brno", "ORD_GNO_BRNO")
+    if not order_no or remaining_qty <= 0:
+        raise HTTPException(status_code=409, detail="blocking sell order was not identifiable")
+
+    try:
+        cancel_result = api.cancel_order(
+            order_no,
+            qty=remaining_qty,
+            original_order_branch=branch,
+            cancel_all=True,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"KIS order cancellation failed: {exc}") from exc
+    if str(cancel_result.get("rt_cd") or "") != "0":
+        raise HTTPException(
+            status_code=409,
+            detail=f"KIS order cancellation rejected: {cancel_result.get('msg1') or cancel_result}",
+        )
+
+    trader.update_trade_order_status(
+        order_no,
+        order_status="canceled",
+        filled_qty=_history_fill_qty(blocking_order),
+        filled_price=_history_fill_price(blocking_order),
+        response_msg="KIS blocking sell order canceled before retry",
+        broker_result=cancel_result,
+    )
+    _clear_balance_cache()
+
+    retry_qty = min(remaining_qty, _to_int(item.get("qty")) or remaining_qty)
+    retry_id = _create_retry_approval_from_item(item, retry_qty=retry_qty, source_approval_id=approval_id)
+    return {
+        "id": retry_id,
+        "status": "pending",
+        "source_approval_id": approval_id,
+        "symbol": symbol,
+        "qty": retry_qty,
+        "canceled_order_id": order_no,
+        "cancel_result": cancel_result,
     }
 
 
