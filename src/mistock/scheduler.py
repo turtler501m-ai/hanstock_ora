@@ -67,7 +67,8 @@ def _schedule_due(schedule: dict, now: datetime | None = None) -> bool:
     except (TypeError, ValueError):
         return True
     interval = max(1, int(schedule.get("interval_minutes") or 60))
-    return (now - last_run.astimezone(KST)).total_seconds() >= interval * 60
+    buffer_seconds = min(120, interval * 60 // 2)
+    return (now - last_run.astimezone(KST)).total_seconds() >= interval * 60 - buffer_seconds
 
 
 def _pending_scheduler_approval_exists(symbol: str, action: str) -> bool:

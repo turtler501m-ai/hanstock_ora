@@ -440,7 +440,8 @@ def is_schedule_due(schedule: dict, now=None) -> bool:
     except ValueError:
         return True
     interval = int(schedule.get("interval_minutes") or 15)
-    return (now - last_dt).total_seconds() >= interval * 60 - 1
+    buffer_seconds = min(120, interval * 60 // 2)
+    return (now - last_dt).total_seconds() >= interval * 60 - buffer_seconds
 
 
 # ---------------------------------------------------------------------------
