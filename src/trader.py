@@ -1175,6 +1175,10 @@ def run(
         if row.get("action") == "buy":
             estimated_cost = _estimated_buy_cost(row)
             if execution_buying_cash <= 0:
+                logger.warning(
+                    "[BUY SKIP] buying cash unavailable: "
+                    f"{row.get('symbol')} qty={row.get('qty')} price={row.get('price')}"
+                )
                 results.append({
                     **row,
                     "decision": "skip",
@@ -1183,6 +1187,10 @@ def run(
                 })
                 continue
             if estimated_cost > execution_buying_cash:
+                logger.warning(
+                    "[BUY SKIP] buy order exceeds buying cash: "
+                    f"{row.get('symbol')} cost={estimated_cost:,} buying_cash={execution_buying_cash:,}"
+                )
                 results.append({
                     **row,
                     "decision": "skip",
