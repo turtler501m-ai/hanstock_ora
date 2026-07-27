@@ -78,7 +78,7 @@ class RuntimePlanTests(unittest.TestCase):
         self.assertEqual([row["action"] for row in result["results"]], ["sell", "buy"])
         self.assertEqual(execute_plan_row.call_count, 2)
 
-    def test_run_skips_new_buys_when_daily_loss_halt_is_active(self):
+    def test_run_skips_buys_but_keeps_position_plan_when_daily_loss_halt_is_active(self):
         balance = {
             "output1": [
                 {
@@ -105,6 +105,7 @@ class RuntimePlanTests(unittest.TestCase):
             patch("src.trader.slack_session_start"),
             patch("src.trader.slack_session_end"),
             patch("src.trader.check_daily_loss", return_value=True),
+            patch("src.trader.daily_loss_halt_triggered", return_value=True),
             patch("src.trader.generate_signal", return_value={
                 "action": "buy",
                 "qty": 1,
@@ -117,9 +118,58 @@ class RuntimePlanTests(unittest.TestCase):
         ):
             result = trader.run()
 
-        self.assertEqual(result["plan"], [])
-        self.assertEqual(result["results"], [])
+        self.assertEqual([row["action"] for row in result["plan"]], ["buy"])
+        self.assertEqual(result["results"][0]["decision"], "skip")
+        self.assertEqual(result["results"][0]["skip_reason"], "daily loss halt blocks buy orders only")
         execute_plan_row.assert_not_called()
+        find_candidates.assert_not_called()
+
+    def test_run_executes_sells_when_daily_loss_halt_is_active(self):
+        balance = {
+            "output1": [
+                {
+                    "pdno": "005930",
+                    "prdt_name": "Samsung",
+                    "evlu_pfls_rt": "-12.0",
+                }
+            ],
+            "output2": [
+                {
+                    "dnca_tot_amt": "1000000",
+                    "tot_evlu_amt": "2000000",
+                    "evlu_pfls_smtl_amt": "-400000",
+                }
+            ],
+        }
+        api = self.make_api(balance=balance)
+
+        with (
+            patch("src.trader.check_secrets"),
+            patch("src.trader.init_db"),
+            patch("src.trader.init_approval_db"),
+            patch("src.trader.KIStockAPI", return_value=api),
+            patch("src.trader.slack_session_start"),
+            patch("src.trader.slack_session_end"),
+            patch("src.trader.check_daily_loss", return_value=True),
+            patch("src.trader.daily_loss_halt_triggered", return_value=True),
+            patch("src.trader.generate_signal", return_value={
+                "action": "sell",
+                "qty": 1,
+                "price": 70000,
+                "reason": "stop loss",
+                "indicators": {"rsi": 25, "sma20": 10, "sma60": 11, "bb_lo": 9, "bb_hi": 12},
+            }),
+            patch("src.trader.find_candidates") as find_candidates,
+            patch(
+                "src.trader.execute_plan_row",
+                side_effect=lambda _api, _context, row: {**row, "ok": True, "decision": "execute"},
+            ) as execute_plan_row,
+        ):
+            result = trader.run()
+
+        self.assertEqual([row["action"] for row in result["plan"]], ["sell"])
+        self.assertEqual(result["results"][0]["decision"], "execute")
+        execute_plan_row.assert_called_once()
         find_candidates.assert_not_called()
 
     def test_run_analysis_only_returns_plan_without_submitting_orders(self):

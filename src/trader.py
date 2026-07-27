@@ -1060,9 +1060,7 @@ def run(
         real_orders_enabled=flags.real_orders_enabled,
     )
 
-    if check_daily_loss(pnl):
-        slack_session_end(results=[], cash=cash, total=total_eval, pnl=pnl)
-        return {"plan": [], "results": []}
+    daily_loss_halted = check_daily_loss(pnl)
 
     bp_kwargs = {}
     if include_ai_rebalance:
@@ -1071,6 +1069,7 @@ def run(
         bp_kwargs["force_strategy_id"] = force_strategy_id
 
     runtime_bundle = build_runtime_plan(api, balance, **bp_kwargs)
+    daily_loss_halted = daily_loss_halted or bool(runtime_bundle.get("daily_loss_halt"))
 
     candidates = runtime_bundle.get("candidate_scan", {}).get("candidates", [])
     if candidates:
@@ -1084,6 +1083,14 @@ def run(
     for row in runtime_bundle["plan"]:
         if execution_categories is not None and row.get("category") not in execution_categories:
             results.append({**row, "decision": "skip", "ok": True, "skip_reason": "category filtered"})
+            continue
+        if daily_loss_halted and row.get("action") == "buy":
+            results.append({
+                **row,
+                "decision": "skip",
+                "ok": True,
+                "skip_reason": "daily loss halt blocks buy orders only",
+            })
             continue
         result_row = execute_plan_row(api, context, row)
         results.append(result_row)
