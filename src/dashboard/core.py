@@ -3,6 +3,7 @@ import hashlib
 import base64
 import binascii
 import concurrent.futures
+import math
 import os
 import re
 import secrets
@@ -64,7 +65,26 @@ from src.strategy.seven_split import adjust_tick_size  # noqa: E402
 from src.utils.logger import logger  # noqa: E402
 
 
-app = FastAPI(title="Seven Split Dashboard", version="1.0.0")
+def _json_safe_value(value):
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_value(item) for item in value]
+    return value
+
+
+class SafeJSONResponse(JSONResponse):
+    def render(self, content) -> bytes:
+        return super().render(_json_safe_value(content))
+
+
+app = FastAPI(
+    title="Seven Split Dashboard",
+    version="1.0.0",
+    default_response_class=SafeJSONResponse,
+)
 DashboardOperationError = (
     OSError,
     RuntimeError,

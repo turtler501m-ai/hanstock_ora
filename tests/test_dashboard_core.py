@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import asyncio
+import math
 import sqlite3
 from datetime import datetime
 from unittest.mock import patch
@@ -43,6 +44,21 @@ class MemoryTextPath:
 
 
 class DashboardCoreTests(unittest.TestCase):
+    def test_json_safe_value_replaces_non_finite_floats(self):
+        payload = {
+            "ok": True,
+            "nan": math.nan,
+            "inf": math.inf,
+            "nested": [{"value": -math.inf}, {"value": 1.5}],
+        }
+
+        safe = dashboard_core._json_safe_value(payload)
+
+        self.assertIsNone(safe["nan"])
+        self.assertIsNone(safe["inf"])
+        self.assertIsNone(safe["nested"][0]["value"])
+        self.assertEqual(safe["nested"][1]["value"], 1.5)
+
     def test_broker_history_import_is_treated_as_real_fill(self):
         self.assertFalse(dashboard._trade_is_sync_adjustment({"reason": "broker history import"}))
         self.assertTrue(dashboard._trade_is_sync_adjustment({"reason": "balance sync adjustment"}))

@@ -3,6 +3,7 @@ from unittest.mock import patch, MagicMock
 from pathlib import Path
 import json
 
+from src.dashboard.services.scheduler_service import DashboardSchedulerService
 from src.dashboard import get_scheduler_status, trigger_scheduler_run, _scheduler_run_state, _scheduler_running_lock
 
 class SchedulerApiTests(unittest.TestCase):
@@ -319,6 +320,35 @@ class SchedulerApiTests(unittest.TestCase):
         self.assertIsNone(response["strategy_id"])
         thread_args = mock_thread.call_args.kwargs["args"]
         self.assertEqual(thread_args[3], ["alpha", "beta"])
+
+    @patch("src.dashboard.services.scheduler_service.PersistentRuntimeState")
+    def test_dashboard_scheduler_service_forwards_strategy_ids(self, runtime_state):
+        class FakeState(dict):
+            def replace(self, payload):
+                self.clear()
+                self.update(payload)
+
+        runtime_state.return_value = FakeState()
+        service = DashboardSchedulerService("test", now_fn=lambda: "now")
+        captured = {}
+
+        def runner(**kwargs):
+            captured.update(kwargs)
+            return {"ok": True}
+
+        service.run(
+            runner,
+            mode="analysis_only",
+            include_ai_rebalance=True,
+            auto_approve=False,
+            strategy_ids=["alpha", "beta"],
+            allowed_categories={"candidate"},
+        )
+
+        self.assertEqual(captured["mode"], "analysis_only")
+        self.assertEqual(captured["strategy_ids"], ["alpha", "beta"])
+        self.assertEqual(captured["allowed_categories"], {"candidate"})
+        self.assertIsNone(captured["force_strategy_id"])
 
     def test_trigger_scheduler_run_prevents_double_execution(self):
         with _scheduler_running_lock:

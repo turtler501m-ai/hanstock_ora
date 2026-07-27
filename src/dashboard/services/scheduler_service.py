@@ -83,8 +83,9 @@ class DashboardSchedulerService:
         mode: str,
         include_ai_rebalance: bool,
         auto_approve: bool,
-        strategy_id: str | None,
+        strategy_id: str | None = None,
         allowed_categories: set[str] | None = None,
+        **extra_kwargs: Any,
     ) -> None:
         try:
             kwargs = {
@@ -95,6 +96,7 @@ class DashboardSchedulerService:
             }
             if allowed_categories is not None:
                 kwargs["allowed_categories"] = allowed_categories
+            kwargs.update(extra_kwargs)
             result = runner(**kwargs)
         except SchedulerExecutionError as exc:
             self.fail(exc)
