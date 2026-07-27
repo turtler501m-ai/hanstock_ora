@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 
 from src import trader
 from src.notifier.slack import send_slack
+from src.utils.market_calendar import is_market_session
 
 
 SchedulerOperationError = (
@@ -357,6 +358,12 @@ def main() -> int:
         help="force a specific active strategy model for this scheduler run",
     )
     args = parser.parse_args()
+    force_run = os.environ.get("HANSTOCK_SCHEDULE_FORCE") == "1"
+    if args.mode == "daily_auto" and not force_run:
+        now = datetime.now(trader.KST)
+        if not is_market_session("KR", now):
+            print(f"[scheduler] {now.date()} is not a KRX trading session; skipped")
+            return 0
     cycle_kwargs = {
         "mode": args.mode,
         "include_ai_rebalance": args.include_ai_rebalance,

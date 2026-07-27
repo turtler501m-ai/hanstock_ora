@@ -30,6 +30,21 @@ from src.utils.logger import logger
 
 
 _ISOLATED_STRATEGY_IDS = {"plunge_bounce_strategy", "heikin_ashi_scalping_strategy"}
+_last_dispatch_failures: list[str] = []
+
+
+def _is_registered_ai_strategy(strategy_id: str | None) -> bool:
+    if not strategy_id:
+        return False
+    try:
+        from src.db.repository import load_ai_strategies
+
+        return any(
+            str(item.get("id")) == str(strategy_id)
+            for item in load_ai_strategies()
+        )
+    except Exception:
+        return False
 
 
 def _allowed_categories_for_strategy(strategy_id: str | None) -> set[str]:
@@ -39,7 +54,10 @@ def _allowed_categories_for_strategy(strategy_id: str | None) -> set[str]:
 
 
 def dispatch_due_schedules() -> list[str]:
+    global _last_dispatch_failures
+    _last_dispatch_failures = []
     ran: list[str] = []
+    failures: list[str] = []
     schedules = list_strategy_schedules(enabled_only=True)
     if not schedules:
         logger.info("[dispatch] no enabled strategy schedules")
@@ -61,7 +79,10 @@ def dispatch_due_schedules() -> list[str]:
                     auto_collect=True,
                 )
                 save_scheduler_result(mode, datetime.now(KST).isoformat(), result)
-            elif str(strategy_id or "").startswith("ai_stock_"):
+            elif (
+                strategy_id not in _ISOLATED_STRATEGY_IDS
+                and _is_registered_ai_strategy(strategy_id)
+            ):
                 # AI스톡: 주문 경로(run_scheduled_cycle)를 타지 않고 자동화 엔진을 호출한다(§5.12.2).
                 from src.ai_stock.automation_service import run_strategy as _ai_run
                 from src.ai_stock.realtime_service import run_realtime_cycle
@@ -89,25 +110,38 @@ def dispatch_due_schedules() -> list[str]:
                     result["by_market"][m] = m_result
                 if market_errors:
                     result["errors"] = market_errors
+                    result["status"] = "failed"
+                    result["ok"] = False
                 save_scheduler_result(mode, datetime.now(KST).isoformat(), result)
             else:
-                run_scheduled_cycle(
+                result = run_scheduled_cycle(
                     mode,
                     auto_approve=auto_approve,
                     force_strategy_id=strategy_id,
                     allowed_categories=_allowed_categories_for_strategy(strategy_id),
                 )
+            if isinstance(result, dict) and (
+                result.get("status") == "failed" or result.get("ok") is False
+            ):
+                raise RuntimeError(
+                    f"scheduler result reported failure: {result.get('errors') or result}"
+                )
             mark_strategy_schedule_run(strategy_id)
             ran.append(strategy_id)
             logger.info(f"[dispatch] done {strategy_id}")
         except Exception as exc:  # noqa: BLE001
+            failures.append(f"{strategy_id}: {exc}")
             logger.error(f"[dispatch] {strategy_id} failed: {exc}")
+    _last_dispatch_failures = failures
     return ran
 
 
 def main() -> int:
     ran = dispatch_due_schedules()
     print(f"[dispatch] ran: {ran}")
+    if _last_dispatch_failures:
+        print(f"[dispatch] failures: {_last_dispatch_failures}", file=sys.stderr)
+        return 1
     return 0
 
 

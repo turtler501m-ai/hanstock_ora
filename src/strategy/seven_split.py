@@ -863,7 +863,14 @@ def find_candidates(
                     return entry, None, e
 
             if ai_targets:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=len(ai_targets)) as executor:
+                max_workers = max(
+                    1,
+                    min(
+                        len(ai_targets),
+                        int(os.environ.get("AI_PREDICTION_MAX_WORKERS", "1")),
+                    ),
+                )
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                     futures = [executor.submit(predict_for_entry, entry) for entry in ai_targets]
                     for future in concurrent.futures.as_completed(futures):
                         entry, prediction, p_err = future.result()
@@ -986,7 +993,14 @@ def find_candidates(
                 return entry, None, e
 
         if ai_targets:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=len(ai_targets)) as executor:
+            max_workers = max(
+                1,
+                min(
+                    len(ai_targets),
+                    int(os.environ.get("AI_PREDICTION_MAX_WORKERS", "1")),
+                ),
+            )
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = [executor.submit(predict_for_entry, entry) for entry in ai_targets]
                 for future in concurrent.futures.as_completed(futures):
                     entry, prediction, e = future.result()

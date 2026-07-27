@@ -47,4 +47,5 @@ acquire_lock() {
     status=$?
     set -e
     echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] strategy_dispatch done status=$status"
+    exit "$status"
 } >> "$LOG_FILE" 2>&1

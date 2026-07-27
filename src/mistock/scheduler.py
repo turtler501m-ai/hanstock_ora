@@ -100,6 +100,10 @@ def is_us_market_open() -> bool:
     now_ny = datetime.now(ZoneInfo("America/New_York"))
     if now_ny.weekday() >= 5:
         return False
+    from src.utils.market_calendar import is_market_session
+
+    if not is_market_session("US", now_ny):
+        return False
     current_time = now_ny.time().replace(tzinfo=None)
     return datetime.strptime("09:30", "%H:%M").time() <= current_time <= datetime.strptime("15:55", "%H:%M").time()
 

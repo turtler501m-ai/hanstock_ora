@@ -424,6 +424,10 @@ def is_schedule_due(schedule: dict, now=None) -> bool:
     dow = now.isoweekday()  # 1~7
     if not _weekday_matches(schedule.get("weekdays", "1-5"), dow):
         return False
+    from src.utils.market_calendar import is_market_session
+
+    if not is_market_session("KR", now):
+        return False
     hm = now.strftime("%H%M")
     
     # 콜론 제거를 통해 대시보드 저장 포맷 유연화
