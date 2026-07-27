@@ -244,6 +244,45 @@ class KISClientTests(unittest.TestCase):
         self.assertEqual(session.get.call_args.kwargs["params"]["FID_COND_MRKT_DIV_CODE"], "J")
         self.assertNotIn("FID_COND_MRK_DIV_CODE", session.get.call_args.kwargs["params"])
 
+    def test_get_daily_logs_http_failure_detail(self):
+        session = Mock()
+        session.get.return_value = _FakeResponse(status_code=500, text="server unavailable")
+        client = KISClient(
+            self.make_config(),
+            session=session,
+            access_token="token",
+        )
+
+        with patch("src.utils.logger.logger.error") as log_error:
+            result = client.get_daily("005930", n=5)
+
+        self.assertEqual(result, [])
+        self.assertIn(
+            "Daily chart HTTP 500 symbol=005930: server unavailable",
+            log_error.call_args.args[0],
+        )
+
+    def test_get_daily_logs_kis_failure_detail(self):
+        session = Mock()
+        session.get.return_value = _FakeResponse(
+            {"rt_cd": "1", "msg_cd": "MCA00001", "msg1": "invalid symbol"},
+            status_code=200,
+        )
+        client = KISClient(
+            self.make_config(),
+            session=session,
+            access_token="token",
+        )
+
+        with patch("src.utils.logger.logger.error") as log_error:
+            result = client.get_daily("Q530107", n=5)
+
+        self.assertEqual(result, [])
+        self.assertIn(
+            "Daily chart KIS symbol=Q530107 rt_cd=1 msg_cd=MCA00001 msg1=invalid symbol",
+            log_error.call_args.args[0],
+        )
+
     def test_place_order_uses_live_tr_id_for_live_environment(self):
         session = Mock()
         session.post.side_effect = [

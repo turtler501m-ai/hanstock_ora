@@ -446,16 +446,25 @@ class KISClient:
                 timeout=self.config.request_timeout_seconds,
             )
             if response.status_code != 200:
-                self.mark_failure()
+                self.mark_failure(
+                    f"Daily chart HTTP {response.status_code} symbol={symbol}: "
+                    f"{self._response_text(response)}"
+                )
                 return []
             data = response.json()
             if data.get("rt_cd") != "0":
-                self.mark_failure()
+                self.mark_failure(
+                    "Daily chart KIS "
+                    f"symbol={symbol} "
+                    f"rt_cd={data.get('rt_cd', '')} "
+                    f"msg_cd={data.get('msg_cd', '')} "
+                    f"msg1={data.get('msg1', '')}"
+                )
                 return []
             self.mark_success()
             return data.get("output2", [])[:n]
-        except Exception:
-            self.mark_failure()
+        except Exception as exc:
+            self.mark_failure(f"Daily chart exception symbol={symbol}: {exc}")
             return []
 
     def place_order(self, symbol: str, order_type: str, price: int, qty: int, exchange_id: str = "KRX") -> dict[str, Any]:
