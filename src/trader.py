@@ -670,6 +670,21 @@ def _is_executable_plan_row(row: dict) -> bool:
     return row.get("action") in {"buy", "sell"} and int(row.get("qty", 0) or 0) > 0
 
 
+def _estimated_buy_cost(row: dict) -> int:
+    try:
+        explicit_cost = float(row.get("estimated_cost") or 0)
+    except (TypeError, ValueError):
+        explicit_cost = 0
+    if explicit_cost > 0:
+        return int(explicit_cost)
+    try:
+        qty = int(row.get("qty", 0) or 0)
+        price = int(row.get("price", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return int(qty * price * 1.001) if qty > 0 and price > 0 else 0
+
+
 def execute_plan_row(api, context: dict, row: dict) -> dict:
     if not _is_executable_plan_row(row):
         return {**row, "decision": "skip", "ok": True}
@@ -1144,6 +1159,7 @@ def run(
         context["router"] = OrderRouter(api)
 
     results = []
+    execution_buying_cash = int(runtime_bundle.get("buying_cash", cash) or 0)
     for row in runtime_bundle["plan"]:
         if execution_categories is not None and row.get("category") not in execution_categories:
             results.append({**row, "decision": "skip", "ok": True, "skip_reason": "category filtered"})
@@ -1156,8 +1172,28 @@ def run(
                 "skip_reason": "daily loss halt blocks buy orders only",
             })
             continue
+        if row.get("action") == "buy":
+            estimated_cost = _estimated_buy_cost(row)
+            if execution_buying_cash <= 0:
+                results.append({
+                    **row,
+                    "decision": "skip",
+                    "ok": True,
+                    "skip_reason": "buying cash unavailable",
+                })
+                continue
+            if estimated_cost > execution_buying_cash:
+                results.append({
+                    **row,
+                    "decision": "skip",
+                    "ok": True,
+                    "skip_reason": "buy order exceeds buying cash",
+                })
+                continue
         result_row = execute_plan_row(api, context, row)
         results.append(result_row)
+        if row.get("action") == "buy" and result_row.get("ok"):
+            execution_buying_cash = max(0, execution_buying_cash - _estimated_buy_cost(row))
 
     remaining_cash = runtime_bundle.get("remaining_cash", cash)
     slack_session_end(results=results, cash=remaining_cash, total=total_eval, pnl=pnl)
