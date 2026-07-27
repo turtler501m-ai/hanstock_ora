@@ -6,6 +6,26 @@ from src import scheduler, strategy_scheduler
 
 
 class SchedulerModeTests(unittest.TestCase):
+    def setUp(self):
+        self.ai_strategy_lookup = patch(
+            "src.db.repository.load_ai_strategies",
+            return_value=[],
+        )
+        self.ai_strategy_lookup.start()
+        self.approval_lookup = patch(
+            "src.dashboard._approval_by_id",
+            side_effect=lambda approval_id: {
+                "id": approval_id,
+                "status": "pending",
+                "response_msg": "",
+            },
+        )
+        self.approval_lookup.start()
+
+    def tearDown(self):
+        self.approval_lookup.stop()
+        self.ai_strategy_lookup.stop()
+
     def test_strategy_dispatch_limits_isolated_strategy_to_candidate_orders(self):
         schedule = {
             "strategy_id": "plunge_bounce_strategy",
@@ -49,6 +69,39 @@ class SchedulerModeTests(unittest.TestCase):
         self.assertEqual(save_mock.call_args.args[0], "execute")
         self.assertEqual(save_mock.call_args.args[2], expected)
         mark_mock.assert_called_once_with("narrative_momentum_strategy")
+
+    def test_strategy_dispatch_recognizes_main_hanstock_ai_strategy(self):
+        schedule = {
+            "strategy_id": "main_ai_strategy",
+            "market": "KR",
+            "mode": "execute",
+            "auto_approve": False,
+        }
+        with patch.object(
+            strategy_scheduler,
+            "list_strategy_schedules",
+            return_value=[schedule],
+        ), patch.object(
+            strategy_scheduler, "is_schedule_due", return_value=True
+        ), patch(
+            "src.db.repository.load_ai_strategies",
+            return_value=[{"id": "main_ai_strategy"}],
+        ), patch(
+            "src.ai_stock.automation_service.run_strategy",
+            return_value={"automation": {}},
+        ) as autonomy_run, patch.object(
+            strategy_scheduler, "save_scheduler_result"
+        ), patch.object(
+            strategy_scheduler, "mark_strategy_schedule_run"
+        ):
+            ran = strategy_scheduler.dispatch_due_schedules()
+
+        self.assertEqual(ran, ["main_ai_strategy"])
+        autonomy_run.assert_called_once_with(
+            market="KR",
+            strategy_id="main_ai_strategy",
+            run_type="scheduled",
+        )
 
     def test_run_scheduled_cycle_delegates_execute_mode(self):
         expected = {"mode": "execute", "results": []}
