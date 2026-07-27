@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/hanstock
-ExecStart=/home/ubuntu/hanstock/.venv/bin/uvicorn src.dashboard:app --host 127.0.0.1 --port 8000 --log-level error
+ExecStart=/home/ubuntu/hanstock/.venv/bin/uvicorn src.dashboard:app --host 0.0.0.0 --port 8000 --log-level error
 Restart=always
 RestartSec=5
 Environment=PATH=/home/ubuntu/hanstock/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
