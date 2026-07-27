@@ -140,10 +140,12 @@ def _operational_protection_broker():
         and bool(getattr(config, "autonomy_enable_live_trading", False))
         and bool(getattr(config, "autonomy_live_opt_in", False))
     ):
-        # KIS domestic cash has no broker-native conditional stop endpoint.
-        # The durable protection ledger plus continuous position evaluation is
-        # therefore the active server-monitored protection boundary.
-        return PaperProtectionBroker()
+        # Neither current market integration exposes a durable broker-native
+        # hard-stop adapter.  Never substitute the in-memory paper broker in a
+        # live process: it cannot observe the account and loses state on restart.
+        return UnavailableProtectionBroker(
+            "live autonomous hard-stop adapter is not implemented"
+        )
     return UnavailableProtectionBroker(
         "autonomous protection requires matching environment and live opt-ins"
     )

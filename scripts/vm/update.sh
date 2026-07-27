@@ -29,8 +29,24 @@ PYTHON="$ROOT_DIR/.venv/bin/python"
 echo "[update] installing requirements"
 "$PYTHON" -m pip install -r requirements.txt
 
+if systemctl list-unit-files hanstock.service >/dev/null 2>&1; then
+    echo "[update] syncing dashboard systemd unit"
+    sudo install -m 0644 \
+        "$ROOT_DIR/scripts/vm/hanstock.service" \
+        /etc/systemd/system/hanstock.service
+    sudo systemctl daemon-reload
+fi
+
 echo "[update] restarting dashboard"
 "$ROOT_DIR/scripts/vm/server.sh" restart
 "$ROOT_DIR/scripts/vm/server.sh" status
+
+if systemctl list-unit-files hanstock-autonomy.service >/dev/null 2>&1; then
+    echo "[update] restarting autonomy service"
+    sudo systemctl restart hanstock-autonomy.service
+    systemctl status hanstock-autonomy.service --no-pager
+else
+    echo "[update] autonomy service is not installed (safe default)"
+fi
 
 echo "[update] done"

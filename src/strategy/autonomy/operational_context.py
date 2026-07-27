@@ -16,6 +16,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 from src.ai_stock.market_data import MarketDataProvider, get_provider
 from src.config import config
 from src.db import ai_stock_repository
+from src.utils.logger import logger
 
 from .runtime import AutonomyRuntime, RuntimeConfigurationError, RuntimeResult
 from .daily_equity import DailyEquityService
@@ -317,7 +318,11 @@ class OperationalSnapshotProvider:
                 )
         try:
             kill_switch_active = bool(self.kill_switch_reader())
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "[AUTONOMY] kill-switch state unavailable; "
+                f"blocking new risk: {type(exc).__name__}: {exc}"
+            )
             kill_switch_active = True
         account_id = self.account_id
         snapshot_id = f"kis-read:{market}:{now.isoformat()}"

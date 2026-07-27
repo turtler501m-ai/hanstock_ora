@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 import threading
 from contextlib import closing
@@ -10,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from src.db.connection import open_sqlite
+from src.utils.processes import process_exists
 
 
 KST = timezone(timedelta(hours=9))
@@ -209,16 +209,4 @@ class PersistentRuntimeState(dict[str, Any]):
 
 
 def _process_exists(pid: Any) -> bool:
-    try:
-        process_id = int(pid)
-    except (TypeError, ValueError):
-        return False
-    if process_id <= 0:
-        return False
-    if process_id == os.getpid():
-        return True
-    try:
-        os.kill(process_id, 0)
-    except (OSError, PermissionError):
-        return False
-    return True
+    return process_exists(pid)

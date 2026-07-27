@@ -1,7 +1,7 @@
 #!/bin/bash
 ACTION="${1:-restart}"
 PORT="${PORT:-8000}"
-HOST="${HOST:-0.0.0.0}"
+HOST="${HOST:-127.0.0.1}"
 RELOAD="${RELOAD:-false}"
 LINES="${LINES:-80}"
 UVICORN_LOG_LEVEL="${UVICORN_LOG_LEVEL:-error}"

@@ -157,6 +157,18 @@ class AutonomousRecoveryService:
 
     def audit_unprotected_positions(self, market: str) -> ProtectionGateSignal:
         market = str(market).upper()
+        broker = self.protection_brokers.get(market)
+        if broker is None:
+            raise RuntimeError(f"protection broker unavailable for {market}")
+        if not bool(getattr(broker, "supports_hard_stops", False)):
+            reason = str(
+                getattr(broker, "reason", f"hard-stop protection unsupported for {market}")
+            )
+            return ProtectionGateSignal(
+                block_new_risk=True,
+                reason="protection_broker_unavailable",
+                alerts=(reason,),
+            )
         recovery = self.reconcile_protections(market)
         signal = self.protection.global_gate_signal(market=market)
         failures = tuple(

@@ -5,6 +5,7 @@ from src.strategy.autonomy.broker_adapters import ReconciliationResult
 from src.strategy.autonomy.protection import (
     ProtectionGateSignal,
     ProtectionObservation,
+    UnavailableProtectionBroker,
 )
 from src.strategy.autonomy.recovery import AutonomousRecoveryService
 
@@ -87,6 +88,8 @@ class Protection:
 
 
 class Broker:
+    supports_hard_stops = True
+
     def __init__(self, observed_exists=False):
         self.observed_exists = observed_exists
 
@@ -165,6 +168,22 @@ class RecoveryServiceTest(unittest.TestCase):
         signal = service.audit_unprotected_positions("KR")
         self.assertTrue(signal.block_new_risk)
         self.assertEqual(signal.reason, "protection_recovery_incomplete")
+
+    def test_unsupported_broker_blocks_even_without_positions(self):
+        repo = Repo()
+        repo.positions = []
+        service = AutonomousRecoveryService(
+            order_reconcilers={"KR": Reconciler()},
+            protection_brokers={
+                "KR": UnavailableProtectionBroker("KIS stop API unavailable")
+            },
+            protection=Protection(),
+            repo=repo,
+        )
+        signal = service.audit_unprotected_positions("KR")
+        self.assertTrue(signal.block_new_risk)
+        self.assertEqual(signal.reason, "protection_broker_unavailable")
+        self.assertIn("KIS stop API unavailable", signal.alerts)
 
 
 if __name__ == "__main__":

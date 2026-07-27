@@ -220,6 +220,27 @@ class ManagedApprovalBridge:
         )
         return rejected
 
+    def revalidate_for_execution(
+        self, order: Mapping[str, Any], approval: Any
+    ) -> None:
+        """Fail closed if trusted account/market state changed after approval."""
+        order_id = int(order["id"])
+        current = self._canonical_order(order_id, OrderStatus.APPROVED)
+        self._assert_approval_links(approval, current)
+        try:
+            self._revalidate(current, approval)
+        except Exception as exc:
+            latest = self.repo.get_managed_order(order_id)
+            if latest and latest.get("status") == OrderStatus.APPROVED.value:
+                self.orders.reject(
+                    order_id,
+                    expected=OrderStatus.APPROVED,
+                    reason=f"pre-submit revalidation failed: {type(exc).__name__}",
+                )
+            raise ApprovalBridgeError(
+                "managed execution revalidation failed closed"
+            ) from exc
+
     def expire(self, approval_id: int, *, now: datetime | None = None) -> bool:
         approval = self.approvals.get_pending_approval(approval_id)
         order_id = self._approval_order_id(approval)
@@ -371,10 +392,12 @@ class ManagedExecutionCoordinator:
         approvals: ApprovalService,
         orders: ManagedOrderService,
         *,
+        pre_submit_validator: Callable[[Mapping[str, Any], Any], None] | None = None,
         repo: Any = repository,
     ):
         self.approvals = approvals
         self.orders = orders
+        self.pre_submit_validator = pre_submit_validator
         self.repo = repo
 
     def execute(
@@ -387,6 +410,8 @@ class ManagedExecutionCoordinator:
         ManagedApprovalBridge._assert_approval_links(approval, order)
         if OrderStatus(order["status"]) is not OrderStatus.APPROVED:
             raise ApprovalBridgeError("managed order is not approved for execution")
+        if self.pre_submit_validator is not None:
+            self.pre_submit_validator(order, approval)
         if str(order.get("action")) == "buy":
             protection_broker = getattr(self.orders, "protection_broker", None)
             if (

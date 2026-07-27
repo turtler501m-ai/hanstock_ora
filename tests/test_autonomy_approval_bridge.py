@@ -319,6 +319,47 @@ class ApprovalBridgeTests(unittest.TestCase):
             coordinator.execute(approval_id, object())
         self.assertEqual(self.orders.submissions, 0)
 
+    def test_execution_rechecks_fresh_snapshot_and_fails_closed(self):
+        approval_id = self.bridge().queue(5)
+        self.bridge().approve(approval_id)
+        execution_bridge = self.bridge(snapshots=FreshSnapshots(fail=True))
+        coordinator = ManagedExecutionCoordinator(
+            self.approvals,
+            self.orders,
+            pre_submit_validator=execution_bridge.revalidate_for_execution,
+            repo=self.repo,
+        )
+
+        with self.assertRaisesRegex(ApprovalBridgeError, "failed closed"):
+            coordinator.execute(approval_id, object())
+
+        self.assertEqual(self.repo.order["status"], "rejected")
+        self.assertEqual(self.orders.submissions, 0)
+
+    def test_execution_revalidation_preserves_risk_reducing_sell(self):
+        self.repo.order.update(action="sell", status="risk_approved", requested_qty=3)
+        self.repo.decision["risk_decision"].update(quantity=3)
+        approval_id = self.bridge(
+            latest=LatestRisk(quantity=3, action="exit"),
+            snapshots=FreshSnapshots(owned_qty=3),
+        ).queue(5)
+        bridge = self.bridge(
+            latest=LatestRisk(quantity=3, action="exit"),
+            snapshots=FreshSnapshots(owned_qty=3),
+        )
+        bridge.approve(approval_id)
+        coordinator = ManagedExecutionCoordinator(
+            self.approvals,
+            self.orders,
+            pre_submit_validator=bridge.revalidate_for_execution,
+            repo=self.repo,
+        )
+
+        result = coordinator.execute(approval_id, object())
+
+        self.assertEqual(result["status"], "submitted")
+        self.assertEqual(self.orders.submissions, 1)
+
     def test_latest_smaller_quantity_rejects_without_mutating_order(self):
         approval_id = self.bridge().queue(5)
         with self.assertRaises(ApprovalBridgeError):

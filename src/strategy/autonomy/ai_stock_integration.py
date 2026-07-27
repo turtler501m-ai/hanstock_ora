@@ -189,6 +189,7 @@ def approve_managed_ai_stock_order(approval_id: int) -> dict[str, Any]:
         submitted = ManagedExecutionCoordinator(
             bridge.approvals,
             orders,
+            pre_submit_validator=bridge.revalidate_for_execution,
             repo=ai_stock_repository,
         ).execute(int(approval_id), gateway)
         response.update(

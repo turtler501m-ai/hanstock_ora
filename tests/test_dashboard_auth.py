@@ -62,6 +62,19 @@ class DashboardAuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.headers["www-authenticate"], 'Basic realm="Hanstock Dashboard"')
 
+    def test_auth_enabled_is_enforced_outside_test_mode(self):
+        env = {
+            "HANSTOCK_TESTING": "0",
+            "DASHBOARD_AUTH_ENABLED": "true",
+            "DASHBOARD_AUTH_USERNAME": "operator",
+            "DASHBOARD_AUTH_PASSWORD": "secret",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            response = self._call()
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.headers["www-authenticate"], 'Basic realm="Hanstock Dashboard"')
+
     def test_auth_enabled_rejects_invalid_credentials(self):
         env = {
             "DASHBOARD_AUTH_ENABLED": "true",
