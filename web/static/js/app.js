@@ -101,6 +101,43 @@ const translateReason = (value) => {
     return text;
 };
 
+const SKIP_REASON_LABELS = {
+    'category filtered': '카테고리 제외',
+    'daily loss halt blocks buy orders only': '일손실 한도 초과로 신규 매수 차단',
+    'buying cash unavailable': '매수가능현금 없음',
+    'buy order exceeds buying cash': '주문금액이 매수가능현금 초과',
+};
+
+const schedulerSkipReasonLabel = (row = {}) => {
+    const raw = String(row.skip_reason || '').trim();
+    if (raw) {
+        return SKIP_REASON_LABELS[raw] || translateReason(raw);
+    }
+    const qty = Number(row.qty || row.signal_qty || 0);
+    if (row.action === 'hold') return '유지(Hold)';
+    if (qty === 0) return '주문수량 0';
+    return '주문 조건 미충족';
+};
+
+const schedulerDecisionLabel = (decision, row = {}) => {
+    if (decision === 'skip') return `보류: ${schedulerSkipReasonLabel(row)}`;
+    return toKorDecision(decision);
+};
+
+const schedulerReasonText = (row = {}) => {
+    let cleanReason = row.reason || '스케쥴 분석 결과';
+    if (cleanReason.startsWith('[')) {
+        const closingIdx = cleanReason.indexOf(']');
+        if (closingIdx !== -1) {
+            cleanReason = cleanReason.substring(closingIdx + 1).trim();
+        }
+    }
+    if ((row.decision || (row.approval_id ? 'approved' : 'skip')) !== 'skip') {
+        return translateReason(cleanReason);
+    }
+    return `[보류 원인: ${schedulerSkipReasonLabel(row)}] ${translateReason(cleanReason)}`;
+};
+
 const strategyReasonLabel = (reason) => {
     const text = String(reason || '').trim();
     if (!text) {
@@ -3803,34 +3840,17 @@ async function renderScheduleInfo() {
                                     const decision = row.decision || (row.approval_id ? 'approved' : 'skip');
                                     const kind = decision === 'execute' || decision === 'approved' ? 'buy' : (decision === 'skip' ? 'hold' : 'warn');
                                     
-                                    let cleanReason = row.reason || '스케쥴 분석 결과';
-                                    if (cleanReason.startsWith('[')) {
-                                        const closingIdx = cleanReason.indexOf(']');
-                                        if (closingIdx !== -1) {
-                                            cleanReason = cleanReason.substring(closingIdx + 1).trim();
-                                        }
-                                    }
-                                    if (decision === 'skip') {
-                                        let skipPrefix = '';
-                                        if (row.skip_reason === 'category filtered') {
-                                            skipPrefix = '[카테고리 제외] ';
-                                        } else if (row.action === 'hold' || (row.qty || row.signal_qty || 0) === 0) {
-                                            skipPrefix = (row.action === 'hold') ? '[보류: 유지(Hold)] ' : '[보류: 주문수량 0] ';
-                                        } else {
-                                            skipPrefix = '[보류] ';
-                                        }
-                                        cleanReason = skipPrefix + cleanReason;
-                                    }
+                                    const displayReason = schedulerReasonText(row);
                                     
                                     tr.innerHTML = `
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${escapeHtml(row.symbol || '-')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;"><div class="symbol-name" style="font-weight: 500;">${escapeHtml(row.name || '-')}</div></td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(row.strategy_name || row.strategy_id || '기본 분할매매', 'hold')}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(toKorPlanCategory(row.category), 'hold')}</td>
-                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(toKorDecision(decision), kind)}</td>
+                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;">${pill(schedulerDecisionLabel(decision, row), kind)}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right;">${formatNumber(row.qty || row.signal_qty)}</td>
                                         <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem; text-align: right; font-weight: 500;">${formatNumber(row.price || row.signal_price)} 원</td>
-                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;"><div class="reason-cell" style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(row.reason || '')}">${escapeHtml(translateReason(cleanReason))}</div></td>
+                                        <td style="padding: 0.6rem 0.75rem; font-size: 0.85rem;"><div class="reason-cell" style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(displayReason)}">${escapeHtml(displayReason)}</div></td>
                                     `;
                                     plansTbody.appendChild(tr);
                                 });
