@@ -30,6 +30,7 @@ from src.utils.logger import logger
 
 
 _ISOLATED_STRATEGY_IDS = {"plunge_bounce_strategy", "heikin_ashi_scalping_strategy"}
+_TRADER_SCHEDULE_STRATEGY_IDS = {"issue_sector_rotation_strategy"}
 _last_dispatch_failures: list[str] = []
 
 
@@ -80,7 +81,8 @@ def dispatch_due_schedules() -> list[str]:
                 )
                 save_scheduler_result(mode, datetime.now(KST).isoformat(), result)
             elif (
-                strategy_id not in _ISOLATED_STRATEGY_IDS
+                strategy_id not in _TRADER_SCHEDULE_STRATEGY_IDS
+                and strategy_id not in _ISOLATED_STRATEGY_IDS
                 and _is_registered_ai_strategy(strategy_id)
             ):
                 # AI스톡: 주문 경로(run_scheduled_cycle)를 타지 않고 자동화 엔진을 호출한다(§5.12.2).

@@ -103,6 +103,43 @@ class SchedulerModeTests(unittest.TestCase):
             run_type="scheduled",
         )
 
+    def test_strategy_dispatch_routes_issue_sector_through_trader(self):
+        schedule = {
+            "strategy_id": "issue_sector_rotation_strategy",
+            "market": "KR",
+            "mode": "execute",
+            "auto_approve": True,
+        }
+        expected = {"strategy_id": "issue_sector_rotation_strategy", "results": []}
+        with patch.object(
+            strategy_scheduler,
+            "list_strategy_schedules",
+            return_value=[schedule],
+        ), patch.object(
+            strategy_scheduler, "is_schedule_due", return_value=True
+        ), patch(
+            "src.db.repository.load_ai_strategies",
+            return_value=[{"id": "issue_sector_rotation_strategy"}],
+        ), patch.object(
+            strategy_scheduler,
+            "run_scheduled_cycle",
+            return_value=expected,
+        ) as run_cycle, patch(
+            "src.ai_stock.automation_service.run_strategy"
+        ) as autonomy_run, patch.object(
+            strategy_scheduler, "mark_strategy_schedule_run"
+        ):
+            ran = strategy_scheduler.dispatch_due_schedules()
+
+        self.assertEqual(ran, ["issue_sector_rotation_strategy"])
+        run_cycle.assert_called_once_with(
+            "execute",
+            auto_approve=True,
+            force_strategy_id="issue_sector_rotation_strategy",
+            allowed_categories={"position", "candidate", "ai_rebalance"},
+        )
+        autonomy_run.assert_not_called()
+
     def test_run_scheduled_cycle_delegates_execute_mode(self):
         expected = {"mode": "execute", "results": []}
 

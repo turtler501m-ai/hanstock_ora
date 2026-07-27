@@ -73,6 +73,17 @@ class TraderCoreTests(unittest.TestCase):
         self.assertEqual(signal["qty"], 7)
         self.assertEqual(signal["price"], 0)
 
+    def test_generate_signal_stop_loss_uses_configured_ten_percent_floor(self):
+        with patch("src.strategy.seven_split.config.stop_loss_pct", -10.0):
+            signal = generate_signal(
+                {"prpr": "10000", "hldg_qty": "7", "evlu_pfls_rt": "-10.0"},
+                [],
+            )
+
+        self.assertEqual(signal["action"], "sell")
+        self.assertEqual(signal["qty"], 7)
+        self.assertEqual(signal["reason"], "stop loss -10.0%")
+
     def test_strategy_profile_exposes_composite_indicators(self):
         prices = [float(i) for i in range(1, 140)]
         highs = [p + 1 for p in prices]

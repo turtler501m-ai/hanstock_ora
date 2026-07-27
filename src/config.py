@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     
     # Strategy Params
     split_n: int = 7
-    stop_loss_pct: float = -15.0
+    stop_loss_pct: float = -10.0
     take_profit: float = 30.0
     rsi_buy: int = 30
     rsi_sell: int = 70
