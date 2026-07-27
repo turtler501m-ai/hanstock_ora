@@ -282,7 +282,7 @@ class KIStockAPI:
             _kis_throttle()
             today = datetime.now().strftime("%Y%m%d")
             start = (datetime.now() - timedelta(days=365 * 3)).strftime("%Y%m%d")
-            mrkt_div = "E" if symbol in self.ETF_MARKET_CODES else "J"
+            mrkt_div = "J"
             params = {"FID_COND_MRKT_DIV_CODE": mrkt_div, "FID_INPUT_ISCD": symbol, "FID_INPUT_DATE_1": start, "FID_INPUT_DATE_2": today, "FID_PERIOD_DIV_CODE": "D", "FID_ORG_ADJ_PRC": "0"}
             r = HTTP.get(f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice", headers=self._headers("FHKST03010100"), params=params, timeout=15)
             data = self._response_json(r, "Daily chart")

@@ -431,7 +431,7 @@ class KISClient:
         self.check_circuit()
         now = self.now()
         params = {
-            "FID_COND_MRKT_DIV_CODE": "E" if symbol in self.config.etf_market_codes else "J",
+            "FID_COND_MRKT_DIV_CODE": "J",
             "FID_INPUT_ISCD": symbol,
             "FID_INPUT_DATE_1": (now - timedelta(days=365 * 3)).strftime("%Y%m%d"),
             "FID_INPUT_DATE_2": now.strftime("%Y%m%d"),

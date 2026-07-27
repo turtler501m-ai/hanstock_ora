@@ -232,7 +232,7 @@ class TraderKISIntegrationTests(unittest.TestCase):
         self.assertNotIn("CANO=", message)
         self.assertNotIn("inquire-balance?", message)
 
-    def test_get_daily_uses_market_division_by_symbol_type(self):
+    def test_get_daily_uses_domestic_market_division_for_stocks_and_etfs(self):
         response = _FakeResponse({"rt_cd": "0", "output2": [{"stck_bsop_date": "20260425"}]})
 
         with (
@@ -246,7 +246,7 @@ class TraderKISIntegrationTests(unittest.TestCase):
 
         self.assertEqual(etf_daily, [{"stck_bsop_date": "20260425"}])
         self.assertEqual(stock_daily, [{"stck_bsop_date": "20260425"}])
-        self.assertEqual(http_get.call_args_list[0].kwargs["params"]["FID_COND_MRKT_DIV_CODE"], "E")
+        self.assertEqual(http_get.call_args_list[0].kwargs["params"]["FID_COND_MRKT_DIV_CODE"], "J")
         self.assertEqual(http_get.call_args_list[1].kwargs["params"]["FID_COND_MRKT_DIV_CODE"], "J")
 
     def test_get_quote_routes_request_headers_through_client_delegate(self):
