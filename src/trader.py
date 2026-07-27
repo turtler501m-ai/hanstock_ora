@@ -191,14 +191,27 @@ _KIS_ORDER_LAST_CALL = 0.0
 _KIS_ORDER_MIN_INTERVAL_SECONDS = float(os.environ.get("KIS_ORDER_MIN_INTERVAL_SECONDS", "4.0"))
 
 
-def build_kis_client_config() -> KISClientConfig:
-    settings = get_settings()
-    flags = trading_flags(settings)
-    base_url = (
+def _kis_base_url(trading_env: str) -> str:
+    return (
         "https://openapi.koreainvestment.com:9443"
-        if flags.trading_env == "real"
+        if trading_env == "real"
         else "https://openapivts.koreainvestment.com:29443"
     )
+
+
+def build_kis_client_config(group: str = "default") -> KISClientConfig:
+    settings = get_settings()
+    flags = trading_flags(settings)
+    if group == "real_check":
+        return KISClientConfig(
+            base_url=_kis_base_url("real"),
+            app_key=settings.kis_real_check_app_key,
+            app_secret=settings.kis_real_check_app_secret,
+            account_no=settings.kis_real_check_account or settings.kistock_account,
+            trading_env="real",
+            token_cache_path=Path("data") / "kis_token_real_check.json",
+        )
+    base_url = _kis_base_url(flags.trading_env)
     return KISClientConfig(
         base_url=_runtime_value("BASE_URL", base_url),
         app_key=_runtime_value("KISTOCK_APP_KEY", settings.kistock_app_key),
@@ -233,22 +246,48 @@ class KIStockAPI:
     _circuit_opened_at: "datetime | None" = None
     MAX_ERRORS: int = 5
 
-    def __init__(self, notify_errors: bool = True) -> None:
+    def __init__(self, notify_errors: bool = True, group: str = "default") -> None:
         require_online_access("KIS API access")
         self.notify_errors = notify_errors
-        self.client_config = build_kis_client_config()
+        self.group = group
+        self.client_config = build_kis_client_config(group=group)
         self.base_url = getattr(self.client_config, "base_url", BASE_URL)
         self.app_key = getattr(self.client_config, "app_key", KISTOCK_APP_KEY)
         self.app_secret = getattr(self.client_config, "app_secret", KISTOCK_APP_SECRET)
         self.account_no = getattr(self.client_config, "account_no", KISTOCK_ACCOUNT)
         self.trading_env = getattr(self.client_config, "trading_env", TRADING_ENV)
+        if self.group == "real_check":
+            self.token_cache_path = getattr(self.client_config, "token_cache_path", None) or (
+                Path("data") / "kis_token_real_check.json"
+            )
+        else:
+            self.token_cache_path = self.TOKEN_CACHE
+        self._apply_group_condition_settings()
         self.access_token = self._load_or_fetch_token()
         self._client = KISClient(self.client_config, session=HTTP, access_token=self.access_token)
 
+    def _apply_group_condition_settings(self) -> None:
+        settings = get_settings()
+        if self.group == "real_check":
+            self.kis_condition_search_enabled = settings.kis_real_check_condition_search_enabled
+            self.kis_condition_user_id = (
+                settings.kis_real_check_condition_user_id
+                or settings.kis_real_check_hts_id
+                or settings.kistock_hts_id
+            )
+            self.kis_condition_seq = settings.kis_real_check_condition_seq
+            self.kis_condition_name = settings.kis_real_check_condition_name
+            return
+        self.kis_condition_search_enabled = settings.kis_condition_search_enabled
+        self.kis_condition_user_id = settings.kis_condition_user_id or settings.kistock_hts_id
+        self.kis_condition_seq = settings.kis_condition_seq
+        self.kis_condition_name = settings.kis_condition_name
+
     def _load_or_fetch_token(self) -> str:
-        if self.TOKEN_CACHE.exists():
+        cache_path = Path(self.token_cache_path)
+        if cache_path.exists():
             try:
-                cached = json.loads(self.TOKEN_CACHE.read_text(encoding="utf-8"))
+                cached = json.loads(cache_path.read_text(encoding="utf-8"))
                 expires_at = datetime.fromisoformat(cached["expires_at"])
                 if (
                     cached.get("trading_env") == self.trading_env
@@ -275,10 +314,11 @@ class KIStockAPI:
         data = r.json()
         token = data.get("access_token", "")
         expires_at = datetime.now() + timedelta(hours=23)
-        self.TOKEN_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        cache_path = Path(self.token_cache_path)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
         import hashlib
         app_key_hash = hashlib.sha256(self.app_key.encode("utf-8")).hexdigest()
-        self.TOKEN_CACHE.write_text(
+        cache_path.write_text(
             json.dumps({
                 "token": token,
                 "expires_at": expires_at.isoformat(),
@@ -498,6 +538,29 @@ class KIStockAPI:
         )
         self._sync_circuit_from_client()
         return result
+
+
+def real_check_configured(settings=None) -> bool:
+    current = settings or get_settings()
+    return bool(
+        current.kis_real_check_enabled
+        and current.kis_real_check_app_key
+        and current.kis_real_check_app_secret
+    )
+
+
+def build_market_data_api(broker_api: KIStockAPI) -> KIStockAPI:
+    settings = get_settings()
+    if not settings.kis_real_check_enabled:
+        return broker_api
+    if not settings.kis_real_check_app_key or not settings.kis_real_check_app_secret:
+        logger.warning("[KIS real_check] enabled but app key/secret are empty; using broker API for market data")
+        return broker_api
+    try:
+        return KIStockAPI(notify_errors=False, group="real_check")
+    except Exception as exc:
+        logger.warning(f"[KIS real_check] failed to initialize; using broker API for market data: {exc}")
+        return broker_api
 
 
 
@@ -1024,6 +1087,7 @@ def run(
     init_approval_db()
 
     api = KIStockAPI()
+    market_data_api = build_market_data_api(api)
     balance = api.get_balance()
 
     stocks = balance.get("output1", [])
@@ -1068,7 +1132,7 @@ def run(
     if force_strategy_id is not None:
         bp_kwargs["force_strategy_id"] = force_strategy_id
 
-    runtime_bundle = build_runtime_plan(api, balance, **bp_kwargs)
+    runtime_bundle = build_runtime_plan(market_data_api, balance, **bp_kwargs)
     daily_loss_halted = daily_loss_halted or bool(runtime_bundle.get("daily_loss_halt"))
 
     candidates = runtime_bundle.get("candidate_scan", {}).get("candidates", [])

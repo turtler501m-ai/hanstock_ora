@@ -221,6 +221,15 @@ const CATEGORIES = [
             "KIS_CONDITION_USER_ID",
             "KIS_CONDITION_SEQ",
             "KIS_CONDITION_NAME",
+            "KIS_REAL_CHECK_ENABLED",
+            "KIS_REAL_CHECK_APP_KEY",
+            "KIS_REAL_CHECK_APP_SECRET",
+            "KIS_REAL_CHECK_ACCOUNT",
+            "KIS_REAL_CHECK_HTS_ID",
+            "KIS_REAL_CHECK_CONDITION_SEARCH_ENABLED",
+            "KIS_REAL_CHECK_CONDITION_USER_ID",
+            "KIS_REAL_CHECK_CONDITION_SEQ",
+            "KIS_REAL_CHECK_CONDITION_NAME",
             "KIS_CIRCUIT_COOLDOWN_SECONDS"
         ]
     },

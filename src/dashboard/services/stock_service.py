@@ -179,8 +179,9 @@ class DashboardStockService:
         parsed_balance: dict,
         strategy_id: str | None = None,
     ) -> dict:
+        market_data_api = trader.build_market_data_api(api)
         runtime_bundle = trader.build_runtime_plan(
-            api,
+            market_data_api,
             balance_data,
             read_cached_candidates=True,
             force_strategy_id=strategy_id,

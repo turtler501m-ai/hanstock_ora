@@ -64,6 +64,25 @@ class TraderCoreTests(unittest.TestCase):
         self.assertIn("005930", universe)
         self.assertNotIn("000660", universe)
 
+    def test_build_scan_universe_prefers_api_condition_settings(self):
+        api = Mock()
+        api.kis_condition_search_enabled = True
+        api.kis_condition_user_id = "real-check-user"
+        api.kis_condition_seq = "900"
+        api.kis_condition_name = "real-check-breakout"
+        api.get_condition_search_result.return_value = ["005930"]
+
+        with patch("src.strategy.seven_split.config.kis_condition_search_enabled", False):
+            universe = build_scan_universe(api, set())
+
+        api.get_condition_search_result.assert_called_once_with(
+            "real-check-user",
+            "900",
+            "real-check-breakout",
+        )
+        api.get_volume_rank.assert_not_called()
+        self.assertIn("005930", universe)
+
     def test_generate_signal_stop_loss_sells_all(self):
         signal = generate_signal(
             {"prpr": "10000", "hldg_qty": "7", "evlu_pfls_rt": "-20"},

@@ -74,6 +74,50 @@ class TraderKISIntegrationTests(unittest.TestCase):
         self.assertIs(api.client_config, client_config)
         kis_client_cls.assert_called_once_with(client_config, session=trader.HTTP, access_token="token-abc")
 
+    def test_real_check_config_uses_real_market_data_credentials_and_cache(self):
+        with (
+            patch.object(trader.config, "kis_real_check_app_key", "real-key-12345678"),
+            patch.object(trader.config, "kis_real_check_app_secret", "real-secret"),
+            patch.object(trader.config, "kis_real_check_account", "8765432101"),
+        ):
+            client_config = trader.build_kis_client_config(group="real_check")
+
+        self.assertEqual(client_config.trading_env, "real")
+        self.assertEqual(client_config.base_url, "https://openapi.koreainvestment.com:9443")
+        self.assertEqual(client_config.app_key, "real-key-12345678")
+        self.assertEqual(client_config.app_secret, "real-secret")
+        self.assertEqual(client_config.account_no, "8765432101")
+        self.assertEqual(client_config.token_cache_path, Path("data") / "kis_token_real_check.json")
+
+    def test_build_market_data_api_returns_real_check_client_when_enabled(self):
+        broker_api = Mock()
+        real_check_api = Mock()
+
+        with (
+            patch.object(trader.config, "kis_real_check_enabled", True),
+            patch.object(trader.config, "kis_real_check_app_key", "real-key-12345678"),
+            patch.object(trader.config, "kis_real_check_app_secret", "real-secret"),
+            patch.object(trader, "KIStockAPI", return_value=real_check_api) as api_cls,
+        ):
+            result = trader.build_market_data_api(broker_api)
+
+        self.assertIs(result, real_check_api)
+        api_cls.assert_called_once_with(notify_errors=False, group="real_check")
+
+    def test_build_market_data_api_falls_back_when_real_check_credentials_missing(self):
+        broker_api = Mock()
+
+        with (
+            patch.object(trader.config, "kis_real_check_enabled", True),
+            patch.object(trader.config, "kis_real_check_app_key", ""),
+            patch.object(trader.config, "kis_real_check_app_secret", ""),
+            patch.object(trader, "KIStockAPI") as api_cls,
+        ):
+            result = trader.build_market_data_api(broker_api)
+
+        self.assertIs(result, broker_api)
+        api_cls.assert_not_called()
+
     def test_headers_delegate_to_client_and_sync_access_token(self):
         client = Mock()
         client.headers.return_value = {"tr_id": "VTTC8434R", "authorization": "Bearer fresh-token"}
