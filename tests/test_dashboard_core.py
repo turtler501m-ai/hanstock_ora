@@ -1257,6 +1257,60 @@ class DashboardCoreTests(unittest.TestCase):
             dashboard.trader.config.trade_db_path = original_db_path
             dashboard.fetch_cloud_trades = original_fetch_cloud_trades
 
+    def test_balance_sync_adjustment_is_reconciled_not_submitted(self):
+        import src.dashboard.routes.stock as stock_routes
+
+        original_db_path = dashboard.trader.config.trade_db_path
+        original_get_api = stock_routes._get_api
+        original_get_balance_data = stock_routes._get_balance_data
+        original_fetch_cloud_trades = stock_routes.fetch_cloud_trades
+        original_clear_balance_cache = stock_routes._clear_balance_cache
+        original_dry_run = stock_routes.trader.DRY_RUN
+
+        class _FakeAPI:
+            def get_trade_history(self, start_date, end_date):
+                return []
+
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                db_path = f"{tmpdir}/trades.sqlite"
+                dashboard.trader.config.trade_db_path = db_path
+                stock_routes._get_api = lambda: _FakeAPI()
+                stock_routes._get_balance_data = lambda api, allow_cache=True: {
+                    "output1": [
+                        {
+                            "pdno": "005360",
+                            "prdt_name": "Monami",
+                            "hldg_qty": "10",
+                            "pchs_avg_pric": "1700",
+                            "prpr": "1710",
+                            "evlu_pfls_amt": "100",
+                        }
+                    ],
+                    "output2": [{}],
+                }
+                stock_routes.fetch_cloud_trades = lambda: []
+                stock_routes._clear_balance_cache = lambda: None
+                stock_routes.trader.DRY_RUN = False
+
+                result = stock_routes.sync_trades(days=1)
+
+                self.assertEqual(result["balance_synced_count"], 1)
+                with sqlite3.connect(db_path) as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute("SELECT * FROM trades").fetchone()
+                self.assertEqual(row["symbol"], "005360")
+                self.assertEqual(row["order_status"], "reconciled")
+                self.assertEqual(row["broker_order_id"], "")
+                self.assertEqual(row["filled_qty"], 10)
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+            stock_routes._get_api = original_get_api
+            stock_routes._get_balance_data = original_get_balance_data
+            stock_routes.fetch_cloud_trades = original_fetch_cloud_trades
+            stock_routes._clear_balance_cache = original_clear_balance_cache
+            stock_routes.trader.DRY_RUN = original_dry_run
+
     def test_sell_all_holdings_queues_market_sell_for_each_current_holding(self):
         original_db_path = dashboard.trader.config.trade_db_path
         original_get_api = dashboard._get_api

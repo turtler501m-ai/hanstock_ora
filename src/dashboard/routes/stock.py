@@ -2009,7 +2009,10 @@ def sync_trades(days: int = 90):
                     price=price,
                     reason="利앷텒???붽퀬 媛뺤젣 ?숆린??(?섎룞/?꾨씫遺?蹂댁젙)",
                     ok=True,
-                    order_submission_enabled=True
+                    order_submission_enabled=False,
+                    order_status="reconciled",
+                    filled_qty=abs(diff),
+                    filled_price=price,
                 )
                 synced_count += 1
                 
@@ -2043,7 +2046,10 @@ def sync_trades(days: int = 90):
 
                     reason="利앷텒???붽퀬 媛뺤젣 ?숆린??(?꾨웾留ㅻ룄 蹂댁젙)",
                     ok=True,
-                    order_submission_enabled=True
+                    order_submission_enabled=False,
+                    order_status="reconciled",
+                    filled_qty=db_qty,
+                    filled_price=avg_cost,
                 )
                 synced_count += 1
                 
