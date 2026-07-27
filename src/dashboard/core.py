@@ -3362,7 +3362,14 @@ def _load_trackable_order_trades(days: int = MIN_ORDER_HISTORY_SYNC_DAYS) -> lis
             FROM trades
             WHERE broker_order_id IS NOT NULL
               AND broker_order_id != ''
-              AND COALESCE(order_status, '') IN ('submitted', 'partial', 'open', 'filled')
+              AND (
+                    COALESCE(order_status, '') IN ('submitted', 'partial', 'open')
+                    OR (
+                        COALESCE(order_status, '') = 'filled'
+                        AND action = 'sell'
+                        AND source_approval_id IS NOT NULL
+                    )
+                  )
               AND substr(COALESCE(ts, ''), 1, 10) >= ?
             ORDER BY ts ASC
             """,

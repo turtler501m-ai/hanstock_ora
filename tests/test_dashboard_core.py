@@ -995,6 +995,17 @@ class DashboardCoreTests(unittest.TestCase):
                 db_path = f"{tmpdir}/trades.db"
                 dashboard.trader.config.trade_db_path = db_path
                 dashboard.trader.init_db()
+                approval_id = dashboard._create_approval_row({
+                    "symbol": "005360",
+                    "name": "Monami",
+                    "action": "sell",
+                    "qty": 10,
+                    "price": 1782,
+                    "reason": "sell",
+                    "source": "trader",
+                })
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute("UPDATE approvals SET status = 'executed' WHERE id = ?", (approval_id,))
                 dashboard.trader.save_trade(
                     "005360",
                     "Monami",
@@ -1007,6 +1018,7 @@ class DashboardCoreTests(unittest.TestCase):
                     broker_order_id="0001",
                     order_status="filled",
                     filled_qty=10,
+                    source_approval_id=approval_id,
                 )
 
                 class FakeAPI:
