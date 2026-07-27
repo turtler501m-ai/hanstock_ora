@@ -186,6 +186,29 @@ def available_buying_cash(
     return min(max(0, int(broker_cash or 0)), remaining_exposure)
 
 
+def buying_cash_diagnostics(
+    broker_cash: int | float,
+    stock_eval: int | float,
+    account_total_eval: int | float,
+) -> dict:
+    """Expose why new-buy cash is capped for dashboard/log diagnostics."""
+    settings = get_settings()
+    capital = operating_capital(account_total_eval)
+    cash_buffer = float(_runtime_value("CASH_BUFFER", settings.cash_buffer) or 0)
+    investable_limit = int(capital * max(0.0, 1.0 - cash_buffer))
+    exposure_remaining = investable_limit - max(0, int(stock_eval or 0))
+    broker_cash_int = max(0, int(broker_cash or 0))
+    return {
+        "broker_cash": broker_cash_int,
+        "stock_eval": max(0, int(stock_eval or 0)),
+        "operating_capital": capital,
+        "cash_buffer": cash_buffer,
+        "investable_limit": investable_limit,
+        "exposure_remaining": exposure_remaining,
+        "buying_cash": min(broker_cash_int, max(0, exposure_remaining)),
+    }
+
+
 _KIS_ORDER_THROTTLE_LOCK = threading.Lock()
 _KIS_ORDER_LAST_CALL = 0.0
 _KIS_ORDER_MIN_INTERVAL_SECONDS = float(os.environ.get("KIS_ORDER_MIN_INTERVAL_SECONDS", "4.0"))
@@ -841,7 +864,8 @@ def build_runtime_plan(
             for stock in stocks
         )
     capital = operating_capital(total_eval)
-    buying_cash = available_buying_cash(cash, stock_eval, total_eval)
+    buying_cash_info = buying_cash_diagnostics(cash, stock_eval, total_eval)
+    buying_cash = int(buying_cash_info["buying_cash"])
     pnl = int(summary.get("evlu_pfls_smtl_amt", 0) or 0)
     isolated_strategy_run = active_strategy_id in _ISOLATED_STRATEGY_IDS
 
@@ -1083,6 +1107,7 @@ def build_runtime_plan(
         "candidate_scan": candidate_scan,
         "cash": cash,
         "buying_cash": buying_cash,
+        "buying_cash_info": buying_cash_info,
         "operating_capital": capital,
         "held_symbols": {s.get("pdno", "") for s in stocks},
     }
@@ -1175,15 +1200,24 @@ def run(
         if row.get("action") == "buy":
             estimated_cost = _estimated_buy_cost(row)
             if execution_buying_cash <= 0:
+                buying_cash_info = runtime_bundle.get("buying_cash_info") or {}
+                skip_reason = "buying cash unavailable"
+                broker_cash = int(buying_cash_info.get("broker_cash") or cash or 0)
+                exposure_remaining = int(buying_cash_info.get("exposure_remaining") or 0)
+                if broker_cash > 0 and exposure_remaining <= 0:
+                    skip_reason = "capital exposure limit reached"
                 logger.warning(
-                    "[BUY SKIP] buying cash unavailable: "
-                    f"{row.get('symbol')} qty={row.get('qty')} price={row.get('price')}"
+                    f"[BUY SKIP] {skip_reason}: "
+                    f"{row.get('symbol')} qty={row.get('qty')} price={row.get('price')} "
+                    f"cash={broker_cash:,} "
+                    f"stock_eval={int(buying_cash_info.get('stock_eval') or 0):,} "
+                    f"investable_limit={int(buying_cash_info.get('investable_limit') or 0):,}"
                 )
                 results.append({
                     **row,
                     "decision": "skip",
                     "ok": True,
-                    "skip_reason": "buying cash unavailable",
+                    "skip_reason": skip_reason,
                 })
                 continue
             if estimated_cost > execution_buying_cash:

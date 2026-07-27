@@ -1094,6 +1094,9 @@ def build_orders(
     if available_slots <= 0:
         logger.info(f"[INFO] Max positions reached ({config.max_positions}); no new buy orders")
         return []
+    if cash <= 0:
+        logger.info("[INFO] No new-buy budget available; no candidate buy orders")
+        return []
 
     for c in candidates[:available_slots]:
         quote = get_quote_fn(c["ticker"])
@@ -1135,7 +1138,7 @@ def build_orders(
         
         total_cost = sum(o["estimated_cost"] for o in orders)
         budget = min(deployable, cash)
-        if total_cost > budget and budget > 0:
+        if total_cost > budget:
             scale = budget / total_cost
             for o in orders:
                 o["quantity"] = math.floor(o["quantity"] * scale)
@@ -1174,7 +1177,7 @@ def build_orders(
                 
         total_cost = sum(o["estimated_cost"] for o in orders)
         budget = min(deployable, cash)
-        if total_cost > budget and budget > 0:
+        if total_cost > budget:
             scale = budget / total_cost
             for o in orders:
                 o["quantity"] = math.floor(o["quantity"] * scale)

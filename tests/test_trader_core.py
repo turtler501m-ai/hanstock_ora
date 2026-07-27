@@ -35,6 +35,16 @@ class TraderCoreTests(unittest.TestCase):
         self.assertEqual(len(orders), 1)
         self.assertLessEqual(orders[0]["estimated_cost"], 1_000_000)
 
+    def test_build_orders_returns_empty_when_cash_budget_is_zero(self):
+        orders = build_orders(
+            [{"ticker": "005930", "score": 2, "reasons": ["test"]}],
+            lambda _symbol: {"ask1": 70000, "current": 70000},
+            held_count=0,
+            cash=0,
+        )
+
+        self.assertEqual(orders, [])
+
     def test_build_orders_excludes_configured_symbols(self):
         with patch("src.strategy.seven_split.config.hanstock_excluded_symbols", "252670"):
             orders = build_orders(

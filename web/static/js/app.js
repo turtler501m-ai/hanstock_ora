@@ -105,6 +105,7 @@ const SKIP_REASON_LABELS = {
     'category filtered': '카테고리 제외',
     'daily loss halt blocks buy orders only': '일손실 한도 초과로 신규 매수 차단',
     'buying cash unavailable': '매수가능현금 없음',
+    'capital exposure limit reached': '운용자본 한도 초과',
     'buy order exceeds buying cash': '주문금액이 매수가능현금 초과',
 };
 

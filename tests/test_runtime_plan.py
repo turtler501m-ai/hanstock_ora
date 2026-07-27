@@ -225,6 +225,64 @@ class RuntimePlanTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["skip_reason"], "buying cash unavailable")
         execute_plan_row.assert_not_called()
 
+    def test_run_reports_capital_exposure_limit_when_cash_exists_but_cap_is_full(self):
+        balance = {
+            "output1": [
+                {
+                    "pdno": "005930",
+                    "prdt_name": "Samsung",
+                    "evlu_pfls_rt": "-8.0",
+                    "evlu_amt": "90000000",
+                }
+            ],
+            "output2": [
+                {
+                    "dnca_tot_amt": "20000000",
+                    "scts_evlu_amt": "90000000",
+                    "tot_evlu_amt": "110000000",
+                    "evlu_pfls_smtl_amt": "-100000",
+                }
+            ],
+        }
+        api = self.make_api(balance=balance)
+
+        with (
+            patch("src.trader.check_secrets"),
+            patch("src.trader.init_db"),
+            patch("src.trader.init_approval_db"),
+            patch("src.trader.KIStockAPI", return_value=api),
+            patch("src.trader.slack_session_start"),
+            patch("src.trader.slack_session_end"),
+            patch("src.trader.check_daily_loss", return_value=False),
+            patch("src.trader.daily_loss_halt_triggered", return_value=False),
+            patch("src.trader.TOTAL_CAPITAL", 100_000_000),
+            patch("src.trader.CASH_BUFFER", 0.20),
+            patch("src.trader.generate_signal", return_value={
+                "action": "buy",
+                "qty": 1,
+                "price": 70000,
+                "reason": "average down",
+                "indicators": {"rsi": 35, "sma20": 10, "sma60": 9, "bb_lo": 8, "bb_hi": 12},
+            }),
+            patch("src.trader.build_scan_universe", return_value=[]),
+            patch("src.trader.find_candidates", return_value={
+                "candidates": [],
+                "scan_summary": [],
+                "scanned": 0,
+                "min_score": 2,
+                "scan_error": None,
+            }),
+            patch("src.trader.execute_plan_row") as execute_plan_row,
+        ):
+            result = trader.run()
+
+        self.assertEqual(result["buying_cash"], 0)
+        self.assertEqual(result["buying_cash_info"]["broker_cash"], 20_000_000)
+        self.assertLessEqual(result["buying_cash_info"]["exposure_remaining"], 0)
+        self.assertEqual(result["results"][0]["decision"], "skip")
+        self.assertEqual(result["results"][0]["skip_reason"], "capital exposure limit reached")
+        execute_plan_row.assert_not_called()
+
     def test_run_analysis_only_returns_plan_without_submitting_orders(self):
         balance = {
             "output1": [
