@@ -583,15 +583,36 @@ def generate_portfolio_optimizer_plan(holdings: list[dict], total_eval: int) -> 
 
 
 def _condition_search_universe(api: "KIStockAPI") -> list[str]:
-    if not bool(getattr(config, "kis_condition_search_enabled", False)):
+    api_enabled = getattr(api, "kis_condition_search_enabled", None)
+    if not isinstance(api_enabled, (bool, str, int)):
+        api_enabled = getattr(config, "kis_condition_search_enabled", False)
+    if not bool(api_enabled):
         return []
+    api_user_id = getattr(api, "kis_condition_user_id", "")
+    api_condition_no = getattr(api, "kis_condition_seq", "")
+    api_condition_name = getattr(api, "kis_condition_name", "")
+    if not isinstance(api_user_id, str):
+        api_user_id = ""
+    if not isinstance(api_condition_no, str):
+        api_condition_no = ""
+    if not isinstance(api_condition_name, str):
+        api_condition_name = ""
     user_id = str(
-        getattr(config, "kis_condition_user_id", "")
+        api_user_id
+        or getattr(config, "kis_condition_user_id", "")
         or getattr(config, "kistock_hts_id", "")
         or ""
     ).strip()
-    condition_no = str(getattr(config, "kis_condition_seq", "") or "").strip()
-    condition_name = str(getattr(config, "kis_condition_name", "") or "").strip()
+    condition_no = str(
+        api_condition_no
+        or getattr(config, "kis_condition_seq", "")
+        or ""
+    ).strip()
+    condition_name = str(
+        api_condition_name
+        or getattr(config, "kis_condition_name", "")
+        or ""
+    ).strip()
     if not user_id or not condition_no or not condition_name:
         logger.warning("[SCAN] KIS 조건검색 설정이 부족해 조건검색 유니버스를 건너뜁니다.")
         return []

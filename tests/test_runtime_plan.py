@@ -238,6 +238,55 @@ class RuntimePlanTests(unittest.TestCase):
         save_trade.assert_not_called()
         slack_order.assert_not_called()
 
+    def test_run_uses_real_check_api_for_plan_and_broker_api_for_execution(self):
+        balance = {
+            "output1": [{"pdno": "005930", "prdt_name": "Samsung", "evlu_pfls_rt": "-12.0"}],
+            "output2": [{"dnca_tot_amt": "1000000", "tot_evlu_amt": "2000000", "evlu_pfls_smtl_amt": "0"}],
+        }
+        broker_api = self.make_api(balance=balance)
+        market_data_api = Mock()
+        runtime_bundle = {
+            "plan": [
+                {
+                    "category": "position",
+                    "symbol": "005930",
+                    "name": "Samsung",
+                    "action": "sell",
+                    "qty": 1,
+                    "price": 0,
+                    "reason": "stop loss",
+                }
+            ],
+            "candidate_scan": {"candidates": []},
+            "daily_loss_halt": False,
+            "remaining_cash": 1000000,
+        }
+
+        with (
+            patch("src.trader.check_secrets"),
+            patch("src.trader.init_db"),
+            patch("src.trader.init_approval_db"),
+            patch("src.trader.KIStockAPI", return_value=broker_api),
+            patch("src.trader.build_market_data_api", return_value=market_data_api) as build_market_data_api,
+            patch("src.trader.build_runtime_plan", return_value=runtime_bundle) as build_runtime_plan,
+            patch("src.trader.slack_session_start"),
+            patch("src.trader.slack_session_end"),
+            patch(
+                "src.trader.execute_plan_row",
+                side_effect=lambda api, _context, row: {
+                    **row,
+                    "ok": api is broker_api,
+                    "decision": "execute",
+                },
+            ) as execute_plan_row,
+        ):
+            result = trader.run()
+
+        build_market_data_api.assert_called_once_with(broker_api)
+        build_runtime_plan.assert_called_once_with(market_data_api, balance)
+        self.assertTrue(result["results"][0]["ok"])
+        execute_plan_row.assert_called_once()
+
     def test_run_can_limit_execution_to_ai_rebalance_category(self):
         balance = {
             "output1": [],

@@ -170,6 +170,15 @@ GIT_FETCH_TIMEOUT_SECONDS = float(os.environ.get("GIT_FETCH_TIMEOUT_SECONDS", "3
 MIN_ORDER_HISTORY_SYNC_DAYS = 30
 _balance_fetch_lock = threading.Lock()
 ENV_FIELDS = [
+    {"key": "KIS_REAL_CHECK_ENABLED", "label": "KIS real_check Enabled", "type": "bool", "hint": "Use real KIS API for market-data checks only; balance and orders keep using the execution account."},
+    {"key": "KIS_REAL_CHECK_APP_KEY", "label": "KIS real_check App Key", "type": "secret"},
+    {"key": "KIS_REAL_CHECK_APP_SECRET", "label": "KIS real_check App Secret", "type": "secret"},
+    {"key": "KIS_REAL_CHECK_ACCOUNT", "label": "KIS real_check Account", "type": "text"},
+    {"key": "KIS_REAL_CHECK_HTS_ID", "label": "KIS real_check HTS ID", "type": "text"},
+    {"key": "KIS_REAL_CHECK_CONDITION_SEARCH_ENABLED", "label": "KIS real_check Condition Enabled", "type": "bool"},
+    {"key": "KIS_REAL_CHECK_CONDITION_USER_ID", "label": "KIS real_check Condition User ID", "type": "text"},
+    {"key": "KIS_REAL_CHECK_CONDITION_SEQ", "label": "KIS real_check Condition Seq", "type": "text"},
+    {"key": "KIS_REAL_CHECK_CONDITION_NAME", "label": "KIS real_check Condition Name", "type": "text"},
     {"key": "KISTOCK_APP_KEY", "label": "KIS App Key", "type": "secret"},
     {"key": "KISTOCK_APP_SECRET", "label": "KIS App Secret", "type": "secret"},
     {"key": "KISTOCK_ACCOUNT", "label": "KIS Account", "type": "text", "hint": "怨꾩쥖踰덊샇 8?먮━ ?먮뒗 怨꾩쥖踰덊샇 8?먮━ + ?곹뭹肄붾뱶 2?먮━, ?? 12345678 ?먮뒗 1234567801"},
@@ -1258,6 +1267,15 @@ KIS_ENV_BINDINGS = {
     "KIS_CONDITION_USER_ID": ("kis_condition_user_id", str),
     "KIS_CONDITION_SEQ": ("kis_condition_seq", str),
     "KIS_CONDITION_NAME": ("kis_condition_name", str),
+    "KIS_REAL_CHECK_ENABLED": ("kis_real_check_enabled", lambda value: str(value).lower() in ("1", "true", "yes", "on")),
+    "KIS_REAL_CHECK_APP_KEY": ("kis_real_check_app_key", str),
+    "KIS_REAL_CHECK_APP_SECRET": ("kis_real_check_app_secret", str),
+    "KIS_REAL_CHECK_ACCOUNT": ("kis_real_check_account", str),
+    "KIS_REAL_CHECK_HTS_ID": ("kis_real_check_hts_id", str),
+    "KIS_REAL_CHECK_CONDITION_SEARCH_ENABLED": ("kis_real_check_condition_search_enabled", lambda value: str(value).lower() in ("1", "true", "yes", "on")),
+    "KIS_REAL_CHECK_CONDITION_USER_ID": ("kis_real_check_condition_user_id", str),
+    "KIS_REAL_CHECK_CONDITION_SEQ": ("kis_real_check_condition_seq", str),
+    "KIS_REAL_CHECK_CONDITION_NAME": ("kis_real_check_condition_name", str),
 }
 
 
