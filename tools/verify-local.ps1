@@ -1,3 +1,9 @@
+[CmdletBinding()]
+param(
+    [ValidateSet("quick", "dashboard", "trading", "ai", "all")]
+    [string]$Profile = "quick"
+)
+
 $ErrorActionPreference = "Stop"
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -26,11 +32,52 @@ function Get-PythonPath {
 
 $python = Get-PythonPath
 
-powershell -ExecutionPolicy Bypass -File tools\check-encoding.ps1
+Write-Host "verify-local profile: $Profile"
+
+if ($Profile -eq "all") {
+    powershell -ExecutionPolicy Bypass -File tools\check-encoding.ps1
+}
+
 & $python -c "import pathlib; [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for root in ('src','tests') for p in pathlib.Path(root).rglob('*.py')]"
-& $python -m py_compile tools\demo-trading-rehearsal.py
-& $python -m unittest discover -s tests -t .
-& $python tools\demo-trading-rehearsal.py --no-db --allow-not-ready
+
+$testTargets = @{
+    quick = @(
+        "tests.test_dashboard_core",
+        "tests.test_runtime_plan",
+        "tests.test_scheduler_api"
+    )
+    dashboard = @(
+        "tests.test_dashboard_core",
+        "tests.test_dashboard_auth",
+        "tests.test_dashboard_execution_plan",
+        "tests.test_dashboard_plan_views",
+        "tests.test_runtime_dashboard_alignment",
+        "tests.test_scheduler_api"
+    )
+    trading = @(
+        "tests.test_trader_core",
+        "tests.test_runtime_plan",
+        "tests.test_order_router",
+        "tests.test_execution_policy",
+        "tests.test_kis_api",
+        "tests.test_kis_client"
+    )
+    ai = @(
+        "tests.test_ai_stock_core",
+        "tests.test_ai_stock_api",
+        "tests.test_ai_strategy_lifecycle",
+        "tests.test_ai_strategy_presets",
+        "tests.test_autonomy_ai_stock_integration"
+    )
+}
+
+if ($Profile -eq "all") {
+    & $python -m py_compile tools\demo-trading-rehearsal.py
+    & $python -m unittest discover -s tests -t .
+    & $python tools\demo-trading-rehearsal.py --no-db --allow-not-ready
+} else {
+    & $python -m unittest @($testTargets[$Profile])
+}
 
 node --check web\static\js\app.js
 node --check web\static\js\futures_signals.js

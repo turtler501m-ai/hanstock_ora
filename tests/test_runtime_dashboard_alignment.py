@@ -201,7 +201,10 @@ class RuntimeDashboardAlignmentTests(unittest.TestCase):
             "held_symbols": {"005930"},
         }
         api = Mock()
-        api.get_balance.return_value = {"output1": [{"pdno": "005930"}], "output2": [{}]}
+        api.get_balance.return_value = {
+            "output1": [{"pdno": "005930"}],
+            "output2": [{"dnca_tot_amt": "500000", "prvs_rcdl_excc_amt": "500000", "tot_evlu_amt": "1500000"}],
+        }
 
         with ExitStack() as stack:
             stack.enter_context(patch("src.trader.check_secrets"))

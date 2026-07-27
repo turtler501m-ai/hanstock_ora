@@ -767,6 +767,129 @@ class DashboardCoreTests(unittest.TestCase):
             dashboard.trader.config.trade_db_path = original_db_path
             dashboard.AUTO_APPROVAL_STALE_EXECUTING_SECONDS = original_stale_seconds
 
+    def test_retry_approval_creates_pending_sell_for_remaining_sellable_qty(self):
+        original_db_path = dashboard.trader.config.trade_db_path
+        original_get_api = dashboard._get_api
+        original_get_balance_data = dashboard._get_balance_data
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                db_path = f"{tmpdir}/trades.db"
+                dashboard.trader.config.trade_db_path = db_path
+                dashboard.trader.init_db()
+                dashboard._get_api = lambda: object()
+                approval_id = dashboard._create_approval_row({
+                    "symbol": "005360",
+                    "name": "Monami",
+                    "action": "sell",
+                    "qty": 10,
+                    "price": 1782,
+                    "reason": "sell all",
+                    "source": "dashboard_sell_all",
+                })
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute("UPDATE approvals SET status = 'executed' WHERE id = ?", (approval_id,))
+                dashboard.trader.save_trade(
+                    "005360",
+                    "Monami",
+                    "sell",
+                    10,
+                    1782,
+                    "sell all",
+                    True,
+                    True,
+                    broker_result={"odno": "0001"},
+                    order_status="partial",
+                    filled_qty=4,
+                    filled_price=1780,
+                    source_approval_id=approval_id,
+                )
+
+                dashboard._get_balance_data = lambda api, allow_cache=False: {
+                    "output1": [{
+                        "pdno": "005360",
+                        "prdt_name": "Monami",
+                        "hldg_qty": "8",
+                        "ord_psbl_qty": "3",
+                        "prpr": "1700",
+                    }],
+                    "output2": [{}],
+                }
+
+                result = dashboard.retry_approval_order(approval_id)
+
+                self.assertEqual(result["status"], "pending")
+                self.assertEqual(result["qty"], 3)
+                with sqlite3.connect(db_path) as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute(
+                        "SELECT * FROM approvals WHERE id = ?",
+                        (result["id"],),
+                    ).fetchone()
+                self.assertEqual(row["symbol"], "005360")
+                self.assertEqual(row["action"], "sell")
+                self.assertEqual(row["qty"], 3)
+                self.assertEqual(row["price"], 0)
+                self.assertEqual(row["source"], "dashboard_retry")
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+            dashboard._get_api = original_get_api
+            dashboard._get_balance_data = original_get_balance_data
+
+    def test_retry_approval_blocks_when_sellable_quantity_is_zero(self):
+        original_db_path = dashboard.trader.config.trade_db_path
+        original_get_api = dashboard._get_api
+        original_get_balance_data = dashboard._get_balance_data
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                db_path = f"{tmpdir}/trades.db"
+                dashboard.trader.config.trade_db_path = db_path
+                dashboard.trader.init_db()
+                dashboard._get_api = lambda: object()
+                approval_id = dashboard._create_approval_row({
+                    "symbol": "005360",
+                    "name": "Monami",
+                    "action": "sell",
+                    "qty": 10,
+                    "price": 1782,
+                    "reason": "sell all",
+                    "source": "dashboard_sell_all",
+                })
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute("UPDATE approvals SET status = 'failed' WHERE id = ?", (approval_id,))
+                dashboard.trader.save_trade(
+                    "005360",
+                    "Monami",
+                    "sell",
+                    10,
+                    1782,
+                    "sell all",
+                    False,
+                    True,
+                    broker_result={},
+                    order_status="failed",
+                    filled_qty=0,
+                    source_approval_id=approval_id,
+                )
+                dashboard._get_balance_data = lambda api, allow_cache=False: {
+                    "output1": [{
+                        "pdno": "005360",
+                        "prdt_name": "Monami",
+                        "hldg_qty": "10",
+                        "ord_psbl_qty": "0",
+                    }],
+                    "output2": [{}],
+                }
+
+                with self.assertRaises(dashboard.HTTPException) as ctx:
+                    dashboard.retry_approval_order(approval_id)
+
+                self.assertEqual(ctx.exception.status_code, 409)
+                self.assertIn("sellable quantity is zero", str(ctx.exception.detail))
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+            dashboard._get_api = original_get_api
+            dashboard._get_balance_data = original_get_balance_data
+
     def test_order_status_sync_marks_submitted_demo_order_filled(self):
         original_db_path = dashboard.trader.config.trade_db_path
         original_dry_run = dashboard.trader.DRY_RUN

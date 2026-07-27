@@ -2558,6 +2558,10 @@ async function renderApprovals() {
             const statusKind = status === 'pending' ? 'warn' : (status === 'executed' ? 'buy' : (status === 'failed' ? 'sell' : 'hold'));
             const estimatedCost = Number(row.qty || 0) * Number(row.price || 0);
             const autoApprovalInProgress = Boolean(row.auto_approval_in_progress);
+            const retryButton = row.retry_eligible
+                ? `<button type="button" class="retry-approval" data-id="${row.id}">재처리</button>`
+                : '';
+            const responseText = escapeHtml(row.response_msg || row.order_status || '');
             const controls = status === 'pending' && autoApprovalInProgress
                 ? `<span class="time-muted">자동승인 진행중</span>`
                 : status === 'pending'
@@ -2565,7 +2569,10 @@ async function renderApprovals() {
                     <button type="button" class="approve-order" data-id="${row.id}">승인</button>
                     <button type="button" class="button-danger reject-order" data-id="${row.id}">거절</button>
                    </div>`
-                : `<span class="time-muted">${escapeHtml(row.response_msg || '')}</span>`;
+                : `<div class="button-row">
+                    <span class="time-muted">${responseText}</span>
+                    ${retryButton}
+                   </div>`;
 
             const tr = document.createElement('tr');
             tr.innerHTML = `
@@ -2593,6 +2600,9 @@ async function renderApprovals() {
         });
         document.querySelectorAll('.reject-order').forEach((button) => {
             button.addEventListener('click', () => handleApprovalAction(button, 'reject'));
+        });
+        document.querySelectorAll('.retry-approval').forEach((button) => {
+            button.addEventListener('click', () => executeApprovalAction(button, 'retry'));
         });
     } catch (err) {
         setTableMessage('#table-approvals tbody', 9, err.message);

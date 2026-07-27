@@ -1525,8 +1525,19 @@ def get_approvals(limit: int = 50):
             (limit,),
         ).fetchall()
     approvals = []
+    latest_trades = _latest_trades_by_approval_ids([int(row["id"]) for row in rows])
     for row in rows:
         item = _approval_row(row)
+        trade = latest_trades.get(int(item.get("id") or 0))
+        if trade:
+            item["trade_id"] = trade.get("id")
+            item["broker_order_id"] = trade.get("broker_order_id")
+            item["order_status"] = trade.get("order_status")
+            item["filled_qty"] = _to_int(trade.get("filled_qty"))
+            item["pre_order_qty"] = _to_int(trade.get("pre_order_qty"))
+            item["retry_eligible"] = _approval_retry_eligible(item, trade)
+        else:
+            item["retry_eligible"] = _approval_retry_eligible(item, None)
         item["auto_approval_in_progress"] = (
             auto_approval_enabled
             and item.get("status") == "pending"
@@ -1534,6 +1545,108 @@ def get_approvals(limit: int = 50):
         )
         approvals.append(item)
     return {"approvals": approvals}
+
+
+def _latest_trades_by_approval_ids(approval_ids: list[int]) -> dict[int, dict]:
+    ids = [int(approval_id) for approval_id in approval_ids if int(approval_id or 0) > 0]
+    if not ids:
+        return {}
+    trader.init_db()
+    placeholders = ", ".join("?" for _ in ids)
+    with trader.connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM trades
+            WHERE source_approval_id IN ({placeholders})
+            ORDER BY id DESC
+            """,
+            ids,
+        ).fetchall()
+    latest: dict[int, dict] = {}
+    for row in rows:
+        item = dict(row)
+        approval_id = _to_int(item.get("source_approval_id"))
+        if approval_id > 0 and approval_id not in latest:
+            latest[approval_id] = item
+    return latest
+
+
+def _latest_trade_by_approval_id(approval_id: int) -> dict | None:
+    return _latest_trades_by_approval_ids([approval_id]).get(int(approval_id))
+
+
+def _approval_retry_eligible(item: dict, trade: dict | None) -> bool:
+    if str(item.get("action") or "").lower() != "sell":
+        return False
+    if str(item.get("status") or "") == "pending":
+        return False
+    trade_status = str((trade or {}).get("order_status") or "").lower()
+    approval_status = str(item.get("status") or "").lower()
+    if trade_status in {"failed", "partial"}:
+        return True
+    return approval_status == "failed"
+
+
+def _current_sellable_qty(symbol: str) -> int:
+    try:
+        parsed = _parse_balance(_get_balance_data(_get_api(), allow_cache=False))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"KIS balance API request failed: {exc}") from exc
+    for holding in parsed.get("holdings", []):
+        if str(holding.get("symbol") or "").strip() == str(symbol).strip():
+            holding_qty = _to_int(holding.get("qty"))
+            sellable_qty = _to_int(holding.get("sellable_qty", holding_qty))
+            return max(0, min(holding_qty, sellable_qty))
+    return 0
+
+
+@router.post("/api/approvals/{approval_id}/retry")
+def retry_approval_order(approval_id: int):
+    item = _approval_by_id(approval_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="approval not found")
+    trade = _latest_trade_by_approval_id(approval_id)
+    if not _approval_retry_eligible(item, trade):
+        raise HTTPException(status_code=409, detail="approval is not retryable")
+
+    symbol = str(item.get("symbol") or "").strip()
+    sellable_qty = _current_sellable_qty(symbol)
+    if sellable_qty <= 0:
+        raise HTTPException(
+            status_code=409,
+            detail="sellable quantity is zero; cancel or wait for the existing sell order to settle before retry",
+        )
+
+    original_qty = _to_int(item.get("qty"))
+    filled_qty = _to_int((trade or {}).get("filled_qty"))
+    remaining_qty = max(0, original_qty - filled_qty)
+    retry_qty = min(sellable_qty, remaining_qty if remaining_qty > 0 else sellable_qty)
+    if retry_qty <= 0:
+        raise HTTPException(status_code=409, detail="no remaining quantity to retry")
+
+    retry_id = _create_approval_row({
+        "symbol": symbol,
+        "name": item.get("name") or symbol,
+        "action": "sell",
+        "qty": retry_qty,
+        "price": 0,
+        "reason": f"retry approval #{approval_id}: {item.get('reason') or ''}".strip(),
+        "source": "dashboard_retry",
+        "strategy_id": item.get("strategy_id"),
+        "strategy_version": item.get("strategy_version"),
+        "profile_hash": item.get("profile_hash"),
+        "source_candidate_id": item.get("source_candidate_id"),
+    })
+    return {
+        "id": retry_id,
+        "status": "pending",
+        "source_approval_id": approval_id,
+        "symbol": symbol,
+        "qty": retry_qty,
+        "sellable_qty": sellable_qty,
+    }
 
 
 
