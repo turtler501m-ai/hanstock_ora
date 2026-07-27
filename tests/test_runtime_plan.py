@@ -283,6 +283,110 @@ class RuntimePlanTests(unittest.TestCase):
         self.assertEqual(result["results"][0]["skip_reason"], "capital exposure limit reached")
         execute_plan_row.assert_not_called()
 
+    def test_runtime_plan_excludes_locked_sell_holding_from_new_buy_budget(self):
+        balance = {
+            "output1": [
+                {
+                    "pdno": "005360",
+                    "prdt_name": "Monami",
+                    "hldg_qty": "1000",
+                    "ord_psbl_qty": "0",
+                    "prpr": "90000",
+                    "evlu_amt": "90000000",
+                    "evlu_pfls_rt": "-8.0",
+                }
+            ],
+            "output2": [
+                {
+                    "dnca_tot_amt": "20000000",
+                    "scts_evlu_amt": "90000000",
+                    "tot_evlu_amt": "110000000",
+                    "evlu_pfls_smtl_amt": "-100000",
+                }
+            ],
+        }
+        api = self.make_api(balance=balance)
+
+        with (
+            patch("src.trader.TOTAL_CAPITAL", 100_000_000),
+            patch("src.trader.CASH_BUFFER", 0.20),
+            patch("src.trader._sell_order_symbols_by_status", return_value={
+                "submitted": set(),
+                "open": set(),
+                "partial": {"005360"},
+                "failed": set(),
+            }),
+            patch("src.trader.build_scan_universe", return_value=[]),
+            patch("src.trader.find_candidates", return_value={
+                "candidates": [],
+                "scan_summary": [],
+                "scanned": 0,
+                "min_score": 2,
+                "scan_error": None,
+            }),
+        ):
+            result = trader.build_runtime_plan(api, balance)
+
+        self.assertEqual(result["buying_cash"], 20_000_000)
+        self.assertEqual(result["buying_cash_info"]["locked_holding_eval"], 90_000_000)
+        self.assertEqual(result["locked_holding_symbols"], ["005360"])
+        self.assertEqual(result["position_plan_rows"][0]["action"], "hold")
+        self.assertEqual(
+            result["position_plan_rows"][0]["skip_reason"],
+            "sell order pending or holding is not orderable",
+        )
+
+    def test_runtime_plan_retries_unresolved_sell_when_sellable_quantity_returns(self):
+        balance = {
+            "output1": [
+                {
+                    "pdno": "005360",
+                    "prdt_name": "Monami",
+                    "hldg_qty": "1000",
+                    "ord_psbl_qty": "300",
+                    "prpr": "1700",
+                    "evlu_amt": "1700000",
+                    "evlu_pfls_rt": "-8.0",
+                }
+            ],
+            "output2": [
+                {
+                    "dnca_tot_amt": "20000000",
+                    "scts_evlu_amt": "1700000",
+                    "tot_evlu_amt": "21700000",
+                    "evlu_pfls_smtl_amt": "-100000",
+                }
+            ],
+        }
+        api = self.make_api(balance=balance)
+
+        with (
+            patch("src.trader.TOTAL_CAPITAL", 100_000_000),
+            patch("src.trader.CASH_BUFFER", 0.20),
+            patch("src.trader._sell_order_symbols_by_status", return_value={
+                "submitted": set(),
+                "open": set(),
+                "partial": {"005360"},
+                "failed": set(),
+            }),
+            patch("src.trader.build_scan_universe", return_value=[]),
+            patch("src.trader.find_candidates", return_value={
+                "candidates": [],
+                "scan_summary": [],
+                "scanned": 0,
+                "min_score": 2,
+                "scan_error": None,
+            }),
+            patch("src.trader.generate_signal") as generate_signal,
+        ):
+            result = trader.build_runtime_plan(api, balance)
+
+        self.assertEqual(result["position_plan_rows"][0]["source"], "sell_retry")
+        self.assertEqual(result["position_plan_rows"][0]["action"], "sell")
+        self.assertEqual(result["position_plan_rows"][0]["qty"], 300)
+        self.assertEqual(result["position_plan_rows"][0]["price"], 0)
+        generate_signal.assert_not_called()
+
     def test_run_analysis_only_returns_plan_without_submitting_orders(self):
         balance = {
             "output1": [

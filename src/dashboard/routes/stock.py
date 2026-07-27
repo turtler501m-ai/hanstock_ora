@@ -307,6 +307,8 @@ def _compact_scheduler_status_result(last_result: dict | None, item_limit: int =
         "cash",
         "buying_cash",
         "buying_cash_info",
+        "locked_holding_symbols",
+        "retryable_sell_symbols",
         "strategy_id",
         "order_status_sync",
     ):

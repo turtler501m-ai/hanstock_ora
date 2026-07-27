@@ -107,6 +107,7 @@ const SKIP_REASON_LABELS = {
     'buying cash unavailable': '매수가능현금 없음',
     'capital exposure limit reached': '운용자본 한도 초과',
     'buy order exceeds buying cash': '주문금액이 매수가능현금 초과',
+    'sell order pending or holding is not orderable': '매도대기/주문불가 보유',
 };
 
 const schedulerSkipReasonLabel = (row = {}) => {

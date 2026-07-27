@@ -190,17 +190,22 @@ def buying_cash_diagnostics(
     broker_cash: int | float,
     stock_eval: int | float,
     account_total_eval: int | float,
+    *,
+    locked_holding_eval: int | float = 0,
 ) -> dict:
     """Expose why new-buy cash is capped for dashboard/log diagnostics."""
     settings = get_settings()
     capital = operating_capital(account_total_eval)
     cash_buffer = float(_runtime_value("CASH_BUFFER", settings.cash_buffer) or 0)
     investable_limit = int(capital * max(0.0, 1.0 - cash_buffer))
-    exposure_remaining = investable_limit - max(0, int(stock_eval or 0))
+    exposure_for_new_buys = max(0, int(stock_eval or 0) - int(locked_holding_eval or 0))
+    exposure_remaining = investable_limit - exposure_for_new_buys
     broker_cash_int = max(0, int(broker_cash or 0))
     return {
         "broker_cash": broker_cash_int,
         "stock_eval": max(0, int(stock_eval or 0)),
+        "locked_holding_eval": max(0, int(locked_holding_eval or 0)),
+        "exposure_for_new_buys": exposure_for_new_buys,
         "operating_capital": capital,
         "cash_buffer": cash_buffer,
         "investable_limit": investable_limit,
@@ -779,6 +784,49 @@ def _holding_history_from_balance(api, stocks: list[dict]) -> list[dict]:
     return holdings
 
 
+def _sell_order_symbols_by_status() -> dict[str, set[str]]:
+    statuses = {
+        "submitted": set(),
+        "open": set(),
+        "partial": set(),
+        "failed": set(),
+    }
+    try:
+        with connect_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT symbol, COALESCE(order_status, '') AS order_status, COALESCE(broker_order_id, '') AS broker_order_id
+                FROM trades
+                WHERE action = 'sell'
+                  AND COALESCE(order_status, '') IN ('submitted', 'partial', 'open', 'failed')
+                  AND COALESCE(symbol, '') != ''
+                """
+            ).fetchall()
+        for row in rows:
+            symbol = str(row["symbol"] if hasattr(row, "keys") else row[0])
+            status = str(row["order_status"] if hasattr(row, "keys") else row[1])
+            broker_order_id = str(row["broker_order_id"] if hasattr(row, "keys") else row[2])
+            if status in {"submitted", "open"} and not broker_order_id:
+                continue
+            if status in statuses:
+                statuses[status].add(symbol)
+    except Exception as exc:
+        logger.warning(f"Failed to load unresolved sell order symbols: {exc}")
+    return statuses
+
+
+def _open_sell_order_symbols() -> set[str]:
+    by_status = _sell_order_symbols_by_status()
+    return by_status["submitted"] | by_status["open"] | by_status["partial"]
+
+
+def _holding_qty(stock: dict, key: str) -> int:
+    try:
+        return int(stock.get(key, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def build_ai_rebalance_rows(api, balance_data: dict, total_eval: int) -> list[dict]:
     stocks = balance_data.get("output1", [])
     holdings = _holding_history_from_balance(api, stocks)
@@ -864,7 +912,29 @@ def build_runtime_plan(
             for stock in stocks
         )
     capital = operating_capital(total_eval)
-    buying_cash_info = buying_cash_diagnostics(cash, stock_eval, total_eval)
+    sell_order_symbols = _sell_order_symbols_by_status()
+    active_sell_symbols = sell_order_symbols["submitted"] | sell_order_symbols["open"]
+    retryable_sell_symbols = sell_order_symbols["partial"] | sell_order_symbols["failed"]
+    locked_holding_symbols = {
+        str(stock.get("pdno", ""))
+        for stock in stocks
+        if _holding_qty(stock, "hldg_qty") > 0
+        and (
+            str(stock.get("pdno", "")) in active_sell_symbols
+            or ("ord_psbl_qty" in stock and _holding_qty(stock, "ord_psbl_qty") <= 0)
+        )
+    }
+    locked_holding_eval = sum(
+        int(stock.get("evlu_amt", 0) or 0)
+        for stock in stocks
+        if str(stock.get("pdno", "")) in locked_holding_symbols
+    )
+    buying_cash_info = buying_cash_diagnostics(
+        cash,
+        stock_eval,
+        total_eval,
+        locked_holding_eval=locked_holding_eval,
+    )
     buying_cash = int(buying_cash_info["buying_cash"])
     pnl = int(summary.get("evlu_pfls_smtl_amt", 0) or 0)
     isolated_strategy_run = active_strategy_id in _ISOLATED_STRATEGY_IDS
@@ -877,6 +947,51 @@ def build_runtime_plan(
                 logger.info(f"[EXCLUDE] Skipping holding signal for excluded symbol {sym}")
                 continue
             name = stock.get("prdt_name", sym)
+            if sym in locked_holding_symbols:
+                row = signal_to_plan_row(
+                    sym,
+                    name,
+                    {
+                        "action": "hold",
+                        "qty": 0,
+                        "price": int(stock.get("prpr", 0) or 0),
+                        "reason": "sell order pending or holding is not orderable",
+                        "indicators": {},
+                    },
+                    source="locked_holding",
+                    include_hold=True,
+                    metadata={
+                        "locked_holding": True,
+                        "ord_psbl_qty": _holding_qty(stock, "ord_psbl_qty"),
+                    },
+                    strategy_id=active_strategy_id,
+                )
+                if row is not None:
+                    row["skip_reason"] = "sell order pending or holding is not orderable"
+                    position_rows.append(row)
+                continue
+            if sym in retryable_sell_symbols:
+                sellable_qty = min(
+                    _holding_qty(stock, "hldg_qty"),
+                    _holding_qty(stock, "ord_psbl_qty"),
+                )
+                if sellable_qty > 0:
+                    position_rows.append(PlanRow(
+                        symbol=str(sym),
+                        name=str(name),
+                        action="sell",
+                        qty=sellable_qty,
+                        price=0,
+                        reason="retry unresolved sell order after partial/failed execution",
+                        source="sell_retry",
+                        category="position",
+                        metadata={
+                            "sell_retry": True,
+                            "ord_psbl_qty": _holding_qty(stock, "ord_psbl_qty"),
+                        },
+                        strategy_id=active_strategy_id,
+                    ).to_dict())
+                    continue
             rt = float(stock.get("evlu_pfls_rt", 0) or 0)
             daily = api.get_daily(sym, n=60)
             strategy_model = ""
@@ -1109,6 +1224,8 @@ def build_runtime_plan(
         "buying_cash": buying_cash,
         "buying_cash_info": buying_cash_info,
         "operating_capital": capital,
+        "locked_holding_symbols": sorted(locked_holding_symbols),
+        "retryable_sell_symbols": sorted(retryable_sell_symbols),
         "held_symbols": {s.get("pdno", "") for s in stocks},
     }
 
