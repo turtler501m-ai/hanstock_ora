@@ -1,4 +1,5 @@
 import math
+import os
 import yfinance as yf
 from pathlib import Path
 from typing import Callable
