@@ -1146,6 +1146,97 @@ class DashboardCoreTests(unittest.TestCase):
             dashboard.trader.config.trade_db_path = original_db_path
             dashboard.trader.DRY_RUN = original_dry_run
 
+    def test_order_status_sync_cancels_unmatched_sell_without_balance_reservation(self):
+        original_db_path = dashboard.trader.config.trade_db_path
+        original_get_balance_data = dashboard._get_balance_data
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                dashboard.trader.init_db()
+                dashboard.trader.save_trade(
+                    "005360",
+                    "Monami",
+                    "sell",
+                    10,
+                    1782,
+                    "sell",
+                    True,
+                    True,
+                    broker_order_id="S12345",
+                    order_status="open",
+                    pre_order_qty=20,
+                )
+                dashboard._get_balance_data = lambda api, allow_cache=False: {
+                    "output1": [{
+                        "pdno": "005360",
+                        "prdt_name": "Monami",
+                        "hldg_qty": "20",
+                        "ord_psbl_qty": "20",
+                        "prpr": "1700",
+                    }],
+                    "output2": [{}],
+                }
+
+                class _FakeAPI:
+                    def get_trade_history(self, start_date, end_date):
+                        return []
+
+                result = dashboard._sync_order_status_from_history(_FakeAPI(), days=1)
+
+                self.assertEqual(result["unmatched_count"], 1)
+                self.assertEqual(result["updated_count"], 1)
+                with sqlite3.connect(dashboard.trader.config.trade_db_path) as conn:
+                    row = conn.execute("SELECT order_status FROM trades").fetchone()
+                self.assertEqual(row[0], "canceled")
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+            dashboard._get_balance_data = original_get_balance_data
+
+    def test_order_status_sync_keeps_unmatched_sell_with_balance_reservation_open(self):
+        original_db_path = dashboard.trader.config.trade_db_path
+        original_get_balance_data = dashboard._get_balance_data
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                dashboard.trader.init_db()
+                dashboard.trader.save_trade(
+                    "005360",
+                    "Monami",
+                    "sell",
+                    10,
+                    1782,
+                    "sell",
+                    True,
+                    True,
+                    broker_order_id="S12345",
+                    order_status="open",
+                    pre_order_qty=20,
+                )
+                dashboard._get_balance_data = lambda api, allow_cache=False: {
+                    "output1": [{
+                        "pdno": "005360",
+                        "prdt_name": "Monami",
+                        "hldg_qty": "20",
+                        "ord_psbl_qty": "10",
+                        "prpr": "1700",
+                    }],
+                    "output2": [{}],
+                }
+
+                class _FakeAPI:
+                    def get_trade_history(self, start_date, end_date):
+                        return []
+
+                result = dashboard._sync_order_status_from_history(_FakeAPI(), days=1)
+
+                self.assertEqual(result["updated_count"], 0)
+                with sqlite3.connect(dashboard.trader.config.trade_db_path) as conn:
+                    row = conn.execute("SELECT order_status FROM trades").fetchone()
+                self.assertEqual(row[0], "open")
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+            dashboard._get_balance_data = original_get_balance_data
+
     def test_order_history_window_enforces_minimum_month_lookback(self):
         start_date, end_date = dashboard._order_history_window(1)
         start = datetime.strptime(start_date, "%Y%m%d")

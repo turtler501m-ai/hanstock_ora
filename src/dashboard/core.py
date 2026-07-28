@@ -3397,11 +3397,12 @@ def _sync_order_status_from_history(api, *, days: int = MIN_ORDER_HISTORY_SYNC_D
         }
     orders = []
     updated_count = 0
+    unmatched = []
     for trade in tracked:
         order_id = str(trade.get("broker_order_id") or "")
         row = next((item for item in history if _history_matches_tracked_order(item, trade)), None)
         if row is None:
-            orders.append({"broker_order_id": order_id, "order_status": trade.get("order_status") or "submitted"})
+            unmatched.append(trade)
             continue
 
         requested_qty = _to_int(trade.get("qty"))
@@ -3430,16 +3431,33 @@ def _sync_order_status_from_history(api, *, days: int = MIN_ORDER_HISTORY_SYNC_D
             "filled_price": filled_price,
         })
 
+    balance_sync = _sync_order_status_from_balance(
+        api,
+        unmatched,
+        reason="order absent from KIS history",
+        close_unreserved_sells=True,
+    ) if unmatched else {"ok": True, "checked_count": 0, "updated_count": 0, "orders": []}
+    updated_count += int(balance_sync.get("updated_count", 0) or 0)
+    orders.extend(balance_sync.get("orders", []) or [])
+
     return {
-        "ok": True,
+        "ok": bool(balance_sync.get("ok", True)),
         "checked_count": len(tracked),
         "updated_count": updated_count,
         "history_count": len(history),
+        "unmatched_count": len(unmatched),
+        "balance_checked_count": int(balance_sync.get("checked_count", 0) or 0),
         "orders": orders,
     }
 
 
-def _sync_order_status_from_balance(api, tracked: list[dict], *, reason: str = "") -> dict:
+def _sync_order_status_from_balance(
+    api,
+    tracked: list[dict],
+    *,
+    reason: str = "",
+    close_unreserved_sells: bool = False,
+) -> dict:
     try:
         parsed = _parse_balance(_get_balance_data(api, allow_cache=False))
     except DashboardOperationError as exc:
@@ -3463,6 +3481,7 @@ def _sync_order_status_from_balance(api, tracked: list[dict], *, reason: str = "
         pre_order_qty = _to_int(trade.get("pre_order_qty"))
         current = holdings.get(symbol, {})
         current_qty = _to_int(current.get("qty"))
+        sellable_qty = _to_int(current.get("sellable_qty"))
         current_price = _to_int(current.get("price")) or _to_int(trade.get("price"))
 
         filled = False
@@ -3472,6 +3491,44 @@ def _sync_order_status_from_balance(api, tracked: list[dict], *, reason: str = "
             filled = current_qty <= max(0, pre_order_qty - requested_qty)
 
         if not filled:
+            inferred_filled_qty = (
+                min(requested_qty, max(_to_int(trade.get("filled_qty")), pre_order_qty - current_qty))
+                if action == "sell"
+                else _to_int(trade.get("filled_qty"))
+            )
+            sell_is_unreserved = (
+                close_unreserved_sells
+                and action == "sell"
+                and bool(current)
+                and current_qty > 0
+                and sellable_qty >= current_qty
+            )
+            if sell_is_unreserved:
+                order_status = "partial" if inferred_filled_qty > 0 else "canceled"
+                response_msg = f"Balance reconciliation: {order_status} (no active sell reservation)"
+                updated_count += trader.update_trade_order_status(
+                    order_id,
+                    order_status=order_status,
+                    filled_qty=inferred_filled_qty,
+                    filled_price=current_price if inferred_filled_qty > 0 else 0,
+                    response_msg=response_msg,
+                    broker_result={
+                        "fallback": "balance",
+                        "history_error": reason,
+                        "pre_order_qty": pre_order_qty,
+                        "current_qty": current_qty,
+                        "sellable_qty": sellable_qty,
+                    },
+                )
+                orders.append({
+                    "broker_order_id": order_id,
+                    "order_status": order_status,
+                    "filled_qty": inferred_filled_qty,
+                    "filled_price": current_price if inferred_filled_qty > 0 else 0,
+                    "balance_confirmed": True,
+                    "sell_reservation_active": False,
+                })
+                continue
             orders.append({
                 "broker_order_id": order_id,
                 "order_status": trade.get("order_status") or "submitted",

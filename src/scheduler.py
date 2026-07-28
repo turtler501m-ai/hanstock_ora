@@ -163,6 +163,20 @@ def _sync_order_status_after_cycle(result: dict) -> dict:
         return {**result, "order_status_sync_error": _error_record(exc)}
 
 
+def _sync_order_status_before_cycle() -> dict | None:
+    if not _order_status_sync_enabled():
+        return None
+    if trader.DRY_RUN or not trader.ORDER_SUBMISSION_ENABLED:
+        return None
+    try:
+        from src.dashboard import _get_api, _sync_order_status_from_history
+
+        days = _env_int("HANSTOCK_ORDER_STATUS_SYNC_DAYS", 30)
+        return _sync_order_status_from_history(_get_api(), days=days)
+    except SchedulerOperationError as exc:
+        return {"ok": False, "error": _error_record(exc)}
+
+
 def _write_cycle_result(result: dict, *, mode: str, strategy_id: str | None = None) -> None:
     if strategy_id == "plunge_bounce_strategy":
         path = Path(".runtime/plunge_bounce_last_result.json")
@@ -284,6 +298,7 @@ def run_scheduled_cycle(
         retry_delay_seconds = _env_float("HANSTOCK_SCHEDULER_RETRY_DELAY_SECONDS", 5.0)
 
     _slack_cycle_start(mode=mode)
+    pre_order_status_sync = _sync_order_status_before_cycle()
 
     if include_ai_rebalance:
         trader_kwargs = {
@@ -321,6 +336,8 @@ def run_scheduled_cycle(
             "auto_approved": approval_result["approved"],
             "auto_approval_errors": approval_result["errors"],
         }
+    if pre_order_status_sync is not None:
+        result["pre_order_status_sync"] = pre_order_status_sync
     result["strategy_id"] = force_strategy_id or "seven_split"
     result = _sync_order_status_after_cycle(result)
     if mode == "daily_auto" or force_strategy_id:

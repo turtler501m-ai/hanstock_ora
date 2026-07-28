@@ -277,9 +277,25 @@ class SchedulerModeTests(unittest.TestCase):
         ):
             result = scheduler.run_scheduled_cycle(mode="daily_auto")
 
-        get_api.assert_called_once()
-        sync_status.assert_called_once()
+        self.assertEqual(get_api.call_count, 2)
+        self.assertEqual(sync_status.call_count, 2)
+        self.assertEqual(result["pre_order_status_sync"]["updated_count"], 1)
         self.assertEqual(result["order_status_sync"]["updated_count"], 1)
+
+    def test_execute_syncs_stale_orders_before_building_new_plan(self):
+        with patch.object(
+            scheduler.trader, "run", return_value={"results": []}
+        ), patch.object(scheduler.trader, "DRY_RUN", False), patch.object(
+            scheduler.trader, "ORDER_SUBMISSION_ENABLED", True
+        ), patch("src.dashboard._get_api", return_value=object()), patch(
+            "src.dashboard._sync_order_status_from_history",
+            return_value={"ok": True, "updated_count": 3},
+        ) as sync_status:
+            result = scheduler.run_scheduled_cycle(mode="execute")
+
+        sync_status.assert_called_once()
+        self.assertEqual(result["pre_order_status_sync"]["updated_count"], 3)
+        self.assertNotIn("order_status_sync", result)
 
     def test_daily_auto_treats_already_processed_approval_as_done(self):
         expected = {
