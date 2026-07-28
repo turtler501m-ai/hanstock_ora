@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-28T00:59:03.389401+00:00",
+  "generated_at": "2026-07-28T01:03:23.763175+00:00",
   "sources": [
     {
       "name": "KRX KIND listed company list",
@@ -13988,6 +13988,15 @@
       "symbol": "114630",
       "themes": []
     },
+    "114800": {
+      "krx_industry": "",
+      "market": "ETP",
+      "name": "KODEX 인버스",
+      "sector": "ETF/ETN",
+      "source": "naver_finance_supplement",
+      "symbol": "114800",
+      "themes": []
+    },
     "114810": {
       "krx_industry": "특수 목적용 기계 제조업",
       "market": "코스닥",
@@ -14391,6 +14400,15 @@
       "sector": "자동차 신품 부품 제조업",
       "source": "krx_kind",
       "symbol": "123040",
+      "themes": []
+    },
+    "123310": {
+      "krx_industry": "",
+      "market": "ETP",
+      "name": "TIGER 인버스",
+      "sector": "ETF/ETN",
+      "source": "naver_finance_supplement",
+      "symbol": "123310",
       "themes": []
     },
     "123330": {
@@ -18489,6 +18507,24 @@
       "sector": "기타 화학제품 제조업",
       "source": "krx_kind",
       "symbol": "252500",
+      "themes": []
+    },
+    "252670": {
+      "krx_industry": "",
+      "market": "ETP",
+      "name": "KODEX 200선물인버스2X",
+      "sector": "ETF/ETN",
+      "source": "naver_finance_supplement",
+      "symbol": "252670",
+      "themes": []
+    },
+    "252710": {
+      "krx_industry": "",
+      "market": "ETP",
+      "name": "TIGER 200선물인버스2X",
+      "sector": "ETF/ETN",
+      "source": "naver_finance_supplement",
+      "symbol": "252710",
       "themes": []
     },
     "252990": {
@@ -24914,6 +24950,15 @@
       "sector": "사진장비 및 광학기기 제조업",
       "source": "krx_kind",
       "symbol": "494120",
+      "themes": []
+    },
+    "494840": {
+      "krx_industry": "",
+      "market": "ETP",
+      "name": "TIGER 미국방산TOP10",
+      "sector": "ETF/ETN",
+      "source": "naver_finance_supplement",
+      "symbol": "494840",
       "themes": []
     },
     "495810": {
