@@ -4,6 +4,7 @@ import asyncio
 import math
 import sqlite3
 from datetime import datetime
+from pathlib import Path
 from unittest.mock import patch
 
 import src.dashboard as dashboard
@@ -1586,6 +1587,35 @@ class DashboardCoreTests(unittest.TestCase):
             stock_routes.fetch_cloud_trades = original_fetch_cloud_trades
             stock_routes._clear_balance_cache = original_clear_balance_cache
             stock_routes.trader.DRY_RUN = original_dry_run
+
+    def test_trade_sync_status_persists_compact_result(self):
+        import src.dashboard.routes.stock as stock_routes
+
+        original_path = stock_routes.TRADE_SYNC_RESULT_PATH
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                stock_routes.TRADE_SYNC_RESULT_PATH = Path(tmpdir) / "last-sync.json"
+                stock_routes._save_trade_sync_result({
+                    "ok": True,
+                    "synced_count": 12,
+                    "balance_synced_count": 12,
+                    "history_imported_count": 0,
+                    "history_updated_count": 780,
+                    "removed_mismatch_count": 13,
+                    "history_error": None,
+                    "order_status_error": None,
+                    "history_sync": {"orders": [{"large": "payload"}]},
+                })
+
+                result = stock_routes.get_trade_sync_status()
+
+                self.assertTrue(result["available"])
+                self.assertEqual(result["synced_count"], 12)
+                self.assertEqual(result["removed_mismatch_count"], 13)
+                self.assertIn("completed_at", result)
+                self.assertNotIn("history_sync", result)
+        finally:
+            stock_routes.TRADE_SYNC_RESULT_PATH = original_path
 
     def test_sell_all_holdings_queues_market_sell_for_each_current_holding(self):
         original_db_path = dashboard.trader.config.trade_db_path

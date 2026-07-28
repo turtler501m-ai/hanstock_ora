@@ -8,6 +8,7 @@ from src.utils.logger import logger
 globals().update({k: v for k, v in _core.__dict__.items() if not k.startswith('__')})
 
 router = APIRouter(tags=["stock"])
+TRADE_SYNC_RESULT_PATH = Path(".runtime/trade_sync_last_result.json")
 
 class NewStrategyPayload(BaseModel):
     name: str = Field(..., min_length=1)
@@ -1980,6 +1981,43 @@ def _remove_non_broker_trade_rows() -> dict:
     }
 
 
+def _save_trade_sync_result(result: dict) -> None:
+    payload = {
+        key: result.get(key)
+        for key in (
+            "ok",
+            "synced_count",
+            "balance_synced_count",
+            "history_imported_count",
+            "history_updated_count",
+            "removed_mismatch_count",
+            "history_error",
+            "order_status_error",
+        )
+    }
+    payload.update({
+        "completed_at": trader.datetime.now(trader.KST).isoformat(),
+    })
+    TRADE_SYNC_RESULT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = TRADE_SYNC_RESULT_PATH.with_suffix(".tmp")
+    temp_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+    temp_path.replace(TRADE_SYNC_RESULT_PATH)
+
+
+@router.get("/api/trades/sync/status")
+def get_trade_sync_status():
+    if not TRADE_SYNC_RESULT_PATH.exists():
+        return {"ok": True, "available": False}
+    try:
+        payload = json.loads(TRADE_SYNC_RESULT_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read trade sync status: {exc}") from exc
+    return {"available": True, **payload}
+
+
 
 
 @router.post("/api/trades/sync")
@@ -2127,7 +2165,7 @@ def sync_trades(days: int = 90):
         updated_count = _to_int(history_sync.get("updated_count")) if history_sync else 0
         # 동기화로 보유/거래가 바뀌었으니 잔고·파생 보유탭 스냅샷을 무효화해 현행화한다.
         _clear_balance_cache()
-        return {
+        response = {
             "ok": True,
             "synced_count": synced_count + imported_count,
             "balance_synced_count": synced_count,
@@ -2140,6 +2178,8 @@ def sync_trades(days: int = 90):
             "removed_mismatch_count": cleanup["removed_count"],
             "cleanup": cleanup,
         }
+        _save_trade_sync_result(response)
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

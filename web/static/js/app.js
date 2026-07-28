@@ -2675,8 +2675,47 @@ window.routeToTab = function(tabName) {
 };
 
 
+function renderTradeSyncResult(result) {
+    const container = document.getElementById('trade-sync-last-result');
+    if (!container || !result || result.available === false) return;
+
+    const added = Number(result.synced_count || 0);
+    const removed = Number(result.removed_mismatch_count || 0);
+    const imported = Number(result.history_imported_count || 0);
+    const updated = Number(result.history_updated_count || 0);
+    const summary = document.getElementById('trade-sync-result-summary');
+    const time = document.getElementById('trade-sync-result-time');
+    const error = document.getElementById('trade-sync-result-error');
+    container.hidden = false;
+    container.style.display = 'grid';
+    if (summary) {
+        summary.textContent = `추가 ${added}건 · 불일치 정리 ${removed}건 · 체결 추가 ${imported}건 · 상태 갱신 ${updated}건`;
+    }
+    if (time) {
+        const completedAt = result.completed_at ? new Date(result.completed_at) : null;
+        time.textContent = completedAt && !Number.isNaN(completedAt.getTime())
+            ? `완료 시각: ${completedAt.toLocaleString('ko-KR')}`
+            : '';
+    }
+    const errors = [result.history_error, result.order_status_error].filter(Boolean);
+    if (error) {
+        error.hidden = errors.length === 0;
+        error.textContent = errors.length ? `오류: ${errors.join(' / ')}` : '';
+    }
+}
+
+async function loadTradeSyncResult() {
+    try {
+        const result = await fetchJson('/api/trades/sync/status', 10000);
+        renderTradeSyncResult(result);
+    } catch (_) {
+        // The performance data itself remains usable when no saved sync result exists.
+    }
+}
+
 async function renderTrades() {
     try {
+        await loadTradeSyncResult();
         // 성과 요약 (Performance)
         try {
             const perf = await fetchJson('/api/performance', 30000);
@@ -3373,6 +3412,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const result = await postJson('/api/trades/sync', {});
                 const removedCount = Number(result.removed_mismatch_count || 0);
                 setStatus(`증권사 기록 동기화 완료 (추가 ${result.synced_count}건, 불일치 정리 ${removedCount}건)`, true);
+                renderTradeSyncResult(result);
                 // 동기화 후 보유 관련 탭들을 함께 현행화한다.
                 await Promise.all([
                     renderTrades(),
