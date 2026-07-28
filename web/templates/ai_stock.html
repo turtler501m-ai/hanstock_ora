@@ -2,123 +2,110 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#030712">
-    <title>AI스톡 대시보드</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#07111f">
+    <title>한스톡 AI 의사결정</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css?v=29">
-    <link rel="stylesheet" href="/static/css/ai_stock.css">
+    <link rel="stylesheet" href="/static/css/ai_stock.css?v=2">
 </head>
 <body>
-    <div class="dashboard-container">
-        <header class="app-header">
-            <div>
-                <p class="eyebrow">시황 · 종목발굴 · AI 전략</p>
-                <h1>AI스톡 <span class="highlight">대시보드</span></h1>
-            </div>
-            <div class="header-actions">
-                <a class="nav-button" href="/">한스톡</a>
-                <a class="nav-button" href="/mistock">미스톡</a>
-                <a class="nav-button" href="/narrative-momentum">내러티브</a>
-                <a class="nav-button active" href="/ai-stock">AI스톡</a>
-                <a class="nav-button futures-nav-button" href="/futures-signals">해외선물</a>
-                <a class="nav-button" href="/voice-dashboard">음성</a>
-                <a class="nav-button" href="/env-settings">환경설정</a>
-                <a class="nav-button" href="javascript:window.location.reload()">새로고침</a>
-            </div>
-        </header>
+<div class="dashboard-container ai-shell">
+    <header class="app-header">
+        <div>
+            <p class="eyebrow">EVIDENCE TO EXECUTION</p>
+            <h1>AI 의사결정 <span class="highlight">운영실</span></h1>
+        </div>
+        <div class="header-actions">
+            <a class="nav-button" href="/">한스톡</a>
+            <a class="nav-button" href="/narrative-momentum">뉴스</a>
+            <a class="nav-button active" href="/ai-stock">AI 전략</a>
+            <a class="nav-button" href="/env-settings">환경설정</a>
+        </div>
+    </header>
 
-        <!-- 안전/신선도/fallback 배너 (§8.5) -->
-        <div id="ai-banner" class="ai-banner" role="status" hidden></div>
-
-        <!-- 공통 헤더 필터 (§3 공통 화면 설정) -->
-        <div class="ai-filters card glass" aria-label="공통 필터" style="margin-top: 1.5rem; padding: 1.25rem;">
+    <section class="ai-command">
+        <div class="ai-command-fields">
             <label>시장
-                <select id="f-market">
-                    <option value="ALL">전체</option>
-                    <option value="KR">한국(AI한스톡)</option>
-                    <option value="US">미국(AI미스톡)</option>
+                <select id="market-select">
+                    <option value="KR">한국</option>
+                    <option value="US">미국</option>
                 </select>
             </label>
-            <label>분석 기준일 <input type="date" id="f-date"></label>
             <label>전략
-                <select id="f-strategy"><option value="ai_stock_default_v1">기본 전략</option></select>
+                <select id="strategy-select">
+                    <option value="">최근 실행 전략</option>
+                </select>
             </label>
-            <label>최소 종합점수 <input type="number" id="f-min-score" min="0" max="100" value="0"></label>
-            <label>최대 위험점수 <input type="number" id="f-max-risk" min="0" max="100" value="100"></label>
-            <button type="button" id="btn-refresh">데이터 새로고침</button>
-            <button type="button" id="btn-scan" class="primary">AI 분석 실행</button>
-            <span class="ai-status-chip">최근 분석 <b id="s-last-scan">-</b></span>
-            <span class="ai-status-chip">AI 모델 <b id="s-model">-</b></span>
-            <span class="ai-status-chip">신선도 <b id="s-fresh">-</b></span>
-            <span class="ai-status-chip" id="s-safety">안전모드 -</span>
         </div>
+        <div class="ai-command-actions">
+            <button id="refresh-button" class="icon-command" title="새로고침" aria-label="새로고침">
+                <i data-lucide="refresh-cw"></i>
+            </button>
+            <button id="scan-button" class="primary-command">
+                <i data-lucide="sparkles"></i><span>AI 분석 실행</span>
+            </button>
+        </div>
+    </section>
 
-        <!-- 세부 탭 9개 (§1.1) -->
-        <nav class="dashboard-tabs" aria-label="AI스톡 기능 메뉴" role="tablist" style="margin-top: 1.5rem;">
-            <button type="button" class="ai-tab dashboard-tab active" data-tab="overview" role="tab">시장 브리핑</button>
-            <button type="button" class="ai-tab dashboard-tab" data-tab="narratives" role="tab">내러티브</button>
-            <button type="button" class="ai-tab dashboard-tab" data-tab="discovery" role="tab">AI 종목 발굴</button>
-            <button type="button" class="ai-tab dashboard-tab" data-tab="analysis" role="tab">종목 분석</button>
-            <button type="button" class="ai-tab dashboard-tab" data-tab="watchlist" role="tab">관찰종목</button>
-            <button type="button" class="ai-tab dashboard-tab" data-tab="portfolio" role="tab">포트폴리오</button>
-            <button type="button" class="ai-tab dashboard-tab" data-tab="performance" role="tab">성과 검증</button>
-            <button type="button" class="ai-tab dashboard-tab" data-tab="strategies" role="tab">AI 전략 관리</button>
-            <button type="button" class="ai-tab dashboard-tab" data-tab="autonomy" role="tab">자율전략 감사</button>
-            <button type="button" class="ai-tab dashboard-tab" data-tab="execution" role="tab">실행 계획</button>
-        </nav>
+    <div id="alert-strip" class="alert-strip" hidden></div>
 
-    <main class="ai-main">
-        <section class="ai-panel active" data-panel="overview">
-            <h2>시장 브리핑</h2>
-            <div id="p-overview" class="ai-content"><p class="ai-empty">데이터를 불러오는 중…</p></div>
+    <section id="summary-grid" class="summary-grid" aria-label="파이프라인 현황"></section>
+
+    <nav class="pipeline-nav" aria-label="AI 의사결정 단계">
+        <button class="pipeline-tab active" data-view="decisions"><i data-lucide="brain-circuit"></i>판단 보드</button>
+        <button class="pipeline-tab" data-view="evidence"><i data-lucide="newspaper"></i>뉴스 근거</button>
+        <button class="pipeline-tab" data-view="risk"><i data-lucide="shield-check"></i>위험 검증</button>
+        <button class="pipeline-tab" data-view="execution"><i data-lucide="route"></i>승인·주문</button>
+        <button class="pipeline-tab" data-view="diagnostics"><i data-lucide="activity"></i>진단</button>
+    </nav>
+
+    <main class="pipeline-workspace">
+        <section class="candidate-pane">
+            <div class="pane-heading">
+                <div>
+                    <span class="section-kicker">LATEST DECISIONS</span>
+                    <h2 id="list-title">AI 판단 보드</h2>
+                </div>
+                <span id="scan-time" class="mono-muted">-</span>
+            </div>
+            <div id="candidate-list" class="candidate-list">
+                <p class="empty-state">데이터를 불러오는 중입니다.</p>
+            </div>
         </section>
-        <section class="ai-panel" data-panel="narratives">
-            <h2>내러티브</h2>
-            <div id="p-narratives" class="ai-content"><p class="ai-empty">시장을 선택하세요.</p></div>
-        </section>
-        <section class="ai-panel" data-panel="discovery">
-            <h2>AI 종목 발굴 <small>(1차 배치 점수화)</small></h2>
-            <div id="p-discovery-status" class="ai-scan-status"></div>
-            <div id="p-discovery" class="ai-content"><p class="ai-empty">[AI 분석 실행]으로 후보를 생성하세요.</p></div>
-        </section>
-        <section class="ai-panel" data-panel="analysis">
-            <h2>종목 분석</h2>
-            <div id="p-analysis" class="ai-content"><p class="ai-empty">후보를 선택하면 상세가 표시됩니다.</p></div>
-        </section>
-        <section class="ai-panel" data-panel="watchlist">
-            <h2>관찰종목</h2>
-            <div id="p-watchlist" class="ai-content"><p class="ai-empty">관찰 후보가 없습니다.</p></div>
-        </section>
-        <section class="ai-panel" data-panel="portfolio">
-            <h2>포트폴리오</h2>
-            <div id="p-portfolio" class="ai-content"><p class="ai-empty">-</p></div>
-        </section>
-        <section class="ai-panel" data-panel="performance">
-            <h2>성과 검증</h2>
-            <div id="p-performance" class="ai-content"><p class="ai-empty">-</p></div>
-        </section>
-        <section class="ai-panel" data-panel="strategies">
-            <h2>AI 전략 관리 <small>(자동화 정책 · 스케줄)</small></h2>
-            <div id="p-strategies" class="ai-content"><p class="ai-empty">-</p></div>
-        </section>
-        <section class="ai-panel" data-panel="autonomy">
-            <h2>자율전략 감사 <small>(K01 구현 대조 · 운영 차단)</small></h2>
-            <div id="p-autonomy" class="ai-content"><p class="ai-empty">구현 현황을 불러오는 중...</p></div>
-        </section>
-        <section class="ai-panel" data-panel="execution">
-            <h2>실행 계획 <small>(2차 실시간 타이밍)</small></h2>
-            <div id="p-timing" class="ai-content"></div>
-            <div id="p-execution" class="ai-content"><p class="ai-empty">confirmed 후보만 실행 계획으로 연결됩니다.</p></div>
-        </section>
+
+        <aside class="decision-pane">
+            <div id="decision-detail" class="decision-detail">
+                <div class="empty-detail">
+                    <i data-lucide="mouse-pointer-click"></i>
+                    <p>종목을 선택하면 근거부터 주문 상태까지 표시됩니다.</p>
+                </div>
+            </div>
+        </aside>
     </main>
-    </div>
+</div>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="/static/js/ai_stock.js"></script>
+<div id="plan-dialog" class="modal-backdrop" hidden>
+    <form id="plan-form" class="plan-dialog">
+        <div class="dialog-heading">
+            <div>
+                <span class="section-kicker">DETERMINISTIC RISK</span>
+                <h2>실행 계획 생성</h2>
+            </div>
+            <button type="button" id="plan-close" class="icon-command" aria-label="닫기"><i data-lucide="x"></i></button>
+        </div>
+        <input type="hidden" id="plan-candidate-id">
+        <label>진입 가격 <input id="plan-entry" type="number" min="0" step="any" required></label>
+        <label>손절 가격 <input id="plan-stop" type="number" min="0" step="any" required></label>
+        <label>목표 가격 <input id="plan-target" type="number" min="0" step="any"></label>
+        <p class="dialog-note">수량은 AI가 정하지 않습니다. 계좌 현금과 위험 정책으로 서버가 계산합니다.</p>
+        <button type="submit" class="primary-command"><i data-lucide="file-check-2"></i><span>위험 검증 후 계획 생성</span></button>
+    </form>
+</div>
+
+<script src="https://unpkg.com/lucide@latest"></script>
+<script src="/static/js/ai_stock.js?v=2"></script>
 </body>
 </html>

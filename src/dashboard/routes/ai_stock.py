@@ -79,6 +79,26 @@ def ai_stock_status():
     return envelope(data, market=C.MARKET_ALL, meta={"data_quality": "good"})
 
 
+@router.get("/api/ai-stock/decision-pipeline")
+def ai_stock_decision_pipeline(
+    market: str = Query(default=C.MARKET_KR),
+    strategy_id: str | None = Query(default=None),
+    limit: int = Query(default=40, ge=1, le=100),
+):
+    """Return one operational view from evidence through managed execution."""
+    from src.ai_stock.decision_pipeline_service import build_pipeline
+
+    m = require_storable_market(market)
+    return envelope(
+        build_pipeline(
+            market=m,
+            strategy_id=strategy_id or None,
+            limit=limit,
+        ),
+        market=m,
+    )
+
+
 @router.get("/api/ai-stock/autonomy-audit")
 def ai_stock_autonomy_audit(market: str | None = Query(default=None)):
     """Dashboard view of K01 autonomous-strategy implementation coverage."""
