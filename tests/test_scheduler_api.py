@@ -4,7 +4,13 @@ from pathlib import Path
 import json
 
 from src.dashboard.services.scheduler_service import DashboardSchedulerService
-from src.dashboard import get_scheduler_status, trigger_scheduler_run, _scheduler_run_state, _scheduler_running_lock
+from src.dashboard import (
+    _bg_run_multiple_scheduled_cycles,
+    _scheduler_running_lock,
+    _scheduler_run_state,
+    get_scheduler_status,
+    trigger_scheduler_run,
+)
 
 class SchedulerApiTests(unittest.TestCase):
     def setUp(self):
@@ -348,7 +354,29 @@ class SchedulerApiTests(unittest.TestCase):
         self.assertEqual(captured["mode"], "analysis_only")
         self.assertEqual(captured["strategy_ids"], ["alpha", "beta"])
         self.assertEqual(captured["allowed_categories"], {"candidate"})
-        self.assertIsNone(captured["force_strategy_id"])
+        self.assertNotIn("force_strategy_id", captured)
+
+    @patch("src.dashboard.core._run_scheduled_cycles_for_strategies")
+    def test_multiple_strategy_runner_does_not_receive_force_strategy_id(
+        self, runner
+    ):
+        runner.return_value = {"ok": True, "runs": [], "errors": []}
+
+        _bg_run_multiple_scheduled_cycles(
+            "daily_auto",
+            False,
+            True,
+            ["alpha", "beta"],
+            {"position", "candidate"},
+        )
+
+        runner.assert_called_once_with(
+            mode="daily_auto",
+            include_ai_rebalance=False,
+            auto_approve=True,
+            strategy_ids=["alpha", "beta"],
+            allowed_categories={"position", "candidate"},
+        )
 
     def test_trigger_scheduler_run_prevents_double_execution(self):
         with _scheduler_running_lock:

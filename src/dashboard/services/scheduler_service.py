@@ -92,8 +92,9 @@ class DashboardSchedulerService:
                 "mode": mode,
                 "include_ai_rebalance": include_ai_rebalance,
                 "auto_approve": auto_approve,
-                "force_strategy_id": strategy_id,
             }
+            if strategy_id is not None:
+                kwargs["force_strategy_id"] = strategy_id
             if allowed_categories is not None:
                 kwargs["allowed_categories"] = allowed_categories
             kwargs.update(extra_kwargs)
