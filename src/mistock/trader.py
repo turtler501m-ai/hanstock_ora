@@ -228,7 +228,7 @@ def _merge_local_shadow_holdings(broker_holdings: list[dict[str, Any]]) -> list[
     import sys
     is_testing = "unittest" in sys.modules
 
-    local_holdings = {item["symbol"]: item for item in _local_holdings_from_db(refresh_quote=False)}
+    local_holdings = {item["symbol"]: item for item in _local_holdings_from_db(refresh_quote=True)}
     merged = []
 
     # Get symbols that have been bought via the system

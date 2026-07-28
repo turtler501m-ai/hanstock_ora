@@ -1021,10 +1021,12 @@ class DashboardCoreTests(unittest.TestCase):
                     source_approval_id=approval_id,
                 )
 
+                order_date = dashboard.trader.datetime.now(dashboard.trader.KST).strftime("%Y%m%d")
+
                 class FakeAPI:
                     def get_trade_history(self, start_date, end_date):
                         return [{
-                            "ord_dt": "20260727",
+                            "ord_dt": order_date,
                             "ord_tmd": "130203",
                             "odno": "0001",
                             "sll_buy_dvsn_cd": "01",

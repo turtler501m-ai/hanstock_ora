@@ -232,6 +232,43 @@ class MistockDashboardTests(unittest.TestCase):
         self.assertEqual(balance["holdings"][0]["qty"], 2.0)
         self.assertEqual(balance["holdings"][0]["source"], "local_shadow")
 
+    def test_demo_local_shadow_balance_refreshes_current_quote(self):
+        class FakeClient:
+            def get_overseas_balance(self):
+                return {
+                    "output1": [],
+                    "output2": {},
+                    "output3": {"tot_asst_amt": "0", "frcr_use_psbl_amt": "0.00"},
+                    "rt_cd": "0",
+                }
+
+        mistock_db.init_db()
+        object.__setattr__(mistock_config, "trading_env", "demo")
+        original_dry_run = mistock_config.dry_run
+        object.__setattr__(mistock_config, "dry_run", False)
+        object.__setattr__(mistock_config, "total_capital", 1000.0)
+        object.__setattr__(mistock_config, "currency", "USD")
+
+        try:
+            mistock_db.execute(
+                "INSERT INTO holdings (symbol, name, qty, avg_price, updated_at) VALUES (?, ?, ?, ?, ?)",
+                ("AAPL", "Apple", 2, 100, mistock_db.now_text()),
+            )
+            with (
+                patch.object(mistock_trader, "_get_kis_client", return_value=FakeClient()),
+                patch.object(mistock_trader, "quote", return_value={"current": 110.0, "ask1": 110.0, "bid1": 110.0}),
+            ):
+                balance = mistock.mistock_balance()
+        finally:
+            object.__setattr__(mistock_config, "dry_run", original_dry_run)
+
+        holding = balance["holdings"][0]
+        self.assertEqual(holding["source"], "local_shadow")
+        self.assertEqual(holding["price"], 110.0)
+        self.assertEqual(holding["avg_price"], 100.0)
+        self.assertEqual(holding["pnl"], 20.0)
+        self.assertEqual(balance["pnl"], 20.0)
+
     def test_demo_sell_calls_kis_order_api(self):
         calls = []
         class FakeClient:
