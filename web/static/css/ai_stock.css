@@ -73,8 +73,11 @@ body {
 
 .icon-command { width: 40px; padding: 0; }
 .icon-command svg, .primary-command svg, .pipeline-tab svg { width: 17px; height: 17px; }
+.icon-command.loading svg { animation: refresh-spin .8s linear infinite; }
 .primary-command { background: #146f73; border-color: #24979a; }
 .primary-command:disabled, .icon-command:disabled { opacity: .45; cursor: wait; }
+
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
 
 .alert-strip {
   margin-top: 14px;
@@ -232,7 +235,7 @@ body {
   .ai-command-fields { display: grid; grid-template-columns: minmax(0, 1fr); }
   .ai-command label { display: grid; }
   .ai-command select { width: 100%; min-width: 0; }
-  .ai-command-actions { display: grid; grid-template-columns: 40px minmax(0, 1fr); }
+  .ai-command-actions { display: grid; grid-template-columns: 1fr 40px minmax(0, 1fr); }
   .ai-command-actions .primary-command { width: 100%; }
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   .candidate-row { grid-template-columns: 1fr 90px; }

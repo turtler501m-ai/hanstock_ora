@@ -49,6 +49,8 @@
     ["#refresh-button", "#scan-button"].forEach(function (selector) {
       $(selector).disabled = busy;
     });
+    $("#refresh-button").classList.toggle("loading", busy);
+    if (busy) $("#refresh-status").textContent = "갱신 중";
   }
 
   function showError(error) {
@@ -73,6 +75,7 @@
         state.selectedId = rows.length ? rows[0].candidate_id : null;
       }
       render();
+      $("#refresh-status").textContent = "갱신 " + new Date().toLocaleTimeString("ko-KR");
     }).catch(showError).finally(function () { setBusy(false); iconRefresh(); });
   }
 
