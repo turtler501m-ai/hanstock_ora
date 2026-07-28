@@ -2559,8 +2559,8 @@ async function renderApprovals() {
             const estimatedCost = Number(row.qty || 0) * Number(row.price || 0);
             const autoApprovalInProgress = Boolean(row.auto_approval_in_progress);
             const retryButton = row.retry_eligible
-                ? `<button type="button" class="retry-approval" data-id="${row.id}">재처리</button>
-                   <button type="button" class="button-danger cancel-retry-approval" data-id="${row.id}">취소후재처리</button>`
+                ? `<button type="button" class="retry-approval" data-id="${row.id}" data-symbol="${escapeHtml(row.symbol)}">재처리</button>
+                   <button type="button" class="button-danger cancel-retry-approval" data-id="${row.id}" data-symbol="${escapeHtml(row.symbol)}">취소후재처리</button>`
                 : '';
             const blockingText = Number(row.blocking_remaining_qty || 0) > 0
                 ? ` · 증권사 미체결 ${Number(row.blocking_remaining_qty).toLocaleString()}주 (#${escapeHtml(row.blocking_order_id || '-')})`
@@ -2628,6 +2628,62 @@ async function executeApprovalAction(button, action) {
     } catch (err) {
         setStatus(`승인 처리 실패: ${err.message}`);
         button.disabled = false;
+    }
+}
+
+async function executeApprovalBatch(action) {
+    const selector = action === 'cancel-retry'
+        ? '#table-approvals tbody .cancel-retry-approval:not([disabled])'
+        : '#table-approvals tbody .retry-approval:not([disabled])';
+    const seenSymbols = new Set();
+    const buttons = Array.from(document.querySelectorAll(selector)).filter((button) => {
+        const symbol = String(button.dataset.symbol || button.dataset.id);
+        if (seenSymbols.has(symbol)) return false;
+        seenSymbols.add(symbol);
+        return true;
+    });
+    if (!buttons.length) {
+        setStatus('일괄 재처리할 주문이 없습니다.', true);
+        return;
+    }
+
+    const actionLabel = action === 'cancel-retry' ? '취소후재처리' : '재처리';
+    if (!window.confirm(`${buttons.length}건을 ${actionLabel} 일괄 처리하시겠습니까?`)) {
+        return;
+    }
+
+    const batchButtonId = action === 'cancel-retry'
+        ? 'btn-cancel-retry-approvals-batch'
+        : 'btn-retry-approvals-batch';
+    const batchButton = document.getElementById(batchButtonId);
+    if (batchButton) batchButton.disabled = true;
+
+    let successCount = 0;
+    let failedCount = 0;
+    const failedMessages = [];
+    try {
+        // KIS 주문 제한을 피하고 취소 완료 순서를 보장하기 위해 한 건씩 처리한다.
+        for (const button of buttons) {
+            button.disabled = true;
+            try {
+                await postJson(`/api/approvals/${button.dataset.id}/${action}`, {});
+                successCount += 1;
+            } catch (err) {
+                failedCount += 1;
+                failedMessages.push(`#${button.dataset.id} ${err.message}`);
+                button.disabled = false;
+            }
+        }
+        const failureNote = failedMessages.length
+            ? ` · ${failedMessages.slice(0, 3).join(' / ')}`
+            : '';
+        setStatus(
+            `${actionLabel} 일괄 완료: 성공 ${successCount}건, 실패·건너뜀 ${failedCount}건${failureNote}`,
+            failedCount === 0
+        );
+        await Promise.all([renderApprovals(), renderTrades(), renderBalance()]);
+    } finally {
+        if (batchButton) batchButton.disabled = false;
     }
 }
 
@@ -3464,6 +3520,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnApprovals = document.getElementById('btn-approvals');
     if (btnApprovals) {
         btnApprovals.addEventListener('click', renderApprovals);
+    }
+    const btnRetryApprovalsBatch = document.getElementById('btn-retry-approvals-batch');
+    if (btnRetryApprovalsBatch) {
+        btnRetryApprovalsBatch.addEventListener('click', () => executeApprovalBatch('retry'));
+    }
+    const btnCancelRetryApprovalsBatch = document.getElementById('btn-cancel-retry-approvals-batch');
+    if (btnCancelRetryApprovalsBatch) {
+        btnCancelRetryApprovalsBatch.addEventListener('click', () => executeApprovalBatch('cancel-retry'));
     }
     const btnAiAllocation = document.getElementById('btn-ai-allocation');
     if (btnAiAllocation) {
