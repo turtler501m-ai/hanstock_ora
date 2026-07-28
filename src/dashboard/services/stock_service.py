@@ -178,6 +178,7 @@ class DashboardStockService:
         balance_data: dict,
         parsed_balance: dict,
         strategy_id: str | None = None,
+        candidate_scan: dict | None = None,
     ) -> dict:
         market_data_api = trader.build_market_data_api(api)
         runtime_bundle = trader.build_runtime_plan(
@@ -185,6 +186,7 @@ class DashboardStockService:
             balance_data,
             read_cached_candidates=True,
             force_strategy_id=strategy_id,
+            candidate_scan_override=candidate_scan,
         )
         return {
             "mode": "dashboard",

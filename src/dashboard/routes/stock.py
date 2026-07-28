@@ -6,6 +6,14 @@ import threading
 import src.dashboard.core as _core
 from src.dashboard.core import *
 from src.utils.logger import logger
+from src.dashboard.presenters.scheduler_presenter import (
+    _compact_scheduler_candidate_scan,
+    _compact_scheduler_item,
+    _compact_scheduler_status_result,
+    _json_safe,
+    _tail_items,
+    _trim_text,
+)
 globals().update({k: v for k, v in _core.__dict__.items() if not k.startswith('__')})
 
 router = APIRouter(tags=["stock"])
@@ -174,156 +182,6 @@ def _schedule_display_payload(schedule: dict, display_name: str | None = None) -
     }
 
 
-def _json_safe(value):
-    import math
-
-    if isinstance(value, dict):
-        return {key: _json_safe(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, tuple):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, float) and not math.isfinite(value):
-        return None
-    return value
-
-
-def _trim_text(value, limit: int = 500):
-    if value is None:
-        return value
-    text = str(value)
-    if len(text) <= limit:
-        return text
-    return text[: max(0, limit - 3)] + "..."
-
-
-def _tail_items(items, limit: int):
-    if not isinstance(items, list):
-        return []
-    if len(items) <= limit:
-        return list(items)
-    return list(items[-limit:])
-
-
-def _compact_scheduler_item(item, allowed_keys: set[str]) -> dict:
-    if not isinstance(item, dict):
-        return {"value": _trim_text(item)}
-    compact = {key: item.get(key) for key in allowed_keys if key in item}
-    for key in ("reason", "response_msg", "message"):
-        if key in compact:
-            compact[key] = _trim_text(compact[key])
-    return compact
-
-
-def _compact_scheduler_candidate_scan(candidate_scan) -> dict:
-    if not isinstance(candidate_scan, dict):
-        return {}
-    candidates = candidate_scan.get("candidates")
-    scan_summary = candidate_scan.get("scan_summary")
-    scanned = candidate_scan.get("scanned", candidate_scan.get("scanned_count"))
-    candidates_count = candidate_scan.get("candidates_count")
-    if candidates_count is None and isinstance(candidates, list):
-        candidates_count = len(candidates)
-    candidate_keys = {"symbol", "name", "score", "price", "reasons", "reason"}
-    return {
-        "scanned": scanned,
-        "scanned_count": scanned,
-        "candidates_count": candidates_count,
-        "candidates": [
-            _compact_scheduler_item(item, candidate_keys)
-            for item in _tail_items(candidates, 20)
-        ],
-        "scan_error": _trim_text(candidate_scan.get("scan_error")),
-        "summary_count": len(scan_summary) if isinstance(scan_summary, list) else candidate_scan.get("summary_count"),
-    }
-
-
-def _compact_scheduler_status_result(last_result: dict | None, item_limit: int = 100) -> dict | None:
-    if not isinstance(last_result, dict):
-        return last_result
-    result = last_result.get("result")
-    if not isinstance(result, dict):
-        return last_result
-
-    plan_items = result.get("results") or []
-    approved_items = result.get("auto_approved") or []
-    approval_errors = result.get("auto_approval_errors") or []
-    run_errors = result.get("errors") or result.get("retry_errors") or []
-
-    if not isinstance(plan_items, list):
-        plan_items = []
-    if not isinstance(approved_items, list):
-        approved_items = []
-    if not isinstance(approval_errors, list):
-        approval_errors = []
-    if not isinstance(run_errors, list):
-        run_errors = [run_errors] if run_errors else []
-
-    queued_created = sum(1 for item in plan_items if isinstance(item, dict) and item.get("decision") == "queue")
-    approved_executed = sum(1 for item in approved_items if isinstance(item, dict) and item.get("status") == "executed")
-    approved_failed = sum(1 for item in approved_items if isinstance(item, dict) and item.get("status") == "failed")
-
-    plan_keys = {
-        "symbol", "name", "category", "decision", "approval_id", "action",
-        "qty", "signal_qty", "price", "signal_price", "reason", "skip_reason",
-        "time", "run_date", "run_recorded_at", "round", "strategy_id", "strategy_name",
-    }
-    approved_keys = {
-        "id", "approval_id", "symbol", "name", "action", "qty", "price",
-        "status", "response_msg", "message", "time", "run_date", "run_recorded_at",
-        "round", "strategy_id", "strategy_name",
-    }
-    error_keys = {"approval_id", "message", "time", "run_date", "run_recorded_at", "round", "strategy_id", "strategy_name"}
-
-    compact_result = {
-        "results": [
-            _compact_scheduler_item(item, plan_keys)
-            for item in _tail_items(plan_items, item_limit)
-        ],
-        "auto_approved": [
-            _compact_scheduler_item(item, approved_keys)
-            for item in _tail_items(approved_items, item_limit)
-        ],
-        "auto_approval_errors": [
-            _compact_scheduler_item(item, error_keys)
-            for item in _tail_items(approval_errors, 50)
-        ],
-        "errors": [_trim_text(item) for item in _tail_items(run_errors, 50)],
-        "status": result.get("status"),
-        "ok": result.get("ok"),
-        "summary_counts": {
-            "plan_count": len(plan_items),
-            "queue_count": max(0, queued_created - len(approved_items) - len(approval_errors)),
-            "approved_count": approved_executed,
-            "failed_count": approved_failed + len(approval_errors) + len(run_errors),
-            "shown_plan_count": min(len(plan_items), item_limit),
-            "shown_approved_count": min(len(approved_items), item_limit),
-            "shown_approval_error_count": min(len(approval_errors), 50),
-            "shown_error_count": min(len(run_errors), 50),
-        },
-    }
-
-    if "candidate_scan" in result:
-        compact_result["candidate_scan"] = _compact_scheduler_candidate_scan(result.get("candidate_scan"))
-
-    for key in (
-        "remaining_cash",
-        "daily_loss_halt",
-        "cash",
-        "buying_cash",
-        "buying_cash_info",
-        "locked_holding_symbols",
-        "retryable_sell_symbols",
-        "strategy_id",
-        "order_status_sync",
-    ):
-        if key in result and key not in compact_result:
-            compact_result[key] = _json_safe(result.get(key))
-
-    compact = {key: value for key, value in last_result.items() if key != "result"}
-    compact["result"] = compact_result
-    compact["compact"] = True
-    return compact
 
 
 def _enrich_scheduler_display(last_result: dict | None) -> dict | None:
@@ -723,13 +581,39 @@ def cancel_autonomy_managed_order(order_id: int):
 
 
 @router.get("/api/strategy-context")
-def get_strategy_context():
+def get_strategy_context(strategy_id: str | None = None):
     from src.db.repository import load_ai_strategies
+    from src.dashboard.services.analysis_cycle_service import (
+        ISOLATED_STRATEGY_IDS,
+        get_latest_usable_analysis_cycle,
+    )
 
     strategies = load_ai_strategies()
-    active = next((strategy for strategy in strategies if strategy.get("selected")), None)
+    active = next(
+        (
+            strategy
+            for strategy in strategies
+            if strategy_id
+            and (
+                str(strategy.get("id")) == str(strategy_id)
+                or str(strategy.get("model")) == str(strategy_id)
+            )
+        ),
+        None,
+    )
+    if strategy_id and active is None:
+        raise HTTPException(status_code=404, detail=f"strategy not found: {strategy_id}")
+    if active is None:
+        active = next((strategy for strategy in strategies if strategy.get("selected")), None)
     if active is None and strategies:
         active = strategies[0]
+    active_strategy_id = str(active.get("id")) if active else None
+    isolated = active_strategy_id in ISOLATED_STRATEGY_IDS
+    analysis_cycle = (
+        None
+        if isolated or not active_strategy_id
+        else get_latest_usable_analysis_cycle(active_strategy_id, trader.TRADING_ENV)
+    )
     profile = active.get("profile") if active else {}
     active_gate = _approval_gate(active) if active else {"ok": False, "missing": ["active strategy"]}
     active_operation = _operation_status(active) if active else {
@@ -764,6 +648,10 @@ def get_strategy_context():
             "approval_gate": active_gate,
             "operation_status": active_operation,
         },
+        "analysis_flow": {
+            "isolated": isolated,
+            "cycle": analysis_cycle,
+        },
         "safety": {
             "trading_env": trader.TRADING_ENV,
             "dry_run": bool(trader.DRY_RUN),
@@ -776,6 +664,29 @@ def get_strategy_context():
             "openai_configured": bool(str(getattr(trader.config, "openai_api_key", "") or "").strip()),
         },
     }
+
+
+@router.post("/api/analysis-cycles")
+def start_analysis_cycle(payload: dict = Body(default_factory=dict)):
+    from src.dashboard.services.analysis_cycle_service import (
+        AnalysisCycleError,
+        start_common_analysis_cycle,
+    )
+
+    requested_strategy_id = str(payload.get("strategy_id") or "").strip()
+    strategy = stock_service.resolve_dashboard_strategy(requested_strategy_id or None)
+    if requested_strategy_id and strategy is None:
+        raise HTTPException(status_code=404, detail=f"strategy not found: {requested_strategy_id}")
+    strategy_id = str(strategy.get("id")) if strategy else "seven_split"
+    try:
+        cycle = start_common_analysis_cycle(
+            strategy_id,
+            trader.TRADING_ENV,
+            mode=str(payload.get("mode") or "analysis"),
+        )
+    except AnalysisCycleError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True, "cycle": cycle}
 
 
 
@@ -1522,7 +1433,7 @@ def get_finrl_pipeline():
 
 
 @router.get("/api/approvals")
-def get_approvals(limit: int = 50):
+def get_approvals(limit: int = 50, strategy_id: str | None = None):
     if limit < 1:
         raise HTTPException(status_code=400, detail="limit must be greater than 0")
     limit = min(limit, 200)
@@ -1532,10 +1443,34 @@ def get_approvals(limit: int = 50):
     _init_approval_db()
     with trader.connect_db() as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT * FROM approvals ORDER BY id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        if strategy_id:
+            recent_rows = conn.execute(
+                "SELECT * FROM approvals WHERE strategy_id = ? ORDER BY id DESC LIMIT ?",
+                (strategy_id, limit),
+            ).fetchall()
+            actionable_rows = conn.execute(
+                """
+                SELECT * FROM approvals
+                WHERE strategy_id = ? AND status IN ('pending', 'executing', 'failed')
+                ORDER BY id DESC
+                """,
+                (strategy_id,),
+            ).fetchall()
+        else:
+            recent_rows = conn.execute(
+                "SELECT * FROM approvals ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            actionable_rows = conn.execute(
+                """
+                SELECT * FROM approvals
+                WHERE status IN ('pending', 'executing', 'failed')
+                ORDER BY id DESC
+                """
+            ).fetchall()
+        rows_by_id = {int(row["id"]): row for row in recent_rows}
+        rows_by_id.update({int(row["id"]): row for row in actionable_rows})
+        rows = sorted(rows_by_id.values(), key=lambda row: int(row["id"]), reverse=True)
     approvals = []
     latest_trades = _latest_trades_by_approval_ids([int(row["id"]) for row in rows])
     open_sells = _latest_open_sell_trades_by_symbols([str(row["symbol"]) for row in rows])
@@ -1564,7 +1499,11 @@ def get_approvals(limit: int = 50):
             and item.get("source") in {"dashboard_sell_all", "dashboard_holding_sell"}
         )
         approvals.append(item)
-    return {"approvals": approvals}
+    return {
+        "approvals": approvals,
+        "actionable_count": len(actionable_rows),
+        "recent_limit": limit,
+    }
 
 
 def _latest_open_sell_trades_by_symbols(symbols: list[str]) -> dict[str, dict]:
@@ -2332,7 +2271,7 @@ def sync_trades(days: int = 90):
 
 
 @router.get("/api/trades")
-def get_trades(limit: int = 50):
+def get_trades(limit: int = 50, strategy_id: str | None = None):
     try:
         cloud_trades = fetch_cloud_trades() or []
         local_trades = []
@@ -2368,7 +2307,10 @@ def get_trades(limit: int = 50):
                 "source_approval_id": t.get("source_approval_id"),
             }
             
-        trades = sorted(_account_trades(list(merged_trades.values())), key=lambda x: x["ts"], reverse=True)
+        trades = _account_trades(list(merged_trades.values()))
+        if strategy_id:
+            trades = [trade for trade in trades if str(trade.get("strategy_id") or "") == strategy_id]
+        trades = sorted(trades, key=lambda x: x["ts"], reverse=True)
         return {"trades": trades[:limit]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2377,11 +2319,13 @@ def get_trades(limit: int = 50):
 
 
 @router.get("/api/performance/periodic")
-def get_periodic_performance(response: Response):
+def get_periodic_performance(response: Response, strategy_id: str | None = None):
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     try:
         trades = _load_merged_trades()
+        if strategy_id:
+            trades = [trade for trade in trades if str(trade.get("strategy_id") or "") == strategy_id]
         return _build_periodic_performance(trades)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2390,11 +2334,13 @@ def get_periodic_performance(response: Response):
 
 
 @router.get("/api/performance")
-def get_performance(response: Response):
+def get_performance(response: Response, strategy_id: str | None = None):
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     try:
         trades = _account_trades(_load_merged_trades())
+        if strategy_id:
+            trades = [trade for trade in trades if str(trade.get("strategy_id") or "") == strategy_id]
         record_started_at = min((str(t.get("ts") or "") for t in trades if t.get("ts")), default="")
         
         total_trades = len(trades)
@@ -2785,6 +2731,17 @@ def trigger_scheduler_run(payload: dict = Body(...)):
         strategy_ids = [force_strategy_id]
     if not strategy_ids:
         strategy_ids = ["seven_split"]
+    from src.dashboard.services.analysis_cycle_service import ISOLATED_STRATEGY_IDS
+
+    isolated_requested = [sid for sid in strategy_ids if sid in ISOLATED_STRATEGY_IDS]
+    if isolated_requested:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "isolated strategies must be run from their own dashboard tabs: "
+                + ", ".join(isolated_requested)
+            ),
+        )
 
     if not _dashboard_scheduler_service.claim(
         mode=mode,

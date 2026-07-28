@@ -26,10 +26,10 @@ from src.scheduler import run_scheduled_cycle
 from src.db.scheduler_repository import KST
 from src.strategy.narrative_momentum import STRATEGY_ID as NARRATIVE_MOMENTUM_STRATEGY_ID
 from src.strategy.narrative_momentum_runner import run_narrative_momentum_cycle
+from src.strategy_ids import ISOLATED_STOCK_STRATEGY_IDS
 from src.utils.logger import logger
 
-
-_ISOLATED_STRATEGY_IDS = {"plunge_bounce_strategy", "heikin_ashi_scalping_strategy"}
+_ISOLATED_STRATEGY_IDS = ISOLATED_STOCK_STRATEGY_IDS
 _TRADER_SCHEDULE_STRATEGY_IDS = {"issue_sector_rotation_strategy"}
 _TRADER_DISPATCH_PRIORITY = {
     "seven_split": 0,

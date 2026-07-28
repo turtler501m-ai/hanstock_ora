@@ -376,6 +376,16 @@ def init_db() -> None:
             raise RuntimeError(
                 f"Failed to initialize required autonomous-strategy tables: {ai_err}"
             ) from ai_err
+        try:
+            from src.db.analysis_repository import init_analysis_cycle_tables
+
+            init_analysis_cycle_tables(conn)
+            conn.commit()
+        except (sqlite3.Error, OSError, ValueError, TypeError, ImportError) as cycle_err:
+            conn.rollback()
+            raise RuntimeError(
+                f"Failed to initialize analysis-cycle tables: {cycle_err}"
+            ) from cycle_err
 
 
 def _ensure_column(conn: DBWrapper, table: str, column: str, column_type: str) -> None:
@@ -395,3 +405,4 @@ from src.db.usage_repository import *  # noqa: F401,F403,E402
 from src.db.strategy_repository import *  # noqa: F401,F403,E402
 from src.db.scheduler_repository import *  # noqa: F401,F403,E402
 from src.db.market_repository import *  # noqa: F401,F403,E402
+from src.db.analysis_repository import *  # noqa: F401,F403,E402

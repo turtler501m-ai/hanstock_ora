@@ -246,21 +246,36 @@ def save_scanned_candidate(
     return None
 
 
-def get_scanned_candidates_history(limit: int = 100, days: int = 30) -> list[dict]:
+def get_scanned_candidates_history(
+    limit: int = 100,
+    days: int = 30,
+    strategy_id: str | None = None,
+) -> list[dict]:
     init_db()
     since_date = (datetime.now(KST) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     try:
         with connect_db() as conn:
             conn.row_factory = sqlite3.Row
-            rows = conn.execute(
-                """
-                SELECT * FROM scanned_candidates
-                WHERE scanned_at >= ?
-                ORDER BY scanned_at DESC
-                LIMIT ?
-                """,
-                (since_date, limit)
-            ).fetchall()
+            if strategy_id:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM scanned_candidates
+                    WHERE scanned_at >= ? AND strategy_id = ?
+                    ORDER BY scanned_at DESC
+                    LIMIT ?
+                    """,
+                    (since_date, strategy_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM scanned_candidates
+                    WHERE scanned_at >= ?
+                    ORDER BY scanned_at DESC
+                    LIMIT ?
+                    """,
+                    (since_date, limit),
+                ).fetchall()
             return [dict(row) for row in rows]
     except (sqlite3.Error, OSError, ValueError, TypeError) as e:
         logger.warning(f"Failed to fetch scanned candidates history: {e}")

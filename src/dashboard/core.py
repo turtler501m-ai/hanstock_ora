@@ -43,6 +43,30 @@ from src.dashboard.services.futures_service import FuturesDashboardService  # no
 from src.dashboard.services.scheduler_service import DashboardSchedulerService  # noqa: E402
 from src.dashboard.services.external_service import ExternalIntegrationService  # noqa: E402
 from src.dashboard.services.stock_service import DashboardStockService  # noqa: E402
+from src.dashboard.services.order_history_service import (
+    _broker_order_id_from_history,
+    _history_action,
+    _history_fill_price,
+    _history_fill_qty,
+    _history_int,
+    _history_matches_tracked_order,
+    _history_name,
+    _history_order_is_canceled,
+    _history_order_is_rejected,
+    _history_remaining_qty,
+    _history_row_to_trade,
+    _history_symbol,
+    _history_text,
+    _history_timestamp,
+    _history_trade_key,
+)
+from src.dashboard.services.analysis_cycle_service import (  # noqa: E402
+    AnalysisCycleError,
+    get_common_analysis_stage,
+    load_or_capture_common_stage,
+    mark_common_analysis_stage,
+    resolve_common_analysis_cycle,
+)
 from src.dashboard.services.balance_service import (  # noqa: E402
     clamp_ratio,
     holding_value,
@@ -2415,22 +2439,81 @@ async def trigger_watchlist_ai_scan(request: WatchlistTogglePayload | None = Bod
 
 
 
+def _dashboard_analysis_cycle(
+    strategy_id: str | None,
+    cycle_id: str | None = None,
+) -> tuple[str, dict | None]:
+    if not strategy_id and not cycle_id:
+        return "seven_split", None
+    strategy = _resolve_dashboard_strategy(strategy_id)
+    if strategy_id and strategy is None:
+        raise AnalysisCycleError(f"strategy not found: {strategy_id}")
+    resolved_strategy_id = str(strategy.get("id")) if strategy else "seven_split"
+    if not cycle_id:
+        return resolved_strategy_id, None
+    cycle = resolve_common_analysis_cycle(
+        resolved_strategy_id,
+        trader.TRADING_ENV,
+        cycle_id,
+    )
+    return resolved_strategy_id, cycle
+
+
+def _cycle_balance_data(api, cycle: dict | None) -> dict:
+    if cycle is None:
+        return _get_balance_data(api)
+    balance_data = load_or_capture_common_stage(
+        cycle["id"],
+        "account_balance",
+        lambda: _get_balance_data(api),
+        details={"source": "broker_snapshot"},
+    )
+    if not isinstance(balance_data, dict):
+        raise DashboardOperationError("analysis-cycle account snapshot is invalid")
+    return balance_data
+
+
 @app.get("/api/signals")
-async def get_signals(strategy_id: str | None = None):
+async def get_signals(strategy_id: str | None = None, cycle_id: str | None = None):
     missing = _required_env_missing()
     if missing:
         raise HTTPException(status_code=503, detail=f"Missing environment variables: {', '.join(missing)}")
 
+    try:
+        resolved_strategy_id, cycle = _dashboard_analysis_cycle(strategy_id, cycle_id)
+    except AnalysisCycleError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     def _build():
         api = _get_api()
-        parsed = _parse_balance(_get_balance_data(api))
-        return {"signals": build_dashboard_signals(api, parsed, strategy_id=strategy_id)}
+        parsed = _parse_balance(_cycle_balance_data(api, cycle))
+        signals = build_dashboard_signals(api, parsed, strategy_id=resolved_strategy_id)
+        response_cycle = cycle
+        payload = {"signals": signals}
+        if cycle is not None:
+            response_cycle = mark_common_analysis_stage(
+                cycle["id"],
+                "signals",
+                details={"count": len(signals)},
+                payload={"signals": signals},
+            )
+            payload["_analysis_cycle"] = response_cycle if isinstance(response_cycle, dict) else cycle
+        return payload
 
     try:
-        cache_key = f"signals:{strategy_id}" if strategy_id else "signals"
+        stored = get_common_analysis_stage(cycle["id"], "signals") if cycle else None
+        if isinstance((stored or {}).get("payload"), dict):
+            return {**stored["payload"], "_analysis_cycle": cycle}
+        cache_key = f"signals:{resolved_strategy_id}:{cycle['id'] if cycle else 'latest'}"
         return snapshot_read_through(cache_key, _build)
     except DashboardOperationError as e:
+        if cycle:
+            mark_common_analysis_stage(cycle["id"], "signals", status="failed", details={"error": str(e)})
         raise HTTPException(status_code=502, detail=f"Signal analysis failed: {e}") from e
+    except Exception as e:
+        if cycle:
+            mark_common_analysis_stage(cycle["id"], "signals", status="failed", details={"error": str(e)})
+        raise HTTPException(status_code=500, detail=f"Signal analysis failed: {e}") from e
 
 
 
@@ -2440,6 +2523,8 @@ async def get_candidates(
     ranker: str = "gpt_5_mini",
     optimizer: str = "score_tilted_inverse_vol",
     strategy_id: str | None = None,
+    cycle_id: str | None = None,
+    refresh: bool = False,
 ):
     if min_score < 1:
         raise HTTPException(status_code=400, detail="min_score must be greater than 0")
@@ -2448,18 +2533,37 @@ async def get_candidates(
     if missing:
         raise HTTPException(status_code=503, detail=f"Missing environment variables: {', '.join(missing)}")
 
+    try:
+        resolved_strategy_id, cycle = _dashboard_analysis_cycle(strategy_id, cycle_id)
+    except AnalysisCycleError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    stored = get_common_analysis_stage(cycle["id"], "candidates") if cycle else None
+    if isinstance((stored or {}).get("payload"), dict):
+        return {**stored["payload"], "_analysis_cycle": cycle}
+
     cache_ranker = strategy_id or ranker
-    if cache_ranker == "gpt_5_mini" and optimizer == "score_tilted_inverse_vol":
-        cached = _load_candidate_cache(min_score)
-    else:
-        cached = _load_candidate_cache(min_score, cache_ranker, optimizer)
+    cached = None
+    if not refresh:
+        if cache_ranker == "gpt_5_mini" and optimizer == "score_tilted_inverse_vol":
+            cached = _load_candidate_cache(min_score)
+        else:
+            cached = _load_candidate_cache(min_score, cache_ranker, optimizer)
         
     if cached is not None:
+        if cycle is not None:
+            response_cycle = mark_common_analysis_stage(
+                cycle["id"],
+                "candidates",
+                details={"count": len(cached.get("candidates", [])), "source": "cache"},
+                payload=cached,
+            )
+            cached["_analysis_cycle"] = response_cycle if isinstance(response_cycle, dict) else cycle
         return cached
 
     try:
         api = _get_api()
-        parsed = _parse_balance(_get_balance_data(api))
+        parsed = _parse_balance(_cycle_balance_data(api, cycle))
         
         from src.db.repository import load_ai_strategies
         strats = load_ai_strategies()
@@ -2589,17 +2693,41 @@ async def get_candidates(
             except DashboardOperationError as w_err:
                 logger.warning(f"Failed to auto-add high score candidate to watchlist: {w_err}")
                 
+        if cycle is not None:
+            stored_payload = dict(payload)
+            stored_payload.pop("_analysis_cycle", None)
+            response_cycle = mark_common_analysis_stage(
+                cycle["id"],
+                "candidates",
+                details={"count": len(payload.get("candidates", [])), "source": "scan"},
+                payload=stored_payload,
+            )
+            payload["_analysis_cycle"] = response_cycle if isinstance(response_cycle, dict) else cycle
         return payload
     except DashboardOperationError as e:
+        if cycle:
+            mark_common_analysis_stage(cycle["id"], "candidates", status="failed", details={"error": str(e)})
         raise HTTPException(status_code=502, detail=f"Candidate scan failed: {e}") from e
+    except Exception as e:
+        if cycle:
+            mark_common_analysis_stage(cycle["id"], "candidates", status="failed", details={"error": str(e)})
+        raise HTTPException(status_code=500, detail=f"Candidate scan failed: {e}") from e
 
 
 
 @app.get("/api/candidates/history")
-async def get_candidates_history(limit: int = 100, days: int = 30):
+async def get_candidates_history(
+    limit: int = 100,
+    days: int = 30,
+    strategy_id: str | None = None,
+):
     try:
         from src.db.repository import get_scanned_candidates_history
-        history = get_scanned_candidates_history(limit=limit, days=days)
+        history = get_scanned_candidates_history(
+            limit=limit,
+            days=days,
+            strategy_id=strategy_id,
+        )
         return {"history": history}
     except DashboardOperationError as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -2632,18 +2760,60 @@ async def delete_candidate_history(candidate_id: int):
 
 
 @app.get("/api/execution-plan")
-async def get_execution_plan(strategy_id: str | None = None):
+async def get_execution_plan(strategy_id: str | None = None, cycle_id: str | None = None):
     missing = _required_env_missing()
     if missing:
         raise HTTPException(status_code=503, detail=f"Missing environment variables: {', '.join(missing)}")
     try:
-        cache_key = f"execution_plan:{strategy_id}" if strategy_id else "execution_plan"
+        resolved_strategy_id, cycle = _dashboard_analysis_cycle(strategy_id, cycle_id)
+    except AnalysisCycleError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    def _build():
+        api = _get_api()
+        balance_data = _cycle_balance_data(api, cycle)
+        parsed = _parse_balance(balance_data)
+        candidate_stage = get_common_analysis_stage(cycle["id"], "candidates") if cycle else None
+        candidate_scan = (
+            candidate_stage.get("payload")
+            if isinstance((candidate_stage or {}).get("payload"), dict)
+            else None
+        )
+        payload = stock_service.build_dashboard_execution_plan(
+            api=api,
+            balance_data=balance_data,
+            parsed_balance=parsed,
+            strategy_id=resolved_strategy_id,
+            candidate_scan=candidate_scan,
+        )
+        if cycle is not None:
+            stored_payload = dict(payload)
+            response_cycle = mark_common_analysis_stage(
+                cycle["id"],
+                "execution_plan",
+                details={"count": len(payload.get("plan", []))},
+                payload=stored_payload,
+            )
+            payload["_analysis_cycle"] = response_cycle if isinstance(response_cycle, dict) else cycle
+        return payload
+
+    try:
+        stored = get_common_analysis_stage(cycle["id"], "execution_plan") if cycle else None
+        if isinstance((stored or {}).get("payload"), dict):
+            return {**stored["payload"], "_analysis_cycle": cycle}
+        cache_key = f"execution_plan:{resolved_strategy_id}:{cycle['id'] if cycle else 'latest'}"
         return snapshot_read_through(
             cache_key,
-            lambda: build_dashboard_execution_plan(strategy_id=strategy_id),
+            _build,
         )
     except DashboardOperationError as e:
+        if cycle:
+            mark_common_analysis_stage(cycle["id"], "execution_plan", status="failed", details={"error": str(e)})
         raise HTTPException(status_code=502, detail=f"Execution plan failed: {e}") from e
+    except Exception as e:
+        if cycle:
+            mark_common_analysis_stage(cycle["id"], "execution_plan", status="failed", details={"error": str(e)})
+        raise HTTPException(status_code=500, detail=f"Execution plan failed: {e}") from e
 
 
 
@@ -3099,174 +3269,6 @@ def _build_periodic_performance(trades: list[dict]) -> dict:
     }
 
 
-def _broker_order_id_from_history(row: dict) -> str:
-    for key in ("ODNO", "odno", "ord_no", "order_no"):
-        value = row.get(key)
-        if value:
-            return str(value).strip()
-    return ""
-
-
-def _history_int(row: dict, *keys: str) -> int:
-    for key in keys:
-        value = row.get(key)
-        parsed = _to_int(value)
-        if parsed:
-            return parsed
-    return 0
-
-
-def _history_fill_price(row: dict) -> int:
-    return _history_int(
-        row,
-        "avg_prvs",
-        "avg_pric",
-        "avg_ccld_pric",
-        "ccld_unpr",
-        "ord_unpr",
-    )
-
-
-def _history_fill_qty(row: dict) -> int:
-    for key in ("tot_ccld_qty", "ccld_qty", "cnqn"):
-        value = row.get(key)
-        if value is not None and str(value).strip():
-            return _to_int(value)
-    return _history_int(row, "ord_qty")
-
-
-def _history_remaining_qty(row: dict) -> int:
-    return _history_int(row, "rmn_qty", "RMN_QTY", "ord_psbl_qty")
-
-
-def _history_order_is_canceled(row: dict) -> bool:
-    value = _history_text(
-        row,
-        "cncl_yn",
-        "CNCL_YN",
-        "rvse_cncl_dvsn_name",
-        "RVSE_CNCL_DVSN_NAME",
-    ).strip()
-    return value.upper() == "Y" or "취소" in value or "cancel" in value.lower()
-
-
-def _history_order_is_rejected(row: dict) -> bool:
-    return _history_int(row, "rjct_qty", "RJCT_QTY") > 0
-
-
-def _history_text(row: dict, *keys: str) -> str:
-    for key in keys:
-        value = row.get(key)
-        if value is not None and str(value).strip():
-            return str(value).strip()
-    return ""
-
-
-def _history_symbol(row: dict) -> str:
-    return _history_text(row, "pdno", "PDNO", "isu_no", "mksc_shrn_iscd", "symbol")
-
-
-def _history_name(row: dict) -> str:
-    return _history_text(row, "prdt_name", "PRDT_NAME", "itm_name", "item_name") or _history_symbol(row)
-
-
-def _history_action(row: dict) -> str:
-    code = _history_text(row, "sll_buy_dvsn_cd", "SLL_BUY_DVSN_CD", "trad_dvsn_cd")
-    if code == "01":
-        return "sell"
-    if code == "02":
-        return "buy"
-
-    label = _history_text(row, "sll_buy_dvsn_name", "trad_dvsn_name", "buy_sell_name").lower()
-    if "sell" in label or "매도" in label:
-        return "sell"
-    if "buy" in label or "매수" in label:
-        return "buy"
-    return ""
-
-
-def _history_timestamp(row: dict) -> str:
-    raw_date = _history_text(row, "ord_dt", "ORD_DT", "ccld_dt", "CCLD_DT", "trad_dt")
-    raw_time = _history_text(row, "ord_tmd", "ORD_TMD", "ccld_tmd", "CCLD_TMD", "trad_tmd")
-    digits_date = "".join(char for char in raw_date if char.isdigit())
-    digits_time = "".join(char for char in raw_time if char.isdigit())
-    if len(digits_date) >= 8:
-        date_text = f"{digits_date[:4]}-{digits_date[4:6]}-{digits_date[6:8]}"
-    else:
-        date_text = trader.datetime.now(trader.KST).strftime("%Y-%m-%d")
-    if len(digits_time) >= 6:
-        time_text = f"{digits_time[:2]}:{digits_time[2:4]}:{digits_time[4:6]}"
-    else:
-        time_text = "00:00:00"
-    return f"{date_text} {time_text}"
-
-
-def _history_trade_key(trade: dict) -> tuple:
-    order_id = str(trade.get("broker_order_id") or "").strip()
-    if order_id:
-        ts = str(trade.get("ts") or trade.get("timestamp") or "")
-        trade_date = ts[:10] if len(ts) >= 10 else ""
-        return (
-            "order",
-            order_id,
-            trade_date,
-            str(trade.get("symbol") or ""),
-            str(trade.get("action") or ""),
-        )
-    return (
-        "trade",
-        str(trade.get("ts") or trade.get("timestamp") or ""),
-        str(trade.get("symbol") or ""),
-        str(trade.get("action") or ""),
-        _to_int(trade.get("qty")),
-        _to_int(trade.get("price")),
-    )
-
-
-def _history_matches_tracked_order(row: dict, trade: dict) -> bool:
-    if _broker_order_id_from_history(row) != str(trade.get("broker_order_id") or "").strip():
-        return False
-    row_symbol = _history_symbol(row)
-    trade_symbol = str(trade.get("symbol") or "")
-    if row_symbol and trade_symbol and row_symbol != trade_symbol:
-        return False
-    row_action = _history_action(row)
-    trade_action = str(trade.get("action") or "").lower()
-    if row_action and trade_action and row_action != trade_action:
-        return False
-    row_date = _history_timestamp(row)[:10]
-    trade_ts = str(trade.get("ts") or trade.get("timestamp") or "")
-    trade_date = trade_ts[:10] if len(trade_ts) >= 10 else ""
-    if row_date and trade_date and row_date != trade_date:
-        return False
-    return True
-
-
-def _history_row_to_trade(row: dict) -> dict:
-    symbol = _history_symbol(row)
-    action = _history_action(row)
-    qty = _history_fill_qty(row)
-    price = _history_fill_price(row)
-    if not symbol or action not in {"buy", "sell"} or qty <= 0:
-        return {}
-    return {
-        "ts": _history_timestamp(row),
-        "symbol": symbol,
-        "name": _history_name(row),
-        "action": action,
-        "qty": qty,
-        "price": price,
-        "reason": "broker history import",
-        "ok": 1,
-        "env": trader.TRADING_ENV,
-        "dry_run": 0,
-        "broker_order_id": _broker_order_id_from_history(row),
-        "order_status": "filled",
-        "filled_qty": qty,
-        "filled_price": price,
-        "response_msg": "KIS trade history import",
-        "broker_result": json.dumps(row, ensure_ascii=False),
-    }
 
 
 def _sync_filled_trades_from_history(
@@ -3818,6 +3820,13 @@ def _run_scheduled_cycles_for_strategies(
 ) -> dict:
     from src.scheduler import run_scheduled_cycle
     from src.config import config
+    from src.dashboard.services.analysis_cycle_service import ISOLATED_STRATEGY_IDS
+
+    common_strategy_ids = [
+        strategy_id
+        for strategy_id in dict.fromkeys(strategy_ids)
+        if strategy_id not in ISOLATED_STRATEGY_IDS
+    ]
 
     try:
         from src.db.repository import load_ai_strategies
@@ -3832,7 +3841,15 @@ def _run_scheduled_cycles_for_strategies(
 
     runs = []
     errors = []
-    for strategy_id in strategy_ids:
+    for strategy_id in common_strategy_ids:
+        from src.dashboard.services.analysis_cycle_service import start_common_analysis_cycle
+        from src.db.analysis_repository import set_analysis_cycle_status
+
+        cycle = start_common_analysis_cycle(
+            strategy_id,
+            trader.TRADING_ENV,
+            mode=f"scheduled_{mode}",
+        )
         try:
             if (
                 bool(getattr(config, "autonomy_enabled", False))
@@ -3854,13 +3871,29 @@ def _run_scheduled_cycles_for_strategies(
                     force_strategy_id=strategy_id,
                     allowed_categories=allowed_categories,
                 )
-            runs.append({"strategy_id": strategy_id, "result": result})
+            mark_common_analysis_stage(
+                cycle["id"],
+                "scheduled_run",
+                details={"mode": mode},
+                payload={
+                    "ok": bool(result.get("ok", True)) if isinstance(result, dict) else True,
+                    "status": result.get("status") if isinstance(result, dict) else "completed",
+                },
+            )
+            set_analysis_cycle_status(cycle["id"], "completed")
+            runs.append({"strategy_id": strategy_id, "cycle_id": cycle["id"], "result": result})
         except Exception as exc:
+            mark_common_analysis_stage(
+                cycle["id"],
+                "scheduled_run",
+                status="failed",
+                details={"mode": mode, "error": str(exc)},
+            )
             errors.append({"strategy_id": strategy_id, "message": str(exc)})
     return {
         "status": "failed" if errors and not runs else "success",
         "ok": bool(runs),
-        "strategy_ids": strategy_ids,
+        "strategy_ids": common_strategy_ids,
         "runs": runs,
         "errors": errors,
     }

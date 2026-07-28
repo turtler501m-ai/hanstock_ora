@@ -37,6 +37,7 @@ from src.execution_plan import (
     candidate_order_to_plan_row,
     build_execution_plan,
 )
+from src.strategy_ids import ISOLATED_STOCK_STRATEGY_IDS
 
 KST = timezone(timedelta(hours=9))
 
@@ -595,7 +596,7 @@ def build_market_data_api(broker_api: KIStockAPI) -> KIStockAPI:
 _CANDIDATE_INDICATOR_KEYS = {"rsi", "rsi2", "sma20", "sma60", "bb_lo", "bb_hi", "macd_hist"}
 
 _VALID_RUN_MODES = {"analysis_only", "live", None}
-_ISOLATED_STRATEGY_IDS = {"plunge_bounce_strategy", "heikin_ashi_scalping_strategy"}
+_ISOLATED_STRATEGY_IDS = ISOLATED_STOCK_STRATEGY_IDS
 
 
 def normalize_run_mode(mode: str | None) -> str | None:
@@ -876,6 +877,7 @@ def build_runtime_plan(
     include_ai_rebalance: bool = False,
     read_cached_candidates: bool = False,
     force_strategy_id: str | None = None,
+    candidate_scan_override: dict | None = None,
 ) -> dict:
     active_strategy_id = force_strategy_id
     active_strategy = None
@@ -1020,7 +1022,9 @@ def build_runtime_plan(
     if not halted:
         held_symbols = {s.get("pdno", "") for s in stocks}
         
-        if read_cached_candidates:
+        if candidate_scan_override is not None:
+            candidates = list(candidate_scan_override.get("candidates") or [])
+        elif read_cached_candidates:
             from src.db.repository import get_latest_scanned_candidates
             db_candidates = get_latest_scanned_candidates(active_strategy_id)
             candidates = []
@@ -1142,7 +1146,15 @@ def build_runtime_plan(
             if order:
                 remaining_cash -= int(order.get("estimated_cost", 0) or 0)
 
-        if read_cached_candidates:
+        if candidate_scan_override is not None:
+            candidate_scan = {
+                "candidates": candidates,
+                "scan_summary": list(candidate_scan_override.get("scan_summary") or []),
+                "scanned": int(candidate_scan_override.get("scanned") or len(candidates)),
+                "min_score": candidate_scan_override.get("min_score", 2),
+                "scan_error": candidate_scan_override.get("scan_error"),
+            }
+        elif read_cached_candidates:
             candidate_scan = {
                 "candidates": candidates,
                 "scan_summary": candidates,

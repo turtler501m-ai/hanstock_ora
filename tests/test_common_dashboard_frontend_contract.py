@@ -1,0 +1,42 @@
+import unittest
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+APP_JS = (ROOT / "web" / "static" / "js" / "app.js").read_text(encoding="utf-8")
+COMMON_ANALYSIS_JS = (
+    ROOT / "web" / "static" / "js" / "common-analysis.js"
+).read_text(encoding="utf-8")
+INDEX_HTML = (ROOT / "web" / "templates" / "index.html").read_text(encoding="utf-8")
+
+
+class CommonDashboardFrontendContractTests(unittest.TestCase):
+    def test_strategy_switch_generation_guards_slow_analysis_responses(self):
+        self.assertIn("strategyRequestGeneration += 1", COMMON_ANALYSIS_JS)
+        self.assertIn("isCurrentStrategyRequest(request)", COMMON_ANALYSIS_JS)
+        self.assertIn("analysisCyclePromises = new Map()", COMMON_ANALYSIS_JS)
+
+    def test_analysis_refresh_runs_candidates_before_signals_and_plan(self):
+        start = COMMON_ANALYSIS_JS.index("async function startCommonAnalysisRefresh()")
+        end = COMMON_ANALYSIS_JS.index("function invalidateCommonTabRefreshes()", start)
+        body = COMMON_ANALYSIS_JS[start:end]
+        self.assertLess(
+            body.index("await renderCandidates({ refresh: true })"),
+            body.index("Promise.all([renderSignals(), renderExecutionPlan()])"),
+        )
+
+    def test_isolated_strategy_buttons_are_not_disabled_by_common_scheduler(self):
+        start = APP_JS.index("function disableTriggerButtons(disabled)")
+        end = APP_JS.index("function toKorDecision", start)
+        body = APP_JS[start:end]
+        self.assertNotIn("btn-pb-run", body)
+        self.assertNotIn("btn-ha-run", body)
+
+    def test_orders_show_strategy_and_performance_has_explicit_scope(self):
+        self.assertIn('<th>전략</th>', INDEX_HTML)
+        self.assertIn('id="select-performance-scope"', INDEX_HTML)
+        self.assertIn("row.strategy_name || row.strategy_id || '미분류'", APP_JS)
+
+
+if __name__ == "__main__":
+    unittest.main()

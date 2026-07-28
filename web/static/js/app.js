@@ -9,12 +9,6 @@ let holdingsSortAsc = false;
 let activeStrategyAuditId = '';
 let schedulerPollInterval = null;
 
-function getActiveStrategyId() {
-    return document.getElementById('select-ai-ranker')?.value
-        || localStorage.getItem('hanstock_ai_ranker')
-        || '';
-}
-
 const formatCurrency = (value) => {
     return new Intl.NumberFormat('ko-KR', {
         style: 'currency',
@@ -1358,7 +1352,9 @@ async function syncStrategiesToDropdown() {
         if (!select) return;
 
         select.innerHTML = '';
-        const strategies = (data.strategies || []).filter((strategy) => strategy.status !== 'retired');
+        const strategies = (data.strategies || []).filter(
+            (strategy) => strategy.status !== 'retired' && !ISOLATED_STRATEGY_IDS.has(String(strategy.id || ''))
+        );
         const uniqueStrategies = [];
 
         if (strategies.length === 0) {
@@ -1428,7 +1424,8 @@ async function syncStrategiesToDropdown() {
 
 async function renderStrategyContext() {
     try {
-        const data = await fetchJson('/api/strategy-context');
+        const data = await fetchJson(withActiveStrategy('/api/strategy-context'));
+        if (data.analysis_flow?.cycle) activeAnalysisCycle = data.analysis_flow.cycle;
         const active = data.active_strategy || {};
         const safety = data.safety || {};
         const gate = active.approval_gate || {};
@@ -2034,12 +2031,13 @@ async function renderWatchlist() {
 }
 
 async function renderSignals() {
+    const request = captureStrategyRequest();
     setButtonBusy('btn-signals', true);
     setTableMessage('#table-signals tbody', 7, '보유 종목을 진단하고 있습니다...');
     try {
-        const strategyId = getActiveStrategyId();
-        const query = strategyId ? `?strategy_id=${encodeURIComponent(strategyId)}` : '';
-        const data = await fetchJson(`/api/signals${query}`);
+        const data = await fetchJson(await commonAnalysisPath('/api/signals'));
+        if (!isCurrentStrategyRequest(request)) return;
+        captureAnalysisCycle(data);
         const tbody = document.querySelector('#table-signals tbody');
         tbody.innerHTML = '';
         if (!data.signals.length) {
@@ -2087,16 +2085,21 @@ async function renderSignals() {
     }
 }
 
-async function renderCandidates() {
+async function renderCandidates(options = {}) {
+    const request = captureStrategyRequest();
     setButtonBusy('btn-candidates', true);
     setTableMessage('#table-candidates tbody', 9, '관심종목에서 매수 후보를 찾고 있습니다...');
     try {
-        const strategyId = getActiveStrategyId();
         const optimizer = document.getElementById('select-portfolio-optimizer')?.value || 'score_tilted_inverse_vol';
-        const query = strategyId
-            ? `/api/candidates?min_score=2&strategy_id=${encodeURIComponent(strategyId)}&optimizer=${encodeURIComponent(optimizer)}`
-            : `/api/candidates?min_score=2&ranker=rule_only&optimizer=${encodeURIComponent(optimizer)}`;
+        const query = await commonAnalysisPath('/api/candidates', {
+            min_score: 2,
+            ranker: getActiveStrategyId() ? '' : 'rule_only',
+            optimizer,
+            refresh: Boolean(options.refresh),
+        });
         const data = await fetchJson(query, 90000);
+        if (!isCurrentStrategyRequest(request)) return;
+        captureAnalysisCycle(data);
         const tbody = document.querySelector('#table-candidates tbody');
         if (!tbody) return;
         tbody.innerHTML = '';
@@ -2208,7 +2211,7 @@ async function renderCandidates() {
 
 async function renderCandidateHistory() {
     try {
-        const data = await fetchJson('/api/candidates/history?limit=50', 30000);
+        const data = await fetchJson(withActiveStrategy('/api/candidates/history', { limit: 50 }), 30000);
         const tbody = document.querySelector('#table-candidates-history tbody');
         if (!tbody) return;
         
@@ -2549,7 +2552,7 @@ async function renderApprovals() {
         if (!tbody) return;
         tbody.innerHTML = '';
         if (!data.approvals.length) {
-            setTableMessage('#table-approvals tbody', 9, '승인 대기 주문이 없습니다');
+            setTableMessage('#table-approvals tbody', 10, '승인 대기 주문이 없습니다');
             return;
         }
 
@@ -2581,6 +2584,7 @@ async function renderApprovals() {
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>#${escapeHtml(row.id || '-')}</td>
+                <td>${pill(row.strategy_name || row.strategy_id || '미분류', 'hold')}</td>
                 <td>
                     <div>${escapeHtml(String(row.created_at || '').split(' ')[0])}</div>
                     <div class="time-muted">${escapeHtml(String(row.created_at || '').split(' ')[1] || '')}</div>
@@ -2780,7 +2784,7 @@ async function renderTrades() {
         await loadTradeSyncResult();
         // 성과 요약 (Performance)
         try {
-            const perf = await fetchJson('/api/performance', 30000);
+            const perf = await fetchJson(performancePath('/api/performance'), 30000);
             document.getElementById('perf-total-trades').textContent = `${perf.total_trades}회`;
             document.getElementById('perf-success-rate').textContent = `${perf.success_rate}%`;
             
@@ -2859,7 +2863,7 @@ async function renderTrades() {
             console.error('Failed to fetch performance summary', e);
         }
 
-        const trades = await fetchJson('/api/trades?limit=20');
+        const trades = await fetchJson(performancePath('/api/trades', { limit: 20 }));
         const tbodyTrades = document.querySelector('#table-trades tbody');
         if (!tbodyTrades) return;
         tbodyTrades.innerHTML = '';
@@ -2911,7 +2915,7 @@ async function renderTrades() {
 
 async function renderPeriodicPerformance() {
     try {
-        const periodicData = await fetchJson('/api/performance/periodic', 30000);
+        const periodicData = await fetchJson(performancePath('/api/performance/periodic'), 30000);
         periodicDataCache = periodicData;
         
         // Attach sub-tab event listeners once
@@ -3126,13 +3130,14 @@ function updatePeriodicPerformanceUI() {
 }
 
 async function renderExecutionPlan() {
+    const request = captureStrategyRequest();
     const btn = document.getElementById('btn-execution-plan');
     setButtonBusy(btn, true);
     setTableMessage('#table-execution-plan tbody', 8, '실행 계획 불러오는 중...');
     try {
-        const strategyId = getActiveStrategyId();
-        const query = strategyId ? `?strategy_id=${encodeURIComponent(strategyId)}` : '';
-        const data = await fetchJson(`/api/execution-plan${query}`);
+        const data = await fetchJson(await commonAnalysisPath('/api/execution-plan'));
+        if (!isCurrentStrategyRequest(request)) return;
+        captureAnalysisCycle(data);
         const plan = data.plan || [];
 
         const summaryEl = document.getElementById('execution-plan-summary');
@@ -3238,6 +3243,9 @@ async function fetchDashboardData() {
 
 // 매수후보 포착 히스토리 새로고침 버튼 바인딩
 document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('select-performance-scope')?.addEventListener('change', () => {
+        renderTrades();
+    });
     const histRefreshBtn = document.getElementById('btn-candidates-history-refresh');
     if (histRefreshBtn) {
         histRefreshBtn.addEventListener('click', async () => {
@@ -3514,7 +3522,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const btnCandidates = document.getElementById('btn-candidates');
     if (btnCandidates) {
-        btnCandidates.addEventListener('click', renderCandidates);
+        btnCandidates.addEventListener('click', startCommonAnalysisRefresh);
     }
     const btnExecutionPlan = document.getElementById('btn-execution-plan');
     if (btnExecutionPlan) {
@@ -3568,13 +3576,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     setInterval(() => Promise.all([
         renderRuntime(),
-        renderBalance(),
-        renderTrades(),
-        renderApprovals(),
-        renderCandidateHistory(),
         syncStrategiesToDropdown(),
-        renderAiStrategies(),
-        renderWatchlist()
+        refreshCommonDashboardTab(getActiveDashboardTab())
     ]).catch(err => console.error("Polling error:", err)), 30000);
 });
 
@@ -3656,12 +3659,8 @@ window.addEventListener('load', () => {
             await postJson(`/api/ai-strategies/${encodeURIComponent(rankerSelect.value)}/select`, {
                 selected: true,
             });
-            await Promise.all([
-                renderStrategyContext(),
-                renderWatchlist(),
-                renderSignals(),
-                renderExecutionPlan(),
-            ]);
+            invalidateCommonTabRefreshes();
+            await refreshCommonDashboardTab(getActiveDashboardTab(), { force: true });
         });
     }
     
@@ -4079,9 +4078,14 @@ async function renderSchedulerStrategyChecklist(schedules = []) {
     if (!container) return;
     const data = await fetchJson('/api/ai-strategies');
     const scheduled = new Set(schedules.filter((row) => row.enabled).map((row) => String(row.strategy_id)));
-    const strategies = (data.strategies || []).filter((row) => row.status !== 'retired');
+    const activeStrategyId = getActiveStrategyId();
+    const strategies = (data.strategies || []).filter(
+        (row) => row.status !== 'retired' && !ISOLATED_STRATEGY_IDS.has(String(row.id || ''))
+    );
     container.innerHTML = strategies.map((strategy) => {
-        const checked = strategy.selected || scheduled.has(String(strategy.id));
+        const checked = scheduled.has(String(strategy.id))
+            || String(strategy.id) === activeStrategyId
+            || (!activeStrategyId && strategy.selected);
         return `<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
             <input type="checkbox" class="scheduler-strategy-checkbox" value="${escapeHtml(strategy.id)}" ${checked ? 'checked' : ''}>
             <span>${escapeHtml(strategyDisplayName(strategy))}</span>
@@ -4114,9 +4118,7 @@ window.toggleRoundCollapse = function(round) {
 
 function disableTriggerButtons(disabled) {
     const ids = [
-        'btn-run-daily-auto', 'btn-run-analysis-only', 'btn-run-execute',
-        'btn-pb-run-execute', 'btn-pb-run-analysis',
-        'btn-ha-run-execute', 'btn-ha-run-analysis'
+        'btn-run-daily-auto', 'btn-run-analysis-only', 'btn-run-execute'
     ];
     ids.forEach(id => {
         const btn = document.getElementById(id);
@@ -4233,12 +4235,6 @@ function startSchedulerPolling(mode) {
                 if (typeof refreshOverview === 'function') refreshOverview();
                 if (typeof renderSignals === 'function') renderSignals();
                 if (typeof renderApprovals === 'function') renderApprovals();
-                if (typeof loadScheduleHistoryData === 'function') loadScheduleHistoryData();
-                if (typeof loadScanHistoryData === 'function') loadScanHistoryData();
-                if (typeof loadPerformanceData === 'function') loadPerformanceData();
-                if (typeof loadHeikinAshiScheduleHistory === 'function') loadHeikinAshiScheduleHistory();
-                if (typeof loadHeikinAshiScanHistory === 'function') loadHeikinAshiScanHistory();
-                if (typeof loadHeikinAshiPerformance === 'function') loadHeikinAshiPerformance();
                 if (typeof renderWatchlist === 'function') renderWatchlist();
             } else {
                 if (logBox) {
