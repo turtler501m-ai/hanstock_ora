@@ -1271,6 +1271,7 @@ def get_watchlist(strategy_id: str | None = None):
     from src.db.repository import load_watchlist_data, get_watchlist_extra_info
     from src.strategy.seven_split import STOCK_NAMES, STOCK_SECTORS
     data = load_watchlist_data()
+    names_by_symbol = data.get("names", {}) if isinstance(data.get("names"), dict) else {}
     inherited = False
     if strategy_id:
         from src.db.repository import load_strategy_universe_symbols
@@ -1288,9 +1289,10 @@ def get_watchlist(strategy_id: str | None = None):
     symbols_detail = []
     for code in symbols:
         extra = get_watchlist_extra_info(code)
+        stored_name = str(names_by_symbol.get(code) or "").strip()
         symbols_detail.append({
             "symbol": code,
-            "name": STOCK_NAMES.get(code, "알 수 없는 종목"),
+            "name": stored_name or STOCK_NAMES.get(code, "알 수 없는 종목"),
             "sector": STOCK_SECTORS.get(code, "미분류"),
             "price": extra["price"],
             "score": extra["score"],

@@ -1545,6 +1545,27 @@ class DashboardCoreTests(unittest.TestCase):
         self.assertEqual(result["universe_source"], "shared")
         self.assertEqual([item["symbol"] for item in result["symbols"]], ["005930"])
 
+    def test_watchlist_uses_stored_name_before_static_fallback(self):
+        with patch("src.db.repository.load_watchlist_data", return_value={
+            "symbols": ["002700"],
+            "names": {"002700": "우량 종목"},
+            "ai_auto_add": False,
+            "ai_auto_add_threshold": 3.0,
+        }), patch(
+            "src.db.repository.get_watchlist_extra_info",
+            return_value={
+                "price": 0,
+                "score": 0,
+                "reason": "",
+                "change_rate": None,
+                "rsi": None,
+                "updated_at": "",
+            },
+        ):
+            result = dashboard.get_watchlist()
+
+        self.assertEqual(result["symbols"][0]["name"], "우량 종목")
+
     def test_watchlist_scan_uses_threshold_from_same_request(self):
         saved = []
         with patch.object(dashboard, "_required_env_missing", return_value=[]), \

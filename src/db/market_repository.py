@@ -211,8 +211,10 @@ def load_watchlist_data() -> dict:
     try:
         init_db()
         with connect_db() as conn:
-            c = conn.execute("SELECT symbol FROM watchlist ORDER BY symbol ASC")
-            symbols = [row[0] for row in c.fetchall()]
+            c = conn.execute("SELECT symbol, name FROM watchlist ORDER BY symbol ASC")
+            rows = c.fetchall()
+            symbols = [row[0] for row in rows]
+            names = {row[0]: row[1] for row in rows if len(row) > 1 and row[1]}
             
             # 종목 개수가 아예 비었을 때(0개)만 대표 우량주 5종목 자동 마이그레이션
             if len(symbols) == 0:
@@ -226,6 +228,7 @@ def load_watchlist_data() -> dict:
                     )
                 conn.commit()
                 symbols = default_symbols
+                names = {s: STOCK_NAMES.get(s, "우량 종목") for s in default_symbols}
             
             c_set = conn.execute("SELECT value FROM watchlist_settings WHERE key = 'ai_auto_add'")
             row_set = c_set.fetchone()
@@ -250,6 +253,7 @@ def load_watchlist_data() -> dict:
                 
             return {
                 "symbols": symbols,
+                "names": names,
                 "ai_auto_add": ai_auto_add,
                 "ai_auto_add_threshold": ai_auto_add_threshold
             }
@@ -257,6 +261,7 @@ def load_watchlist_data() -> dict:
         logger.warning(f"Failed to load watchlist from DB: {e}")
         return {
             "symbols": KOSPI_UNIVERSE,
+            "names": {s: STOCK_NAMES.get(s, "우량 종목") for s in KOSPI_UNIVERSE},
             "ai_auto_add": False,
             "ai_auto_add_threshold": 3.0
         }
@@ -406,7 +411,11 @@ def get_watchlist_extra_info(symbol: str) -> dict:
             rows_chart = c_chart.fetchall()
             if rows_chart:
                 latest_chart = rows_chart[0]
-                if res["price"] is None:
+                try:
+                    current_price = float(res["price"]) if res["price"] is not None else None
+                except (TypeError, ValueError):
+                    current_price = None
+                if current_price is None or current_price <= 0:
                     res["price"] = latest_chart[0]
                 res["volume"] = latest_chart[1]
                 if res["updated_at"] is None:
