@@ -31,6 +31,13 @@ from src.utils.logger import logger
 
 _ISOLATED_STRATEGY_IDS = {"plunge_bounce_strategy", "heikin_ashi_scalping_strategy"}
 _TRADER_SCHEDULE_STRATEGY_IDS = {"issue_sector_rotation_strategy"}
+_TRADER_DISPATCH_PRIORITY = {
+    "seven_split": 0,
+    "ai_stock_default_v1": 10,
+    "plunge_bounce_strategy": 20,
+    "issue_sector_rotation_strategy": 30,
+    "heikin_ashi_scalping_strategy": 40,
+}
 _last_dispatch_failures: list[str] = []
 
 
@@ -54,6 +61,18 @@ def _allowed_categories_for_strategy(strategy_id: str | None) -> set[str]:
     return {"position", "candidate", "ai_rebalance"}
 
 
+def _uses_trader_cycle(strategy_id: str | None) -> bool:
+    if strategy_id == NARRATIVE_MOMENTUM_STRATEGY_ID:
+        return False
+    if (
+        strategy_id not in _TRADER_SCHEDULE_STRATEGY_IDS
+        and strategy_id not in _ISOLATED_STRATEGY_IDS
+        and _is_registered_ai_strategy(strategy_id)
+    ):
+        return False
+    return True
+
+
 def dispatch_due_schedules() -> list[str]:
     global _last_dispatch_failures
     _last_dispatch_failures = []
@@ -64,12 +83,24 @@ def dispatch_due_schedules() -> list[str]:
         logger.info("[dispatch] no enabled strategy schedules")
         return ran
 
-    for sched in schedules:
+    due_schedules = [sched for sched in schedules if is_schedule_due(sched)]
+    due_schedules.sort(
+        key=lambda sched: _TRADER_DISPATCH_PRIORITY.get(str(sched.get("strategy_id") or ""), 100)
+    )
+    trader_cycle_ran = False
+
+    for sched in due_schedules:
         strategy_id = sched.get("strategy_id")
-        if not is_schedule_due(sched):
-            continue
         mode = str(sched.get("mode") or "execute")
         auto_approve = bool(sched.get("auto_approve"))
+        if _uses_trader_cycle(strategy_id):
+            if trader_cycle_ran:
+                logger.warning(
+                    f"[dispatch] skipped {strategy_id}: another trader-engine schedule already ran in this cron tick"
+                )
+                mark_strategy_schedule_run(strategy_id)
+                continue
+            trader_cycle_ran = True
         try:
             logger.info(
                 f"[dispatch] running {strategy_id} (mode={mode}, auto_approve={auto_approve})"
