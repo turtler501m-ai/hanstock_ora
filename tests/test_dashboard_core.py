@@ -1555,10 +1555,14 @@ class DashboardCoreTests(unittest.TestCase):
                 )
 
                 class _FakeAPI:
+                    calls = 0
+
                     def get_trade_history(self, start_date, end_date):
+                        self.calls += 1
                         return []
 
-                stock_routes._get_api = lambda: _FakeAPI()
+                fake_api = _FakeAPI()
+                stock_routes._get_api = lambda: fake_api
                 stock_routes._get_balance_data = lambda api, allow_cache=False: {
                     "output1": [],
                     "output2": [{}],
@@ -1571,6 +1575,7 @@ class DashboardCoreTests(unittest.TestCase):
 
                 self.assertEqual(result["removed_mismatch_count"], 1)
                 self.assertTrue(result["order_status_sync"]["ok"])
+                self.assertEqual(fake_api.calls, 1)
                 with sqlite3.connect(dashboard.trader.config.trade_db_path) as conn:
                     count = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
                 self.assertEqual(count, 0)

@@ -3269,9 +3269,15 @@ def _history_row_to_trade(row: dict) -> dict:
     }
 
 
-def _sync_filled_trades_from_history(api, *, days: int = 90) -> dict:
+def _sync_filled_trades_from_history(
+    api,
+    *,
+    days: int = 90,
+    history: list[dict] | None = None,
+) -> dict:
     start_date, end_date = _order_history_window(days)
-    history = api.get_trade_history(start_date, end_date)
+    if history is None:
+        history = api.get_trade_history(start_date, end_date)
     trader.init_db()
 
     existing = {_history_trade_key(item) for item in _load_merged_trades()}
@@ -3393,23 +3399,29 @@ def _load_trackable_order_trades(days: int = MIN_ORDER_HISTORY_SYNC_DAYS) -> lis
     return [dict(row) for row in rows]
 
 
-def _sync_order_status_from_history(api, *, days: int = MIN_ORDER_HISTORY_SYNC_DAYS) -> dict:
+def _sync_order_status_from_history(
+    api,
+    *,
+    days: int = MIN_ORDER_HISTORY_SYNC_DAYS,
+    history: list[dict] | None = None,
+) -> dict:
     tracked = _load_trackable_order_trades(days)
     if not tracked:
         return {"ok": True, "checked_count": 0, "updated_count": 0, "orders": []}
 
     start_date, end_date = _order_history_window(days)
-    try:
-        history = api.get_trade_history(start_date, end_date)
-    except DashboardOperationError as exc:
-        fallback = _sync_order_status_from_balance(api, tracked, reason=str(exc))
-        return {
-            **fallback,
-            "ok": fallback.get("updated_count", 0) > 0,
-            "history_error": str(exc),
-            "history_count": 0,
-            "fallback": "balance",
-        }
+    if history is None:
+        try:
+            history = api.get_trade_history(start_date, end_date)
+        except DashboardOperationError as exc:
+            fallback = _sync_order_status_from_balance(api, tracked, reason=str(exc))
+            return {
+                **fallback,
+                "ok": fallback.get("updated_count", 0) > 0,
+                "history_error": str(exc),
+                "history_count": 0,
+                "fallback": "balance",
+            }
     orders = []
     updated_count = 0
     unmatched = []

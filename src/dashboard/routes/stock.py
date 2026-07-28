@@ -1988,19 +1988,39 @@ def sync_trades(days: int = 90):
         raise HTTPException(status_code=400, detail="紐⑥쓽 ?ㅽ뻾(DRY_RUN) 紐⑤뱶?먯꽌??利앷텒??怨꾩쥖 ?숆린?붾? ?ъ슜?????놁뒿?덈떎.")
     try:
         api = _get_api()
+        shared_history = None
+        shared_history_error = None
+        try:
+            start_date, end_date = _order_history_window(days)
+            shared_history = api.get_trade_history(start_date, end_date)
+        except Exception as exc:
+            shared_history_error = str(exc)
+
         order_status_sync = None
         order_status_error = None
-        try:
-            order_status_sync = _sync_order_status_from_history(api, days=days)
-        except Exception as exc:
-            order_status_error = str(exc)
+        if shared_history is not None:
+            try:
+                order_status_sync = _sync_order_status_from_history(
+                    api,
+                    days=days,
+                    history=shared_history,
+                )
+            except Exception as exc:
+                order_status_error = str(exc)
+        else:
+            order_status_error = shared_history_error
 
         history_sync = None
-        history_error = None
-        try:
-            history_sync = _sync_filled_trades_from_history(api, days=days)
-        except Exception as exc:
-            history_error = str(exc)
+        history_error = shared_history_error
+        if shared_history is not None:
+            try:
+                history_sync = _sync_filled_trades_from_history(
+                    api,
+                    days=days,
+                    history=shared_history,
+                )
+            except Exception as exc:
+                history_error = str(exc)
 
         balance_data = _get_balance_data(api, allow_cache=False)
         parsed_balance = _parse_balance(balance_data)
