@@ -1534,6 +1534,7 @@ def get_approvals(limit: int = 50):
         ).fetchall()
     approvals = []
     latest_trades = _latest_trades_by_approval_ids([int(row["id"]) for row in rows])
+    open_sells = _latest_open_sell_trades_by_symbols([str(row["symbol"]) for row in rows])
     for row in rows:
         item = _approval_row(row)
         trade = latest_trades.get(int(item.get("id") or 0))
@@ -1546,6 +1547,13 @@ def get_approvals(limit: int = 50):
             item["retry_eligible"] = _approval_retry_eligible(item, trade)
         else:
             item["retry_eligible"] = _approval_retry_eligible(item, None)
+        blocking_sell = open_sells.get(str(item.get("symbol") or "").strip())
+        if blocking_sell:
+            item["blocking_order_id"] = blocking_sell.get("broker_order_id")
+            item["blocking_remaining_qty"] = max(
+                0,
+                _to_int(blocking_sell.get("qty")) - _to_int(blocking_sell.get("filled_qty")),
+            )
         item["auto_approval_in_progress"] = (
             auto_approval_enabled
             and item.get("status") == "pending"
@@ -1553,6 +1561,36 @@ def get_approvals(limit: int = 50):
         )
         approvals.append(item)
     return {"approvals": approvals}
+
+
+def _latest_open_sell_trades_by_symbols(symbols: list[str]) -> dict[str, dict]:
+    normalized = sorted({str(symbol or "").strip() for symbol in symbols if str(symbol or "").strip()})
+    if not normalized:
+        return {}
+    trader.init_db()
+    placeholders = ", ".join("?" for _ in normalized)
+    with trader.connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM trades
+            WHERE symbol IN ({placeholders})
+              AND action = 'sell'
+              AND order_status IN ('open', 'partial')
+              AND COALESCE(broker_order_id, '') != ''
+              AND qty > COALESCE(filled_qty, 0)
+            ORDER BY id DESC
+            """,
+            normalized,
+        ).fetchall()
+    latest: dict[str, dict] = {}
+    for row in rows:
+        item = dict(row)
+        symbol = str(item.get("symbol") or "").strip()
+        if symbol and symbol not in latest:
+            latest[symbol] = item
+    return latest
 
 
 def _latest_trades_by_approval_ids(approval_ids: list[int]) -> dict[int, dict]:
@@ -1733,7 +1771,9 @@ def cancel_blocking_sell_and_retry_approval(approval_id: int):
     )
     _clear_balance_cache()
 
-    retry_qty = min(remaining_qty, _to_int(item.get("qty")) or remaining_qty)
+    # The canceled broker order owns the currently locked quantity. Recreate its
+    # entire remainder instead of capping it to an older failed approval amount.
+    retry_qty = remaining_qty
     retry_id = _create_retry_approval_from_item(item, retry_qty=retry_qty, source_approval_id=approval_id)
     return {
         "id": retry_id,

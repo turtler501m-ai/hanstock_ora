@@ -903,7 +903,7 @@ class DashboardCoreTests(unittest.TestCase):
                     "symbol": "005360",
                     "name": "Monami",
                     "action": "sell",
-                    "qty": 10,
+                    "qty": 3,
                     "price": 1721,
                     "reason": "sell retry",
                     "source": "trader",
@@ -984,6 +984,7 @@ class DashboardCoreTests(unittest.TestCase):
                 self.assertEqual(retry["source"], "dashboard_retry")
                 self.assertEqual(retry["status"], "pending")
                 self.assertEqual(retry["action"], "sell")
+                self.assertEqual(retry["qty"], 10)
                 self.assertEqual(retry["price"], 0)
         finally:
             dashboard.trader.config.trade_db_path = original_db_path

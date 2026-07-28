@@ -2562,7 +2562,10 @@ async function renderApprovals() {
                 ? `<button type="button" class="retry-approval" data-id="${row.id}">재처리</button>
                    <button type="button" class="button-danger cancel-retry-approval" data-id="${row.id}">취소후재처리</button>`
                 : '';
-            const responseText = escapeHtml(row.response_msg || row.order_status || '');
+            const blockingText = Number(row.blocking_remaining_qty || 0) > 0
+                ? ` · 증권사 미체결 ${Number(row.blocking_remaining_qty).toLocaleString()}주 (#${escapeHtml(row.blocking_order_id || '-')})`
+                : '';
+            const responseText = `${escapeHtml(row.response_msg || row.order_status || '')}${blockingText}`;
             const controls = status === 'pending' && autoApprovalInProgress
                 ? `<span class="time-muted">자동승인 진행중</span>`
                 : status === 'pending'
