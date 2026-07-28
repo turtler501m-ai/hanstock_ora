@@ -588,11 +588,12 @@ def get_strategy_universe(strategy_id: str):
     sid = _validate_strategy_id(strategy_id)
     from src.db.repository import load_strategy_universe
     from src.strategy.seven_split import STOCK_NAMES
+    from src.market_metadata import resolve_stock_name
 
     universe = load_strategy_universe(sid)
     for item in universe:
         if not item.get("name"):
-            item["name"] = STOCK_NAMES.get(item["symbol"], item["symbol"])
+            item["name"] = resolve_stock_name(item["symbol"], STOCK_NAMES.get(item["symbol"], item["symbol"]))
     return {"ok": True, "universe": universe, "count": len(universe)}
 
 
@@ -601,11 +602,12 @@ def add_strategy_universe(strategy_id: str, payload: dict = Body(...)):
     sid = _validate_strategy_id(strategy_id)
     from src.db.repository import add_strategy_universe_symbol
     from src.strategy.seven_split import STOCK_NAMES
+    from src.market_metadata import resolve_stock_name
 
     symbol = str(payload.get("symbol", "")).strip()
     if not symbol.isdigit() or len(symbol) != 6:
         raise HTTPException(status_code=400, detail="유효하지 않은 종목코드입니다. (6자리 숫자)")
-    name = str(payload.get("name") or STOCK_NAMES.get(symbol, symbol))
+    name = resolve_stock_name(symbol, str(payload.get("name") or STOCK_NAMES.get(symbol, symbol)))
     add_strategy_universe_symbol(sid, symbol, name)
     return {"ok": True, "symbol": symbol, "name": name}
 

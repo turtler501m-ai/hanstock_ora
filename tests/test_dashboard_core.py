@@ -1545,7 +1545,7 @@ class DashboardCoreTests(unittest.TestCase):
         self.assertEqual(result["universe_source"], "shared")
         self.assertEqual([item["symbol"] for item in result["symbols"]], ["005930"])
 
-    def test_watchlist_uses_stored_name_before_static_fallback(self):
+    def test_watchlist_replaces_placeholder_name_with_metadata(self):
         with patch("src.db.repository.load_watchlist_data", return_value={
             "symbols": ["002700"],
             "names": {"002700": "우량 종목"},
@@ -1561,10 +1561,14 @@ class DashboardCoreTests(unittest.TestCase):
                 "rsi": None,
                 "updated_at": "",
             },
+        ), patch(
+            "src.market_metadata.load_kr_stock_metadata",
+            return_value={"002700": {"name": "신일전자", "sector": "전기제품"}},
         ):
             result = dashboard.get_watchlist()
 
-        self.assertEqual(result["symbols"][0]["name"], "우량 종목")
+        self.assertEqual(result["symbols"][0]["name"], "신일전자")
+        self.assertEqual(result["symbols"][0]["sector"], "전기제품")
 
     def test_watchlist_scan_uses_threshold_from_same_request(self):
         saved = []

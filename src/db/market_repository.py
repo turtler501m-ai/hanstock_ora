@@ -10,6 +10,10 @@ from pathlib import Path
 from src.config import config
 from src.utils.logger import logger
 from src.db import repository as _root
+from src.market_metadata import (
+    is_placeholder_stock_name,
+    resolve_stock_name,
+)
 
 KST = timezone(timedelta(hours=9))
 
@@ -214,21 +218,36 @@ def load_watchlist_data() -> dict:
             c = conn.execute("SELECT symbol, name FROM watchlist ORDER BY symbol ASC")
             rows = c.fetchall()
             symbols = [row[0] for row in rows]
-            names = {row[0]: row[1] for row in rows if len(row) > 1 and row[1]}
+            names = {}
+            name_updates: list[tuple[str, str]] = []
+            for row in rows:
+                symbol = str(row[0] or "").strip()
+                stored_name = str(row[1] or "").strip() if len(row) > 1 else ""
+                resolved_name = resolve_stock_name(symbol, stored_name)
+                names[symbol] = resolved_name
+                if symbol and resolved_name != stored_name and not is_placeholder_stock_name(resolved_name, symbol):
+                    name_updates.append((resolved_name, symbol))
+            if name_updates:
+                for resolved_name, symbol in name_updates:
+                    conn.execute(
+                        "UPDATE watchlist SET name = ? WHERE symbol = ?",
+                        (resolved_name, symbol),
+                    )
+                conn.commit()
             
             # 종목 개수가 아예 비었을 때(0개)만 대표 우량주 5종목 자동 마이그레이션
             if len(symbols) == 0:
                 default_symbols = ["005930", "000660", "035420", "005380", "035720"]
                 ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
                 for s in default_symbols:
-                    name = STOCK_NAMES.get(s, "우량 종목")
+                    name = resolve_stock_name(s, STOCK_NAMES.get(s, "우량 종목"))
                     conn.execute(
                         "INSERT OR IGNORE INTO watchlist (symbol, name, created_at) VALUES (?, ?, ?)",
                         (s, name, ts)
                     )
                 conn.commit()
                 symbols = default_symbols
-                names = {s: STOCK_NAMES.get(s, "우량 종목") for s in default_symbols}
+                names = {s: resolve_stock_name(s, STOCK_NAMES.get(s, "우량 종목")) for s in default_symbols}
             
             c_set = conn.execute("SELECT value FROM watchlist_settings WHERE key = 'ai_auto_add'")
             row_set = c_set.fetchone()
@@ -261,7 +280,7 @@ def load_watchlist_data() -> dict:
         logger.warning(f"Failed to load watchlist from DB: {e}")
         return {
             "symbols": KOSPI_UNIVERSE,
-            "names": {s: STOCK_NAMES.get(s, "우량 종목") for s in KOSPI_UNIVERSE},
+            "names": {s: resolve_stock_name(s, STOCK_NAMES.get(s, "우량 종목")) for s in KOSPI_UNIVERSE},
             "ai_auto_add": False,
             "ai_auto_add_threshold": 3.0
         }
@@ -284,11 +303,13 @@ def save_watchlist_data(data: dict) -> None:
                     (str(float(data["ai_auto_add_threshold"])),)
                 )
             
+            names_by_symbol = data.get("names", {}) if isinstance(data.get("names"), dict) else {}
             if "symbols" in data:
                 conn.execute("DELETE FROM watchlist")
                 ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
                 for s in data["symbols"]:
-                    name = STOCK_NAMES.get(s, "우량 종목")
+                    fallback_name = names_by_symbol.get(s) or STOCK_NAMES.get(s, "우량 종목")
+                    name = resolve_stock_name(s, fallback_name)
                     conn.execute(
                         "INSERT OR IGNORE INTO watchlist (symbol, name, created_at) VALUES (?, ?, ?)",
                         (s, name, ts)

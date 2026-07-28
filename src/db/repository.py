@@ -351,10 +351,12 @@ def init_db() -> None:
                     conn.execute("DELETE FROM watchlist")
                     ts = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M:%S")
                     default_symbols = ["005930", "000660", "035420", "005380", "035720"]
+                    from src.market_metadata import resolve_stock_name
+
                     for s in default_symbols:
                         conn.execute(
-                            "INSERT OR IGNORE INTO watchlist (symbol, name, created_at) VALUES (?, '우량 종목', ?)",
-                            (s, ts)
+                            "INSERT OR IGNORE INTO watchlist (symbol, name, created_at) VALUES (?, ?, ?)",
+                            (s, resolve_stock_name(s, "우량 종목"), ts)
                         )
                     logger.info("[MIGRATION] Watchlist cleaned up to 5 default symbols for AI slots.")
                 conn.execute("INSERT OR REPLACE INTO watchlist_settings (key, value) VALUES ('migration_watchlist_cleaned_v3', '1')")

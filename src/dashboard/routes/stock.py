@@ -378,13 +378,15 @@ def _enrich_scheduler_display(last_result: dict | None) -> dict | None:
     except (ImportError, AttributeError, TypeError):
         pass
 
-    unknown_names = {"", "-", "알 수 없는 종목", "우량 종목", "Unknown"}
+    from src.market_metadata import PLACEHOLDER_STOCK_NAMES, resolve_stock_name
+
+    unknown_names = set(PLACEHOLDER_STOCK_NAMES)
 
     def enrich_name(item: dict) -> None:
         symbol = str(item.get("symbol") or "").strip()
         current = str(item.get("name") or "").strip()
         if symbol and (current in unknown_names or current == symbol):
-            item["name"] = latest_name_by_symbol.get(symbol, current or symbol)
+            item["name"] = resolve_stock_name(symbol, latest_name_by_symbol.get(symbol, current or symbol))
 
     for item in plans:
         if isinstance(item, dict):
@@ -1270,6 +1272,7 @@ def review_ai_strategy_performance(id: str, days: int = 30):
 def get_watchlist(strategy_id: str | None = None):
     from src.db.repository import load_watchlist_data, get_watchlist_extra_info
     from src.strategy.seven_split import STOCK_NAMES, STOCK_SECTORS
+    from src.market_metadata import resolve_stock_name, resolve_stock_sector
     data = load_watchlist_data()
     names_by_symbol = data.get("names", {}) if isinstance(data.get("names"), dict) else {}
     inherited = False
@@ -1290,10 +1293,11 @@ def get_watchlist(strategy_id: str | None = None):
     for code in symbols:
         extra = get_watchlist_extra_info(code)
         stored_name = str(names_by_symbol.get(code) or "").strip()
+        static_name = STOCK_NAMES.get(code)
         symbols_detail.append({
             "symbol": code,
-            "name": stored_name or STOCK_NAMES.get(code, "알 수 없는 종목"),
-            "sector": STOCK_SECTORS.get(code, "미분류"),
+            "name": resolve_stock_name(code, stored_name or static_name),
+            "sector": resolve_stock_sector(code, STOCK_SECTORS.get(code)),
             "price": extra["price"],
             "score": extra["score"],
             "reason": extra["reason"],
@@ -1316,6 +1320,7 @@ def get_watchlist(strategy_id: str | None = None):
 def add_to_watchlist(payload: WatchlistAddPayload):
     from src.db.repository import load_watchlist_data, save_watchlist_data
     from src.strategy.seven_split import sync_watchlist_runtime, STOCK_NAMES
+    from src.market_metadata import resolve_stock_name
     
     code = payload.symbol.strip()
     if not code.isdigit() or len(code) != 6:
@@ -1326,7 +1331,7 @@ def add_to_watchlist(payload: WatchlistAddPayload):
 
         if code in load_strategy_universe_symbols(payload.strategy_id):
             raise HTTPException(status_code=400, detail="Already registered for this strategy")
-        name = STOCK_NAMES.get(code, "Unknown")
+        name = resolve_stock_name(code, STOCK_NAMES.get(code, "Unknown"))
         add_strategy_universe_symbol(payload.strategy_id, code, name)
         return {
             "ok": True,
@@ -1346,7 +1351,7 @@ def add_to_watchlist(payload: WatchlistAddPayload):
     return {
         "ok": True,
         "symbol": code,
-        "name": STOCK_NAMES.get(code, "알 수 없는 종목")
+        "name": resolve_stock_name(code, STOCK_NAMES.get(code, "알 수 없는 종목"))
     }
 
 

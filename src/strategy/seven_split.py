@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Callable
 
 from src.config import config
+from src.market_metadata import resolve_stock_name
 from src.utils.logger import logger
 from src.notifier.slack import slack_error
 from src.strategy.indicators import calc_rsi, calc_sma, calc_macd, calc_bollinger
@@ -835,7 +836,7 @@ def find_candidates(
                 
                 entry = {
                     "ticker": code,
-                    "name": STOCK_NAMES.get(code, code),
+                    "name": resolve_stock_name(code, STOCK_NAMES.get(code, code)),
                     "current_price": current,
                     "score": round(score, 4),
                     "rule_score": round(score, 4),
@@ -966,7 +967,7 @@ def find_candidates(
 
             entry = {
                 "ticker": code,
-                "name": STOCK_NAMES.get(code, code),
+                "name": resolve_stock_name(code, STOCK_NAMES.get(code, code)),
                 "current_price": current,
                 "score": round(score, 4),
                 "rule_score": round(score, 4),
