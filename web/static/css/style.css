@@ -288,6 +288,18 @@ h1 .highlight {
     text-overflow: clip;
 }
 
+#val-total,
+#val-account-pnl,
+#val-cash,
+#val-stock-eval {
+    font-size: clamp(0.88rem, 1vw, 1.18rem);
+}
+
+#val-pnl,
+#val-realized {
+    font-size: clamp(0.66rem, 0.74vw, 0.84rem);
+}
+
 .pnl-summary-card {
     cursor: pointer;
 }
@@ -1823,6 +1835,15 @@ tbody tr:hover {
     .summary-grid .card .value {
         font-size: 1.05rem !important;
         letter-spacing: 0;
+    }
+
+    #val-total,
+    #val-account-pnl,
+    #val-cash,
+    #val-stock-eval,
+    #val-pnl,
+    #val-realized {
+        font-size: 0.86rem !important;
     }
 
     .control-center,
