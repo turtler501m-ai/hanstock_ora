@@ -69,6 +69,55 @@ def _compact_scheduler_status_result(last_result: dict | None, item_limit: int =
     if not isinstance(result, dict):
         return last_result
 
+    strategy_runs = result.get("runs")
+    if isinstance(strategy_runs, list):
+        compact_runs = []
+        blocked_count = 0
+        for run in strategy_runs:
+            if not isinstance(run, dict):
+                continue
+            run_result = run.get("result") if isinstance(run.get("result"), dict) else {}
+            scan = run_result.get("scan") if isinstance(run_result.get("scan"), dict) else {}
+            automation = (
+                run_result.get("automation")
+                if isinstance(run_result.get("automation"), dict)
+                else {}
+            )
+            blocked = automation.get("blocked") if isinstance(automation.get("blocked"), list) else []
+            blocked_count += len(blocked)
+            compact_runs.append({
+                "strategy_id": run.get("strategy_id"),
+                "cycle_id": run.get("cycle_id"),
+                "scan": _json_safe(scan),
+                "automation": {
+                    key: _json_safe(value)
+                    for key, value in automation.items()
+                    if key != "blocked"
+                },
+                "blocked": [_trim_text(item) for item in blocked],
+                "autonomy_error": _trim_text(
+                    (run_result.get("autonomy") or {}).get("error")
+                    if isinstance(run_result.get("autonomy"), dict)
+                    else None
+                ),
+            })
+        errors = result.get("errors") if isinstance(result.get("errors"), list) else []
+        compact = {key: value for key, value in last_result.items() if key != "result"}
+        compact["result"] = {
+            "status": result.get("status"),
+            "ok": result.get("ok"),
+            "strategy_ids": result.get("strategy_ids") or [],
+            "runs": compact_runs,
+            "errors": [_trim_text(item) for item in errors],
+            "summary_counts": {
+                "run_count": len(compact_runs),
+                "blocked_count": blocked_count,
+                "failed_count": len(errors),
+            },
+        }
+        compact["compact"] = True
+        return compact
+
     plan_items = result.get("results") or []
     approved_items = result.get("auto_approved") or []
     approval_errors = result.get("auto_approval_errors") or []

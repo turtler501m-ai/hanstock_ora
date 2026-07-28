@@ -100,6 +100,31 @@ class OperationalContextTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeConfigurationError, "stale"):
             provider.snapshot("KR", "s1")
 
+    def test_invalid_candidate_price_does_not_block_valid_candidates(self):
+        repo = _Repo(self.now)
+        original = repo.list_candidates
+
+        def candidates(**kwargs):
+            return [
+                {
+                    **original(**kwargs)[0],
+                    "symbol": "BROKEN",
+                    "current_price": None,
+                },
+                original(**kwargs)[0],
+            ]
+
+        repo.list_candidates = candidates
+        provider = OperationalSnapshotProvider(
+            kr_broker=_KR(),
+            market_data=_Market(self.now),
+            candidate_repository=repo,
+            clock=lambda: self.now,
+            account_id="acct",
+        )
+        result = provider.snapshot("KR", "s1")
+        self.assertEqual(["AAA"], [row["symbol"] for row in result.market["candidates"]])
+
     def test_broker_error_fails_closed(self):
         class Broken:
             def get_balance(self):

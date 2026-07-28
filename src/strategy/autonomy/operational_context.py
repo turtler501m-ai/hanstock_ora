@@ -119,11 +119,11 @@ class OperationalSnapshotProvider:
             row for row in rows
             if str(row.get("strategy_id")) == str(strategy_id)
             and str(row.get("decision") or "").lower() not in {"reject", "excluded"}
+            and _is_positive_number(row.get("current_price"))
         )
         if not accepted:
             raise RuntimeConfigurationError("latest scan has no usable candidates")
         for row in accepted:
-            _positive(row.get("current_price"), f"{row.get('symbol')} current_price")
             _require_fresh(
                 _parse_time(row.get("data_as_of"), "candidate data_as_of"),
                 now, self.max_age_seconds, "candidate",
@@ -436,6 +436,13 @@ def _positive(value, name):
     if number <= 0:
         raise RuntimeConfigurationError(f"{name} must be positive")
     return number
+
+
+def _is_positive_number(value) -> bool:
+    try:
+        return math.isfinite(float(value)) and float(value) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def _nonnegative(value, name):
