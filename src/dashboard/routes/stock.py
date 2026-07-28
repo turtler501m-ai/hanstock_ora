@@ -1945,6 +1945,41 @@ def sync_trade_order_status(days: int = 30):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+def _remove_non_broker_trade_rows() -> dict:
+    """Remove local-only rows that must not survive a broker-authoritative sync."""
+    removable_statuses = (
+        "reconciled",
+        "failed",
+        "canceled",
+        "rejected",
+        "simulated",
+    )
+    placeholders = ",".join("?" for _ in removable_statuses)
+    with trader.connect_db() as conn:
+        cursor = conn.execute(
+            f"""
+            DELETE FROM trades
+            WHERE COALESCE(env, ?) = ?
+              AND COALESCE(broker_order_id, '') = ''
+              AND (
+                    COALESCE(order_status, '') IN ({placeholders})
+                    OR COALESCE(ok, 0) = 0
+                  )
+            """,
+            (
+                trader.TRADING_ENV,
+                trader.TRADING_ENV,
+                *removable_statuses,
+            ),
+        )
+        removed_count = int(cursor.rowcount)
+    return {
+        "ok": True,
+        "removed_count": removed_count,
+        "scope": "local rows without broker order id",
+    }
+
+
 
 
 @router.post("/api/trades/sync")
@@ -1953,6 +1988,13 @@ def sync_trades(days: int = 90):
         raise HTTPException(status_code=400, detail="紐⑥쓽 ?ㅽ뻾(DRY_RUN) 紐⑤뱶?먯꽌??利앷텒??怨꾩쥖 ?숆린?붾? ?ъ슜?????놁뒿?덈떎.")
     try:
         api = _get_api()
+        order_status_sync = None
+        order_status_error = None
+        try:
+            order_status_sync = _sync_order_status_from_history(api, days=days)
+        except Exception as exc:
+            order_status_error = str(exc)
+
         history_sync = None
         history_error = None
         try:
@@ -1963,6 +2005,7 @@ def sync_trades(days: int = 90):
         balance_data = _get_balance_data(api, allow_cache=False)
         parsed_balance = _parse_balance(balance_data)
         current_holdings = {h['symbol']: h for h in parsed_balance['holdings']}
+        cleanup = _remove_non_broker_trade_rows()
         
         # Reconstruct current holdings from DB and Cloud
         cloud_trades = fetch_cloud_trades() or []
@@ -2072,6 +2115,10 @@ def sync_trades(days: int = 90):
             "history_updated_count": updated_count,
             "history_sync": history_sync,
             "history_error": history_error,
+            "order_status_sync": order_status_sync,
+            "order_status_error": order_status_error,
+            "removed_mismatch_count": cleanup["removed_count"],
+            "cleanup": cleanup,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

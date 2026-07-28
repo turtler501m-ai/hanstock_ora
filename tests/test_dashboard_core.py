@@ -1495,6 +1495,93 @@ class DashboardCoreTests(unittest.TestCase):
             stock_routes._clear_balance_cache = original_clear_balance_cache
             stock_routes.trader.DRY_RUN = original_dry_run
 
+    def test_broker_sync_removes_only_local_mismatch_rows(self):
+        import src.dashboard.routes.stock as stock_routes
+
+        original_db_path = dashboard.trader.config.trade_db_path
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                dashboard.trader.init_db()
+                dashboard.trader.save_trade(
+                    "005360", "Monami", "sell", 10, 1700, "failed local order",
+                    False, True, order_status="failed",
+                )
+                dashboard.trader.save_trade(
+                    "005930", "Samsung", "buy", 2, 70000, "balance sync adjustment",
+                    True, False, order_status="reconciled", filled_qty=2,
+                )
+                dashboard.trader.save_trade(
+                    "000660", "SK Hynix", "buy", 1, 120000, "broker fill",
+                    True, True, broker_order_id="B123", order_status="filled",
+                    filled_qty=1,
+                )
+
+                result = stock_routes._remove_non_broker_trade_rows()
+
+                self.assertEqual(result["removed_count"], 2)
+                with sqlite3.connect(dashboard.trader.config.trade_db_path) as conn:
+                    conn.row_factory = sqlite3.Row
+                    rows = conn.execute(
+                        "SELECT symbol, broker_order_id, order_status FROM trades"
+                    ).fetchall()
+                self.assertEqual(
+                    [dict(row) for row in rows],
+                    [{
+                        "symbol": "000660",
+                        "broker_order_id": "B123",
+                        "order_status": "filled",
+                    }],
+                )
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+
+    def test_broker_sync_reports_removed_mismatch_rows(self):
+        import src.dashboard.routes.stock as stock_routes
+
+        original_db_path = dashboard.trader.config.trade_db_path
+        original_get_api = stock_routes._get_api
+        original_get_balance_data = stock_routes._get_balance_data
+        original_fetch_cloud_trades = stock_routes.fetch_cloud_trades
+        original_clear_balance_cache = stock_routes._clear_balance_cache
+        original_dry_run = stock_routes.trader.DRY_RUN
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                dashboard.trader.init_db()
+                dashboard.trader.save_trade(
+                    "005360", "Monami", "sell", 10, 1700, "failed local order",
+                    False, True, order_status="failed",
+                )
+
+                class _FakeAPI:
+                    def get_trade_history(self, start_date, end_date):
+                        return []
+
+                stock_routes._get_api = lambda: _FakeAPI()
+                stock_routes._get_balance_data = lambda api, allow_cache=False: {
+                    "output1": [],
+                    "output2": [{}],
+                }
+                stock_routes.fetch_cloud_trades = lambda: []
+                stock_routes._clear_balance_cache = lambda: None
+                stock_routes.trader.DRY_RUN = False
+
+                result = stock_routes.sync_trades(days=1)
+
+                self.assertEqual(result["removed_mismatch_count"], 1)
+                self.assertTrue(result["order_status_sync"]["ok"])
+                with sqlite3.connect(dashboard.trader.config.trade_db_path) as conn:
+                    count = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
+                self.assertEqual(count, 0)
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+            stock_routes._get_api = original_get_api
+            stock_routes._get_balance_data = original_get_balance_data
+            stock_routes.fetch_cloud_trades = original_fetch_cloud_trades
+            stock_routes._clear_balance_cache = original_clear_balance_cache
+            stock_routes.trader.DRY_RUN = original_dry_run
+
     def test_sell_all_holdings_queues_market_sell_for_each_current_holding(self):
         original_db_path = dashboard.trader.config.trade_db_path
         original_get_api = dashboard._get_api

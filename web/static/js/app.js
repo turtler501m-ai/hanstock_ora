@@ -3371,7 +3371,8 @@ document.addEventListener('DOMContentLoaded', () => {
             btnSyncTrades.style.color = 'white';
             try {
                 const result = await postJson('/api/trades/sync', {});
-                setStatus(`증권사 기록 동기화 완료 (누락된 ${result.synced_count}건 추가됨)`, true);
+                const removedCount = Number(result.removed_mismatch_count || 0);
+                setStatus(`증권사 기록 동기화 완료 (추가 ${result.synced_count}건, 불일치 정리 ${removedCount}건)`, true);
                 // 동기화 후 보유 관련 탭들을 함께 현행화한다.
                 await Promise.all([
                     renderTrades(),
@@ -3380,7 +3381,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     renderExecutionPlan(),
                 ]);
                 
-                btnSyncTrades.textContent = result.synced_count > 0 ? `동기화 완료 (${result.synced_count}건)` : '동기화 완료 ✔️';
+                btnSyncTrades.textContent = (result.synced_count > 0 || removedCount > 0)
+                    ? `동기화 완료 (+${result.synced_count}/-${removedCount})`
+                    : '동기화 완료 ✔️';
                 btnSyncTrades.style.backgroundColor = '#10b981'; // success green
                 btnSyncTrades.style.color = 'white';
                 
