@@ -1050,6 +1050,97 @@ class DashboardCoreTests(unittest.TestCase):
         finally:
             dashboard.trader.config.trade_db_path = original_db_path
 
+    def test_order_status_sync_closes_canceled_history_order(self):
+        original_db_path = dashboard.trader.config.trade_db_path
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                dashboard.trader.init_db()
+                dashboard.trader.save_trade(
+                    "005360",
+                    "Monami",
+                    "sell",
+                    10,
+                    1782,
+                    "sell",
+                    True,
+                    True,
+                    broker_order_id="0001",
+                    order_status="open",
+                    pre_order_qty=20,
+                )
+                order_date = dashboard.trader.datetime.now(dashboard.trader.KST).strftime("%Y%m%d")
+
+                class _FakeAPI:
+                    def get_trade_history(self, start_date, end_date):
+                        return [{
+                            "ord_dt": order_date,
+                            "odno": "0001",
+                            "sll_buy_dvsn_cd": "01",
+                            "pdno": "005360",
+                            "ord_qty": "10",
+                            "tot_ccld_qty": "3",
+                            "rmn_qty": "7",
+                            "cncl_yn": "Y",
+                        }]
+
+                dashboard._sync_order_status_from_history(_FakeAPI(), days=1)
+
+                with sqlite3.connect(dashboard.trader.config.trade_db_path) as conn:
+                    row = conn.execute(
+                        "SELECT order_status, filled_qty FROM trades"
+                    ).fetchone()
+                self.assertEqual(row, ("canceled", 3))
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+
+    def test_order_status_sync_expires_prior_day_order_with_remainder(self):
+        original_db_path = dashboard.trader.config.trade_db_path
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                dashboard.trader.init_db()
+                yesterday = (
+                    dashboard.trader.datetime.now(dashboard.trader.KST)
+                    - dashboard.trader.timedelta(days=1)
+                )
+                trade_ts = yesterday.strftime("%Y-%m-%d 10:00:00")
+                dashboard.trader.save_trade(
+                    "005360",
+                    "Monami",
+                    "sell",
+                    10,
+                    1782,
+                    "sell",
+                    True,
+                    True,
+                    broker_order_id="0001",
+                    order_status="open",
+                    pre_order_qty=20,
+                )
+                with sqlite3.connect(dashboard.trader.config.trade_db_path) as conn:
+                    conn.execute("UPDATE trades SET ts = ?", (trade_ts,))
+
+                class _FakeAPI:
+                    def get_trade_history(self, start_date, end_date):
+                        return [{
+                            "ord_dt": yesterday.strftime("%Y%m%d"),
+                            "odno": "0001",
+                            "sll_buy_dvsn_cd": "01",
+                            "pdno": "005360",
+                            "ord_qty": "10",
+                            "tot_ccld_qty": "0",
+                            "rmn_qty": "10",
+                        }]
+
+                dashboard._sync_order_status_from_history(_FakeAPI(), days=1)
+
+                with sqlite3.connect(dashboard.trader.config.trade_db_path) as conn:
+                    status = conn.execute("SELECT order_status FROM trades").fetchone()[0]
+                self.assertEqual(status, "canceled")
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+
     def test_order_status_sync_marks_submitted_demo_order_filled(self):
         original_db_path = dashboard.trader.config.trade_db_path
         original_dry_run = dashboard.trader.DRY_RUN

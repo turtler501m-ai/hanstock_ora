@@ -129,6 +129,7 @@ def save_trade(
 def update_trade_order_status(
     broker_order_id: str,
     *,
+    trade_id: int | None = None,
     order_status: str,
     filled_qty: int = 0,
     filled_price: int = 0,
@@ -140,15 +141,17 @@ def update_trade_order_status(
     init_db()
     broker_result_json = json.dumps(broker_result or {}, ensure_ascii=False)
     with connect_db() as conn:
+        where_sql = "id = ?" if trade_id is not None else "broker_order_id = ?"
+        where_value = int(trade_id) if trade_id is not None else broker_order_id
         cursor = conn.execute(
-            """
+            f"""
             UPDATE trades
             SET order_status = ?,
                 filled_qty = ?,
                 filled_price = ?,
                 response_msg = ?,
                 broker_result = ?
-            WHERE broker_order_id = ?
+            WHERE {where_sql}
             """,
             (
                 order_status,
@@ -156,7 +159,7 @@ def update_trade_order_status(
                 int(filled_price or 0),
                 response_msg,
                 broker_result_json,
-                broker_order_id,
+                where_value,
             ),
         )
         return int(cursor.rowcount)

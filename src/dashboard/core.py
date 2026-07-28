@@ -3139,6 +3139,21 @@ def _history_remaining_qty(row: dict) -> int:
     return _history_int(row, "rmn_qty", "RMN_QTY", "ord_psbl_qty")
 
 
+def _history_order_is_canceled(row: dict) -> bool:
+    value = _history_text(
+        row,
+        "cncl_yn",
+        "CNCL_YN",
+        "rvse_cncl_dvsn_name",
+        "RVSE_CNCL_DVSN_NAME",
+    ).strip()
+    return value.upper() == "Y" or "취소" in value or "cancel" in value.lower()
+
+
+def _history_order_is_rejected(row: dict) -> bool:
+    return _history_int(row, "rjct_qty", "RJCT_QTY") > 0
+
+
 def _history_text(row: dict, *keys: str) -> str:
     for key in keys:
         value = row.get(key)
@@ -3409,7 +3424,14 @@ def _sync_order_status_from_history(api, *, days: int = MIN_ORDER_HISTORY_SYNC_D
         filled_qty = _history_fill_qty(row)
         filled_price = _history_fill_price(row)
         remaining_qty = _history_remaining_qty(row)
-        if remaining_qty > 0 and filled_qty <= 0:
+        order_date = _history_timestamp(row)[:10]
+        today = trader.datetime.now(trader.KST).strftime("%Y-%m-%d")
+        expired_with_remainder = bool(order_date and order_date < today and remaining_qty > 0)
+        if _history_order_is_canceled(row) or expired_with_remainder:
+            order_status = "canceled"
+        elif _history_order_is_rejected(row) and filled_qty <= 0:
+            order_status = "failed"
+        elif remaining_qty > 0 and filled_qty <= 0:
             order_status = "open"
         elif remaining_qty > 0 or (requested_qty > 0 and filled_qty < requested_qty):
             order_status = "partial"
@@ -3418,6 +3440,7 @@ def _sync_order_status_from_history(api, *, days: int = MIN_ORDER_HISTORY_SYNC_D
         response_msg = f"KIS order history sync: {order_status}"
         updated_count += trader.update_trade_order_status(
             order_id,
+            trade_id=_to_int(trade.get("id")) or None,
             order_status=order_status,
             filled_qty=filled_qty,
             filled_price=filled_price,
@@ -3508,6 +3531,7 @@ def _sync_order_status_from_balance(
                 response_msg = f"Balance reconciliation: {order_status} (no active sell reservation)"
                 updated_count += trader.update_trade_order_status(
                     order_id,
+                    trade_id=_to_int(trade.get("id")) or None,
                     order_status=order_status,
                     filled_qty=inferred_filled_qty,
                     filled_price=current_price if inferred_filled_qty > 0 else 0,
@@ -3539,6 +3563,7 @@ def _sync_order_status_from_balance(
         response_msg = "Balance fallback sync: filled"
         updated_count += trader.update_trade_order_status(
             order_id,
+            trade_id=_to_int(trade.get("id")) or None,
             order_status="filled",
             filled_qty=requested_qty,
             filled_price=current_price,
