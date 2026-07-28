@@ -2,6 +2,7 @@
 from fastapi import APIRouter, Body, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+import threading
 import src.dashboard.core as _core
 from src.dashboard.core import *
 from src.utils.logger import logger
@@ -9,6 +10,9 @@ globals().update({k: v for k, v in _core.__dict__.items() if not k.startswith('_
 
 router = APIRouter(tags=["stock"])
 TRADE_SYNC_RESULT_PATH = Path(".runtime/trade_sync_last_result.json")
+APPROVAL_BATCH_RESULT_PATH = Path(".runtime/approval_batch_last_result.json")
+_approval_batch_lock = threading.Lock()
+_approval_batch_state: dict = {}
 
 class NewStrategyPayload(BaseModel):
     name: str = Field(..., min_length=1)
@@ -1688,6 +1692,108 @@ def _create_retry_approval_from_item(item: dict, *, retry_qty: int, source_appro
         "profile_hash": item.get("profile_hash"),
         "source_candidate_id": item.get("source_candidate_id"),
     })
+
+
+def _save_approval_batch_state(state: dict) -> None:
+    APPROVAL_BATCH_RESULT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = APPROVAL_BATCH_RESULT_PATH.with_suffix(".tmp")
+    temp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(APPROVAL_BATCH_RESULT_PATH)
+
+
+def _run_approval_batch(job_id: str, action: str, approval_ids: list[int]) -> None:
+    results = []
+    success_count = 0
+    failed_count = 0
+    for index, approval_id in enumerate(approval_ids, start=1):
+        try:
+            if action == "cancel-retry":
+                result = cancel_blocking_sell_and_retry_approval(approval_id)
+            else:
+                result = retry_approval_order(approval_id)
+            success_count += 1
+            results.append({"approval_id": approval_id, "ok": True, "result": result})
+        except Exception as exc:
+            failed_count += 1
+            detail = getattr(exc, "detail", None) or str(exc)
+            results.append({"approval_id": approval_id, "ok": False, "error": str(detail)})
+
+        with _approval_batch_lock:
+            if _approval_batch_state.get("job_id") != job_id:
+                return
+            _approval_batch_state.update({
+                "processed_count": index,
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "results": results,
+            })
+            _save_approval_batch_state(_approval_batch_state)
+
+    with _approval_batch_lock:
+        if _approval_batch_state.get("job_id") != job_id:
+            return
+        _approval_batch_state.update({
+            "status": "completed",
+            "completed_at": trader.datetime.now(trader.KST).isoformat(),
+        })
+        _save_approval_batch_state(_approval_batch_state)
+
+
+@router.post("/api/approvals/batch")
+def start_approval_batch(payload: dict = Body(...)):
+    action = str(payload.get("action") or "").strip()
+    if action not in {"retry", "cancel-retry"}:
+        raise HTTPException(status_code=400, detail="action must be retry or cancel-retry")
+    approval_ids = []
+    for value in payload.get("approval_ids") or []:
+        approval_id = _to_int(value)
+        if approval_id > 0 and approval_id not in approval_ids:
+            approval_ids.append(approval_id)
+    if not approval_ids:
+        raise HTTPException(status_code=400, detail="approval_ids is required")
+    if len(approval_ids) > 50:
+        raise HTTPException(status_code=400, detail="approval_ids must contain at most 50 items")
+
+    with _approval_batch_lock:
+        if _approval_batch_state.get("status") == "running":
+            raise HTTPException(status_code=409, detail="another approval batch is already running")
+        job_id = trader.datetime.now(trader.KST).strftime("%Y%m%d%H%M%S%f")
+        _approval_batch_state.clear()
+        _approval_batch_state.update({
+            "job_id": job_id,
+            "action": action,
+            "status": "running",
+            "total_count": len(approval_ids),
+            "processed_count": 0,
+            "success_count": 0,
+            "failed_count": 0,
+            "results": [],
+            "started_at": trader.datetime.now(trader.KST).isoformat(),
+            "completed_at": None,
+        })
+        _save_approval_batch_state(_approval_batch_state)
+
+    threading.Thread(
+        target=_run_approval_batch,
+        args=(job_id, action, approval_ids),
+        name=f"approval-batch-{job_id}",
+        daemon=True,
+    ).start()
+    return dict(_approval_batch_state)
+
+
+@router.get("/api/approvals/batch/status")
+def get_approval_batch_status():
+    with _approval_batch_lock:
+        if _approval_batch_state:
+            return {"available": True, **dict(_approval_batch_state)}
+    if APPROVAL_BATCH_RESULT_PATH.exists():
+        try:
+            saved = json.loads(APPROVAL_BATCH_RESULT_PATH.read_text(encoding="utf-8"))
+            return {"available": True, **saved}
+        except (OSError, ValueError, TypeError):
+            pass
+    return {"available": False, "status": "idle"}
 
 
 @router.post("/api/approvals/{approval_id}/retry")

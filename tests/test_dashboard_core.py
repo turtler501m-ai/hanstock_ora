@@ -836,6 +836,42 @@ class DashboardCoreTests(unittest.TestCase):
             dashboard._get_api = original_get_api
             dashboard._get_balance_data = original_get_balance_data
 
+    def test_start_approval_batch_returns_immediately_and_tracks_progress(self):
+        original_thread = dashboard.threading.Thread
+        original_path = dashboard.APPROVAL_BATCH_RESULT_PATH
+        started = []
+
+        class FakeThread:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def start(self):
+                started.append(self.kwargs)
+
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.APPROVAL_BATCH_RESULT_PATH = Path(tmpdir) / "approval-batch.json"
+                dashboard.threading.Thread = FakeThread
+                dashboard._approval_batch_state.clear()
+
+                result = dashboard.start_approval_batch({
+                    "action": "retry",
+                    "approval_ids": [3, 3, 4],
+                })
+
+                self.assertEqual(result["status"], "running")
+                self.assertEqual(result["total_count"], 2)
+                self.assertEqual(result["processed_count"], 0)
+                self.assertEqual(len(started), 1)
+                self.assertTrue(started[0]["daemon"])
+                status = dashboard.get_approval_batch_status()
+                self.assertTrue(status["available"])
+                self.assertEqual(status["job_id"], result["job_id"])
+        finally:
+            dashboard.threading.Thread = original_thread
+            dashboard.APPROVAL_BATCH_RESULT_PATH = original_path
+            dashboard._approval_batch_state.clear()
+
     def test_retry_approval_blocks_when_sellable_quantity_is_zero(self):
         original_db_path = dashboard.trader.config.trade_db_path
         original_get_api = dashboard._get_api

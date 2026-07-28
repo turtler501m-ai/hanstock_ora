@@ -2658,30 +2658,33 @@ async function executeApprovalBatch(action) {
     const batchButton = document.getElementById(batchButtonId);
     if (batchButton) batchButton.disabled = true;
 
-    let successCount = 0;
-    let failedCount = 0;
-    const failedMessages = [];
     try {
-        // KIS 주문 제한을 피하고 취소 완료 순서를 보장하기 위해 한 건씩 처리한다.
-        for (const button of buttons) {
-            button.disabled = true;
-            try {
-                await postJson(`/api/approvals/${button.dataset.id}/${action}`, {});
-                successCount += 1;
-            } catch (err) {
-                failedCount += 1;
-                failedMessages.push(`#${button.dataset.id} ${err.message}`);
-                button.disabled = false;
-            }
+        buttons.forEach((button) => { button.disabled = true; });
+        const started = await postJson('/api/approvals/batch', {
+            action,
+            approval_ids: buttons.map((button) => Number(button.dataset.id))
+        });
+        setStatus(`${actionLabel} 일괄 작업을 시작했습니다. 0/${started.total_count}건`);
+        let state = started;
+        while (state.status === 'running') {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            state = await fetchJson('/api/approvals/batch/status', 10000);
+            setStatus(
+                `${actionLabel} 처리 중: ${state.processed_count || 0}/${state.total_count || started.total_count}건`
+            );
         }
-        const failureNote = failedMessages.length
-            ? ` · ${failedMessages.slice(0, 3).join(' / ')}`
+        const failures = (state.results || []).filter((item) => !item.ok);
+        const failureNote = failures.length
+            ? ` · ${failures.slice(0, 3).map((item) => `#${item.approval_id} ${item.error}`).join(' / ')}`
             : '';
         setStatus(
-            `${actionLabel} 일괄 완료: 성공 ${successCount}건, 실패·건너뜀 ${failedCount}건${failureNote}`,
-            failedCount === 0
+            `${actionLabel} 일괄 완료: 성공 ${state.success_count || 0}건, 실패·건너뜀 ${state.failed_count || 0}건${failureNote}`,
+            Number(state.failed_count || 0) === 0
         );
         await Promise.all([renderApprovals(), renderTrades(), renderBalance()]);
+    } catch (err) {
+        setStatus(`${actionLabel} 일괄 요청 실패: ${err.message}`);
+        buttons.forEach((button) => { button.disabled = false; });
     } finally {
         if (batchButton) batchButton.disabled = false;
     }
