@@ -113,7 +113,7 @@ class SchedulerModeTests(unittest.TestCase):
         applied = {
             "id": "easy_aggressive_live",
             "selected": True,
-            "status": "paper_passed",
+            "status": "approved",
         }
         with patch.object(
             strategy_scheduler,
@@ -174,6 +174,20 @@ class SchedulerModeTests(unittest.TestCase):
             ],
         )
 
+    def test_ai_schedule_slot_excludes_selected_but_unapproved_strategy(self):
+        from src.strategy_ids import resolve_ai_schedule_strategy_ids
+
+        resolved = resolve_ai_schedule_strategy_ids(
+            ["ai_stock_default_v1"],
+            strategies=[
+                {"id": "paper_only", "selected": True, "status": "paper_passed"},
+                {"id": "ready", "selected": True, "status": "approved"},
+                {"id": "unchecked", "selected": False, "status": "approved"},
+            ],
+        )
+
+        self.assertEqual(resolved, ["ready"])
+
     def test_strategy_dispatch_routes_issue_sector_through_trader(self):
         schedule = {
             "strategy_id": "issue_sector_rotation_strategy",
@@ -211,7 +225,7 @@ class SchedulerModeTests(unittest.TestCase):
         )
         autonomy_run.assert_not_called()
 
-    def test_strategy_dispatch_runs_only_one_trader_engine_schedule_per_tick(self):
+    def test_strategy_dispatch_runs_all_due_trader_engine_schedules(self):
         schedules = [
             {"strategy_id": "issue_sector_rotation_strategy", "mode": "execute", "auto_approve": True},
             {"strategy_id": "seven_split", "mode": "execute", "auto_approve": True},
@@ -234,12 +248,14 @@ class SchedulerModeTests(unittest.TestCase):
         ) as mark_mock:
             ran = strategy_scheduler.dispatch_due_schedules()
 
-        self.assertEqual(ran, ["seven_split"])
-        run_cycle.assert_called_once_with(
-            "execute",
-            auto_approve=True,
-            force_strategy_id="seven_split",
-            allowed_categories={"position", "candidate", "ai_rebalance"},
+        self.assertEqual(
+            ran,
+            ["seven_split", "plunge_bounce_strategy", "issue_sector_rotation_strategy"],
+        )
+        self.assertEqual(run_cycle.call_count, 3)
+        self.assertEqual(
+            [call.kwargs["force_strategy_id"] for call in run_cycle.call_args_list],
+            ["seven_split", "plunge_bounce_strategy", "issue_sector_rotation_strategy"],
         )
         self.assertEqual(
             [call.args[0] for call in mark_mock.call_args_list],

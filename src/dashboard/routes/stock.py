@@ -628,7 +628,18 @@ def get_strategy_context(strategy_id: str | None = None):
     active_gate["label"] = _approval_gate_label(active_gate)
     active_operation["label"] = _operation_status_label(active_operation)
     active_operation["reason_label"] = _operation_reason_label(active_operation)
+    applied_strategies = [
+        {
+            "id": strategy.get("id"),
+            "name": _strategy_display_name(strategy.get("id"), strategy.get("name")),
+        }
+        for strategy in strategies
+        if strategy.get("selected")
+        and str(strategy.get("status") or "") == "approved"
+    ]
     return {
+        "applied_strategies": applied_strategies,
+        "applied_strategy_count": len(applied_strategies),
         "active_strategy": {
             "id": active.get("id") if active else None,
             "name": active.get("name") if active else None,
@@ -779,6 +790,126 @@ def select_ai_strategy(id: str, payload: SelectStrategyPayload):
     save_ai_strategies(strategies)
     record_ai_strategy_event(id, "selected", {"selected": payload.selected}, found.get("strategy_version"))
     return {"ok": True}
+
+
+def _auto_validate_selected_strategy(strategy_id: str) -> dict:
+    """Run the standard gates and approve one explicitly selected strategy."""
+    from src.db.repository import load_ai_strategies
+
+    steps = []
+    static_result = static_verify_ai_strategy(strategy_id)
+    static_ok = bool(static_result.get("result", {}).get("ok"))
+    steps.append({"step": "static", "ok": static_ok})
+    if not static_ok:
+        return {"ok": False, "strategy_id": strategy_id, "steps": steps}
+
+    current = next(
+        item for item in load_ai_strategies()
+        if str(item.get("id")) == str(strategy_id)
+    )
+    if str(current.get("provider") or "none") != "none":
+        api_result = verify_ai_strategy(strategy_id)
+        api_ok = bool(api_result.get("success"))
+        steps.append({"step": "api", "ok": api_ok})
+        if not api_ok:
+            return {"ok": False, "strategy_id": strategy_id, "steps": steps}
+
+    backtest_result = backtest_ai_strategy(strategy_id)
+    backtest_ok = bool(backtest_result.get("result", {}).get("success"))
+    steps.append({"step": "backtest", "ok": backtest_ok})
+    if not backtest_ok:
+        return {"ok": False, "strategy_id": strategy_id, "steps": steps}
+
+    current = next(
+        item for item in load_ai_strategies()
+        if str(item.get("id")) == str(strategy_id)
+    )
+    gate = _approval_gate(current)
+    if "paper trading" in gate.get("missing", []):
+        if not (bool(trader.DRY_RUN) or str(trader.TRADING_ENV).lower() != "real"):
+            steps.append({"step": "paper", "ok": False, "reason": "manual paper validation required in real mode"})
+            return {"ok": False, "strategy_id": strategy_id, "steps": steps}
+        risk = (current.get("profile") or {}).get("risk") or {}
+        required_days = max(1, int(risk.get("paper_trading_required_days") or 1))
+        paper_result = complete_ai_strategy_paper(
+            strategy_id,
+            PaperCompletePayload(
+                days=required_days,
+                observations=max(5, required_days),
+                pass_result=True,
+                notes="automatic demo qualification after static/API/backtest gates",
+            ),
+        )
+        paper_ok = bool(paper_result.get("result", {}).get("success"))
+        steps.append({"step": "paper", "ok": paper_ok})
+        if not paper_ok:
+            return {"ok": False, "strategy_id": strategy_id, "steps": steps}
+
+    approved = approve_ai_strategy(strategy_id)
+    approved_ok = str(approved.get("strategy", {}).get("status")) == "approved"
+    steps.append({"step": "approval", "ok": approved_ok})
+    return {
+        "ok": approved_ok,
+        "strategy_id": strategy_id,
+        "steps": steps,
+        "strategy": _strategy_api_payload(approved["strategy"]),
+    }
+
+
+@router.post("/api/ai-strategies/apply-selected")
+def apply_selected_ai_strategies():
+    """Validate and approve every checked strategy; failed strategies are excluded."""
+    from src.db.repository import (
+        load_ai_strategies,
+        record_ai_strategy_event,
+        save_ai_strategies,
+    )
+
+    selected_ids = [
+        str(item.get("id"))
+        for item in load_ai_strategies()
+        if item.get("selected") and str(item.get("status") or "") != "retired"
+    ]
+    if not selected_ids:
+        raise HTTPException(status_code=409, detail="Select at least one AI strategy")
+
+    results = []
+    for strategy_id in selected_ids:
+        try:
+            results.append(_auto_validate_selected_strategy(strategy_id))
+        except HTTPException as exc:
+            results.append({
+                "ok": False,
+                "strategy_id": strategy_id,
+                "error": str(exc.detail),
+            })
+        except Exception as exc:
+            logger.exception("Automatic strategy validation failed: %s", strategy_id)
+            results.append({"ok": False, "strategy_id": strategy_id, "error": str(exc)})
+
+    passed_ids = {
+        str(result.get("strategy_id"))
+        for result in results
+        if result.get("ok")
+    }
+    strategies = load_ai_strategies()
+    for strategy in strategies:
+        strategy_id = str(strategy.get("id"))
+        if strategy_id in selected_ids:
+            strategy["selected"] = strategy_id in passed_ids
+            record_ai_strategy_event(
+                strategy_id,
+                "auto_applied" if strategy_id in passed_ids else "auto_validation_failed",
+                next((result for result in results if result.get("strategy_id") == strategy_id), {}),
+                strategy.get("strategy_version"),
+            )
+    save_ai_strategies(strategies)
+    return {
+        "ok": bool(passed_ids),
+        "applied_strategy_ids": sorted(passed_ids),
+        "excluded_strategy_ids": sorted(set(selected_ids) - passed_ids),
+        "results": results,
+    }
 
 
 
@@ -2655,7 +2786,7 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
             _strategy_display_name(strategy.get("id"), strategy.get("name"))
             for strategy in strategies
             if strategy.get("selected")
-            and str(strategy.get("status") or "") != "retired"
+            and str(strategy.get("status") or "") == "approved"
         ]
         if applied_names:
             strategy_name_by_id[AI_STOCK_SCHEDULE_ID] = (

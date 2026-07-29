@@ -1430,8 +1430,15 @@ async function renderStrategyContext() {
         const safety = data.safety || {};
         const gate = active.approval_gate || {};
         const operation = active.operation_status || {};
-        setElementText('strategy-context-name', active.name || '-');
-        setElementText('strategy-context-detail', `${active.model || '-'} · AI ${formatNumber(Number(active.ai_weight || 0) * 100, 0)}%`);
+        const applied = data.applied_strategies || [];
+        setElementText(
+            'strategy-context-name',
+            applied.length ? `적용 ${applied.length}개: ${applied.map((strategy) => strategy.name).join(', ')}` : (active.name || '-')
+        );
+        setElementText(
+            'strategy-context-detail',
+            `현재 보기: ${active.name || '-'} · ${active.model || '-'} · AI ${formatNumber(Number(active.ai_weight || 0) * 100, 0)}%`
+        );
         setElementText('strategy-context-status', strategyStatusLabel(active.status));
         setElementText('strategy-context-version', active.strategy_version ? `v${active.strategy_version}` : '-');
         setElementText('strategy-context-safety', `${safety.trading_env || '-'} / ${safety.dry_run ? 'DRY_RUN' : 'LIVE'}`);
@@ -1635,6 +1642,15 @@ async function renderAiStrategies() {
         const data = await fetchJson('/api/ai-strategies');
         tbody.innerHTML = '';
         const strategies = data.strategies || [];
+        const selectedStrategies = strategies.filter((strategy) => strategy.selected);
+        const applySelectedButton = document.getElementById('btn-apply-selected-strategies');
+        if (applySelectedButton) {
+            const names = selectedStrategies.map((strategy) => strategyDisplayName(strategy));
+            applySelectedButton.textContent = names.length
+                ? `선택 ${names.length}개 자동검증·적용`
+                : '전략을 체크하세요';
+            applySelectedButton.title = names.join(', ');
+        }
         if (!strategies.length) {
             setTableMessage('#table-ai-strategies tbody', 6, '등록된 AI 전략이 없습니다.');
             return;
@@ -1723,6 +1739,10 @@ async function renderAiStrategies() {
         };
         bindStrategyAction('.btn-quick-apply-strategy', async (id) => {
             await postJson(`/api/ai-strategies/${id}/select`, { selected: true });
+            const result = await postJson('/api/ai-strategies/apply-selected', {});
+            if (!(result.applied_strategy_ids || []).includes(id)) {
+                throw new Error('Automatic validation did not pass');
+            }
             localStorage.setItem('hanstock_ai_ranker', id);
             await renderStrategyAudit(id);
             setStatus('전략을 바로 적용했습니다.', true);
@@ -2035,7 +2055,30 @@ async function renderSignals() {
     setButtonBusy('btn-signals', true);
     setTableMessage('#table-signals tbody', 7, '보유 종목을 진단하고 있습니다...');
     try {
-        const data = await fetchJson(await commonAnalysisPath('/api/signals'));
+        const strategyData = await fetchJson('/api/ai-strategies');
+        const appliedStrategies = (strategyData.strategies || []).filter(
+            (strategy) => strategy.selected && strategy.status === 'approved'
+        );
+        let data;
+        if (appliedStrategies.length > 1) {
+            const responses = await Promise.all(appliedStrategies.map(async (strategy) => {
+                const response = await fetchJson(`/api/signals?strategy_id=${encodeURIComponent(strategy.id)}`);
+                return (response.signals || []).map((signal) => ({
+                    ...signal,
+                    strategy_name: strategy.display_name || strategy.name || strategy.id,
+                }));
+            }));
+            data = { signals: responses.flat() };
+        } else {
+            data = await fetchJson(await commonAnalysisPath('/api/signals'));
+            const strategy = appliedStrategies[0];
+            if (strategy) {
+                data.signals = (data.signals || []).map((signal) => ({
+                    ...signal,
+                    strategy_name: strategy.display_name || strategy.name || strategy.id,
+                }));
+            }
+        }
         if (!isCurrentStrategyRequest(request)) return;
         captureAnalysisCycle(data);
         const tbody = document.querySelector('#table-signals tbody');
@@ -2071,6 +2114,7 @@ async function renderSignals() {
                 <td>${formatNumber(row.rsi, 1)} / ${formatNumber(row.rsi2, 1)}</td>
                 <td>${formatNumber(row.macd_hist, 2)}</td>
                 <td>
+                    <div class="time-muted">${escapeHtml(row.strategy_name || row.strategy_id || '')}</div>
                     <div class="reason-cell" title="${escapeHtml(reason)}">${escapeHtml(reason)}</div>
                     ${queueButton}
                 </td>
@@ -3362,7 +3406,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     localStorage.setItem('hanstock_ai_ranker', strategyId);
                     activeStrategyAuditId = strategyId;
                 }
-                await Promise.all([renderAiStrategies(), syncStrategiesToDropdown(), renderStrategyContext()]);
+                const applyResult = await postJson('/api/ai-strategies/apply-selected', {});
+                await Promise.all([renderAiStrategies(), syncStrategiesToDropdown(), renderStrategyContext(), renderScheduleInfo()]);
                 await renderStrategyAudit(strategyId);
                 setStatus(result.message || '쉬운 전략을 적용했습니다.', true);
             } catch (err) {
@@ -3437,12 +3482,13 @@ document.addEventListener('DOMContentLoaded', () => {
         applySelectedBtn.addEventListener('click', async () => {
             setButtonBusy(applySelectedBtn, true);
             try {
-                await Promise.all([renderAiStrategies(), syncStrategiesToDropdown(), renderStrategyContext()]);
+                const applyResult = await postJson('/api/ai-strategies/apply-selected', {});
+                await Promise.all([renderAiStrategies(), syncStrategiesToDropdown(), renderStrategyContext(), renderScheduleInfo()]);
                 
                 const select = document.getElementById('select-ai-ranker');
                 if (select && select.options.length > 0) {
                     const data = await fetchJson('/api/ai-strategies');
-                    const activeStrats = data.strategies.filter(s => s.selected);
+                    const activeStrats = data.strategies.filter(s => s.selected && s.status === 'approved');
                     if (activeStrats.length > 0) {
                         select.value = activeStrats[0].id;
                         localStorage.setItem('hanstock_ai_ranker', select.value);
@@ -3454,8 +3500,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     strategyTabBtn.click();
                 }
                 
-                await renderCandidates();
-                setStatus('선택한 AI 전략이 대시보드에 실시간 바인딩되어 신규매수후보 찾기가 완료되었습니다.', true);
+                await Promise.all([renderSignals(), renderCandidates()]);
+                const appliedCount = (applyResult.applied_strategy_ids || []).length;
+                const excludedCount = (applyResult.excluded_strategy_ids || []).length;
+                setStatus(`AI 전략 ${appliedCount}개 적용, 검증 미통과 ${excludedCount}개 제외`, appliedCount > 0);
             } catch (err) {
                 setStatus(`전략 자동 적용 실패: ${err.message}`);
             } finally {

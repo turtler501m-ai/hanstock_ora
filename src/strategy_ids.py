@@ -39,10 +39,10 @@ def resolve_ai_schedule_strategy_ids(
         str(item.get("id") or "").strip()
         for item in strategies or []
         if item.get("selected")
-        and str(item.get("status") or "") != "retired"
+        and str(item.get("status") or "") == "approved"
         and str(item.get("id") or "").strip()
     ]
-    replacements = applied or [AI_STOCK_SCHEDULE_ID]
+    replacements = applied
 
     resolved = []
     for strategy_id in requested:

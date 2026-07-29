@@ -134,7 +134,7 @@ class SchedulerApiTests(unittest.TestCase):
             "model": "none",
             "name": "쉬운 공격형 전략",
             "selected": True,
-            "status": "paper_passed",
+            "status": "approved",
         }],
     )
     def test_scheduler_status_names_ai_slot_after_applied_strategy(
