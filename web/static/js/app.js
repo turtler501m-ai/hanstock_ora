@@ -2057,7 +2057,7 @@ async function renderSignals() {
     try {
         const strategyData = await fetchJson('/api/ai-strategies');
         const appliedStrategies = (strategyData.strategies || []).filter(
-            (strategy) => strategy.selected && strategy.status === 'approved'
+            (strategy) => strategy.selected && strategy.status === 'approved' && !strategy.independent_schedule
         );
         let data;
         if (appliedStrategies.length > 1) {
@@ -3488,7 +3488,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 const select = document.getElementById('select-ai-ranker');
                 if (select && select.options.length > 0) {
                     const data = await fetchJson('/api/ai-strategies');
-                    const activeStrats = data.strategies.filter(s => s.selected && s.status === 'approved');
+                    const activeStrats = data.strategies.filter(
+                        (strategy) => strategy.selected && strategy.status === 'approved' && !strategy.independent_schedule
+                    );
                     if (activeStrats.length > 0) {
                         select.value = activeStrats[0].id;
                         localStorage.setItem('hanstock_ai_ranker', select.value);

@@ -76,7 +76,7 @@ class SchedulerApiTests(unittest.TestCase):
         "src.db.repository.list_strategy_schedules",
         return_value=[
             {
-                "strategy_id": "issue_sector_rotation_strategy",
+                "strategy_id": "heikin_ashi_scalping_strategy",
                 "enabled": 1,
                 "interval_minutes": 5,
                 "start_hm": "0900",
@@ -92,20 +92,20 @@ class SchedulerApiTests(unittest.TestCase):
         "src.db.repository.load_ai_strategies",
         return_value=[
             {
-                "id": "issue_sector_rotation_strategy",
+                "id": "heikin_ashi_scalping_strategy",
                 "model": "none",
-                "name": "이슈 섹터 순환 모멘텀",
+                "name": "알파 하이킨아시",
                 "selected": False,
             }
         ],
     )
     def test_get_scheduler_status_adds_korean_schedule_display(self, mock_load, mock_schedules, mock_universe):
-        status = get_scheduler_status(strategy_id="issue_sector_rotation_strategy")
+        status = get_scheduler_status(strategy_id="heikin_ashi_scalping_strategy")
 
-        self.assertEqual(status["active_strategy_name"], "이슈 섹터 순환 모멘텀")
+        self.assertEqual(status["active_strategy_name"], "알파 하이킨아시")
         self.assertEqual(status["strategy_dispatch"]["summary"], "사용 1개 / 전체 1개 / 감시종목 2개")
         schedule = status["strategy_dispatch"]["schedules"][0]
-        self.assertEqual(schedule["display_name"], "이슈 섹터 순환 모멘텀")
+        self.assertEqual(schedule["display_name"], "알파 하이킨아시")
         self.assertEqual(schedule["enabled_label"], "사용 중")
         self.assertEqual(schedule["interval_label"], "5분마다")
         self.assertEqual(schedule["window_label"], "월-금 09:00-15:30")

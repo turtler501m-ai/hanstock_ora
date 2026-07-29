@@ -5,6 +5,7 @@ ISOLATED_STOCK_STRATEGY_IDS = frozenset(
     }
 )
 
+INDEPENDENT_STOCK_SCHEDULE_IDS = ISOLATED_STOCK_STRATEGY_IDS
 AI_STOCK_SCHEDULE_ID = "ai_stock_default_v1"
 
 
@@ -40,6 +41,7 @@ def resolve_ai_schedule_strategy_ids(
         for item in strategies or []
         if item.get("selected")
         and str(item.get("status") or "") == "approved"
+        and str(item.get("id") or "").strip() not in INDEPENDENT_STOCK_SCHEDULE_IDS
         and str(item.get("id") or "").strip()
     ]
     replacements = applied

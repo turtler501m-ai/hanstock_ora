@@ -70,7 +70,7 @@ class SchedulerModeTests(unittest.TestCase):
         self.assertEqual(save_mock.call_args.args[2], expected)
         mark_mock.assert_called_once_with("narrative_momentum_strategy")
 
-    def test_strategy_dispatch_recognizes_main_hanstock_ai_strategy(self):
+    def test_strategy_dispatch_ignores_direct_ai_strategy_schedule(self):
         schedule = {
             "strategy_id": "main_ai_strategy",
             "market": "KR",
@@ -96,12 +96,8 @@ class SchedulerModeTests(unittest.TestCase):
         ):
             ran = strategy_scheduler.dispatch_due_schedules()
 
-        self.assertEqual(ran, ["main_ai_strategy"])
-        autonomy_run.assert_called_once_with(
-            market="KR",
-            strategy_id="main_ai_strategy",
-            run_type="scheduled",
-        )
+        self.assertEqual(ran, [])
+        autonomy_run.assert_not_called()
 
     def test_ai_schedule_slot_runs_strategy_applied_in_ai_tab(self):
         schedule = {
@@ -182,13 +178,14 @@ class SchedulerModeTests(unittest.TestCase):
             strategies=[
                 {"id": "paper_only", "selected": True, "status": "paper_passed"},
                 {"id": "ready", "selected": True, "status": "approved"},
+                {"id": "plunge_bounce_strategy", "selected": True, "status": "approved"},
                 {"id": "unchecked", "selected": False, "status": "approved"},
             ],
         )
 
         self.assertEqual(resolved, ["ready"])
 
-    def test_strategy_dispatch_routes_issue_sector_through_trader(self):
+    def test_strategy_dispatch_ignores_legacy_issue_sector_schedule(self):
         schedule = {
             "strategy_id": "issue_sector_rotation_strategy",
             "market": "KR",
@@ -216,20 +213,16 @@ class SchedulerModeTests(unittest.TestCase):
         ):
             ran = strategy_scheduler.dispatch_due_schedules()
 
-        self.assertEqual(ran, ["issue_sector_rotation_strategy"])
-        run_cycle.assert_called_once_with(
-            "execute",
-            auto_approve=True,
-            force_strategy_id="issue_sector_rotation_strategy",
-            allowed_categories={"position", "candidate", "ai_rebalance"},
-        )
+        self.assertEqual(ran, [])
+        run_cycle.assert_not_called()
         autonomy_run.assert_not_called()
 
-    def test_strategy_dispatch_runs_all_due_trader_engine_schedules(self):
+    def test_strategy_dispatch_runs_only_independent_strategy_schedules(self):
         schedules = [
             {"strategy_id": "issue_sector_rotation_strategy", "mode": "execute", "auto_approve": True},
             {"strategy_id": "seven_split", "mode": "execute", "auto_approve": True},
             {"strategy_id": "plunge_bounce_strategy", "mode": "execute", "auto_approve": True},
+            {"strategy_id": "heikin_ashi_scalping_strategy", "mode": "execute", "auto_approve": True},
         ]
         expected = {"strategy_id": "seven_split", "results": []}
         with patch.object(
@@ -250,16 +243,16 @@ class SchedulerModeTests(unittest.TestCase):
 
         self.assertEqual(
             ran,
-            ["seven_split", "plunge_bounce_strategy", "issue_sector_rotation_strategy"],
+            ["plunge_bounce_strategy", "heikin_ashi_scalping_strategy"],
         )
-        self.assertEqual(run_cycle.call_count, 3)
+        self.assertEqual(run_cycle.call_count, 2)
         self.assertEqual(
             [call.kwargs["force_strategy_id"] for call in run_cycle.call_args_list],
-            ["seven_split", "plunge_bounce_strategy", "issue_sector_rotation_strategy"],
+            ["plunge_bounce_strategy", "heikin_ashi_scalping_strategy"],
         )
         self.assertEqual(
             [call.args[0] for call in mark_mock.call_args_list],
-            ["seven_split", "plunge_bounce_strategy", "issue_sector_rotation_strategy"],
+            ["plunge_bounce_strategy", "heikin_ashi_scalping_strategy"],
         )
 
     def test_run_scheduled_cycle_delegates_execute_mode(self):

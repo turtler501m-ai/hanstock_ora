@@ -64,6 +64,7 @@ STRATEGY_DISPLAY_NAMES = {
     "ai_stock_default_v1": "AI 기본 종목발굴",
     "narrative_momentum_strategy": "내러티브 모멘텀",
     "plunge_bounce_strategy": "급락 반등",
+    "heikin_ashi_scalping_strategy": "알파 하이킨아시",
     "issue_sector_rotation_strategy": "이슈 섹터 순환 모멘텀",
 }
 
@@ -302,6 +303,7 @@ def _validation_payload(strategy: dict) -> dict:
 def _strategy_api_payload(strategy: dict) -> dict:
     import json
     from src.config import config
+    from src.strategy_ids import INDEPENDENT_STOCK_SCHEDULE_IDS
 
     payload = _json_safe(dict(strategy))
     raw_validation = strategy.get("last_validation_result")
@@ -320,6 +322,7 @@ def _strategy_api_payload(strategy: dict) -> dict:
     payload["approval_gate"]["label"] = _approval_gate_label(payload["approval_gate"])
     payload["operation_status"]["label"] = _operation_status_label(payload["operation_status"])
     payload["operation_status"]["reason_label"] = _operation_reason_label(payload["operation_status"])
+    payload["independent_schedule"] = str(strategy.get("id") or "") in INDEPENDENT_STOCK_SCHEDULE_IDS
     payload["autonomy"] = {
         "enabled": bool(getattr(config, "autonomy_enabled", False)),
         "environment": str(getattr(config, "autonomy_trading_env", "demo")),
@@ -583,6 +586,7 @@ def cancel_autonomy_managed_order(order_id: int):
 @router.get("/api/strategy-context")
 def get_strategy_context(strategy_id: str | None = None):
     from src.db.repository import load_ai_strategies
+    from src.strategy_ids import INDEPENDENT_STOCK_SCHEDULE_IDS
     from src.dashboard.services.analysis_cycle_service import (
         ISOLATED_STRATEGY_IDS,
         get_latest_usable_analysis_cycle,
@@ -636,6 +640,7 @@ def get_strategy_context(strategy_id: str | None = None):
         for strategy in strategies
         if strategy.get("selected")
         and str(strategy.get("status") or "") == "approved"
+        and str(strategy.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
     ]
     return {
         "applied_strategies": applied_strategies,
@@ -2780,13 +2785,17 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
             for strategy in strategies
             if strategy.get("id")
         }
-        from src.strategy_ids import AI_STOCK_SCHEDULE_ID
+        from src.strategy_ids import (
+            AI_STOCK_SCHEDULE_ID,
+            INDEPENDENT_STOCK_SCHEDULE_IDS,
+        )
 
         applied_names = [
             _strategy_display_name(strategy.get("id"), strategy.get("name"))
             for strategy in strategies
             if strategy.get("selected")
             and str(strategy.get("status") or "") == "approved"
+            and str(strategy.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
         ]
         if applied_names:
             strategy_name_by_id[AI_STOCK_SCHEDULE_ID] = (
@@ -2832,7 +2841,12 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
     try:
         from src.db.repository import list_strategy_schedules, load_strategy_universe
 
-        schedules = list_strategy_schedules(enabled_only=False)
+        schedules = [
+            schedule
+            for schedule in list_strategy_schedules(enabled_only=False)
+            if str(schedule.get("strategy_id") or "") == AI_STOCK_SCHEDULE_ID
+            or str(schedule.get("strategy_id") or "") in INDEPENDENT_STOCK_SCHEDULE_IDS
+        ]
         schedule_items = []
         total_universe_count = 0
         for schedule in schedules:

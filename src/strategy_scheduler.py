@@ -28,18 +28,18 @@ from src.strategy.narrative_momentum import STRATEGY_ID as NARRATIVE_MOMENTUM_ST
 from src.strategy.narrative_momentum_runner import run_narrative_momentum_cycle
 from src.strategy_ids import (
     AI_STOCK_SCHEDULE_ID,
+    INDEPENDENT_STOCK_SCHEDULE_IDS,
     ISOLATED_STOCK_STRATEGY_IDS,
     resolve_ai_schedule_strategy_ids,
 )
 from src.utils.logger import logger
 
 _ISOLATED_STRATEGY_IDS = ISOLATED_STOCK_STRATEGY_IDS
-_TRADER_SCHEDULE_STRATEGY_IDS = {"issue_sector_rotation_strategy"}
+_TRADER_SCHEDULE_STRATEGY_IDS = set()
+_MAIN_SCHEDULE_IDS = frozenset({AI_STOCK_SCHEDULE_ID, *INDEPENDENT_STOCK_SCHEDULE_IDS})
 _TRADER_DISPATCH_PRIORITY = {
-    "seven_split": 0,
     "ai_stock_default_v1": 10,
     "plunge_bounce_strategy": 20,
-    "issue_sector_rotation_strategy": 30,
     "heikin_ashi_scalping_strategy": 40,
 }
 _last_dispatch_failures: list[str] = []
@@ -70,7 +70,12 @@ def dispatch_due_schedules() -> list[str]:
     _last_dispatch_failures = []
     ran: list[str] = []
     failures: list[str] = []
-    schedules = list_strategy_schedules(enabled_only=True)
+    schedules = [
+        schedule
+        for schedule in list_strategy_schedules(enabled_only=True)
+        if str(schedule.get("strategy_id") or "") in _MAIN_SCHEDULE_IDS
+        or str(schedule.get("strategy_id") or "") == NARRATIVE_MOMENTUM_STRATEGY_ID
+    ]
     if not schedules:
         logger.info("[dispatch] no enabled strategy schedules")
         return ran
