@@ -38,5 +38,12 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("row.strategy_name || row.strategy_id || '미분류'", APP_JS)
 
 
+    def test_performance_tab_exposes_local_trade_cleanup(self):
+        self.assertIn('id="table-trade-cleanup"', INDEX_HTML)
+        self.assertIn("async function renderTradeCleanup()", APP_JS)
+        self.assertIn("'/api/trades/local-cleanup?limit=200'", APP_JS)
+        self.assertIn("`/api/trades/local/${tradeId}?confirm=true`", APP_JS)
+
+
 if __name__ == "__main__":
     unittest.main()

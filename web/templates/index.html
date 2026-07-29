@@ -737,6 +737,29 @@
                         </table>
                     </div>
 
+                    <h3 class="subsection-title">불일치 거래 정리</h3>
+                    <p class="section-help">
+                        증권사 체결내역과 아직 맞지 않는 로컬 기록입니다. 삭제는 로컬 DB에만 적용되며 증권사 주문은 취소되지 않습니다.
+                    </p>
+                    <div class="table-responsive trades-scroll">
+                        <table id="table-trade-cleanup">
+                            <thead>
+                                <tr>
+                                    <th>시간</th>
+                                    <th>종목</th>
+                                    <th>구분</th>
+                                    <th>수량</th>
+                                    <th>상태</th>
+                                    <th>원인</th>
+                                    <th>정리</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td colspan="7">불일치 거래를 확인 중입니다.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
                     <h3 class="subsection-title">최근 매매 기록</h3>
                     <div class="table-responsive trades-scroll">
                         <table id="table-trades">
@@ -1682,7 +1705,7 @@
     </script>
     <script src="/static/js/environment_badge.js?v=1"></script>
     <script src="/static/js/common-analysis.js?v=1"></script>
-    <script src="/static/js/app.js?v=47"></script>
+    <script src="/static/js/app.js?v=48"></script>
 
     <!-- Plunge Bounce Strategy Scripts -->
     <script>
