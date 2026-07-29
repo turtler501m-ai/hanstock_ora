@@ -2649,6 +2649,18 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
             for strategy in strategies
             if strategy.get("id")
         }
+        from src.strategy_ids import AI_STOCK_SCHEDULE_ID
+
+        applied_names = [
+            _strategy_display_name(strategy.get("id"), strategy.get("name"))
+            for strategy in strategies
+            if strategy.get("selected")
+            and str(strategy.get("status") or "") != "retired"
+        ]
+        if applied_names:
+            strategy_name_by_id[AI_STOCK_SCHEDULE_ID] = (
+                "AI 적용: " + ", ".join(applied_names)
+            )
         active = next(
             (
                 strategy

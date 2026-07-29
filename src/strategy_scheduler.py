@@ -26,7 +26,11 @@ from src.scheduler import run_scheduled_cycle
 from src.db.scheduler_repository import KST
 from src.strategy.narrative_momentum import STRATEGY_ID as NARRATIVE_MOMENTUM_STRATEGY_ID
 from src.strategy.narrative_momentum_runner import run_narrative_momentum_cycle
-from src.strategy_ids import ISOLATED_STOCK_STRATEGY_IDS
+from src.strategy_ids import (
+    AI_STOCK_SCHEDULE_ID,
+    ISOLATED_STOCK_STRATEGY_IDS,
+    resolve_ai_schedule_strategy_ids,
+)
 from src.utils.logger import logger
 
 _ISOLATED_STRATEGY_IDS = ISOLATED_STOCK_STRATEGY_IDS
@@ -84,6 +88,27 @@ def dispatch_due_schedules() -> list[str]:
         return ran
 
     due_schedules = [sched for sched in schedules if is_schedule_due(sched)]
+    explicit_ids = {
+        str(sched.get("strategy_id") or "")
+        for sched in due_schedules
+        if str(sched.get("strategy_id") or "") != AI_STOCK_SCHEDULE_ID
+    }
+    expanded_schedules = []
+    for sched in due_schedules:
+        strategy_id = str(sched.get("strategy_id") or "")
+        if strategy_id != AI_STOCK_SCHEDULE_ID:
+            expanded_schedules.append(sched)
+            continue
+        resolved_ids = resolve_ai_schedule_strategy_ids([strategy_id])
+        for resolved_id in resolved_ids:
+            if resolved_id in explicit_ids:
+                continue
+            expanded_schedules.append({
+                **sched,
+                "strategy_id": resolved_id,
+                "_schedule_strategy_id": strategy_id,
+            })
+    due_schedules = expanded_schedules
     due_schedules.sort(
         key=lambda sched: _TRADER_DISPATCH_PRIORITY.get(str(sched.get("strategy_id") or ""), 100)
     )
@@ -91,6 +116,9 @@ def dispatch_due_schedules() -> list[str]:
 
     for sched in due_schedules:
         strategy_id = sched.get("strategy_id")
+        schedule_strategy_id = (
+            sched.get("_schedule_strategy_id") or strategy_id
+        )
         mode = str(sched.get("mode") or "execute")
         auto_approve = bool(sched.get("auto_approve"))
         if _uses_trader_cycle(strategy_id):
@@ -98,7 +126,7 @@ def dispatch_due_schedules() -> list[str]:
                 logger.warning(
                     f"[dispatch] skipped {strategy_id}: another trader-engine schedule already ran in this cron tick"
                 )
-                mark_strategy_schedule_run(strategy_id)
+                mark_strategy_schedule_run(schedule_strategy_id)
                 continue
             trader_cycle_ran = True
         try:
@@ -159,7 +187,7 @@ def dispatch_due_schedules() -> list[str]:
                 raise RuntimeError(
                     f"scheduler result reported failure: {result.get('errors') or result}"
                 )
-            mark_strategy_schedule_run(strategy_id)
+            mark_strategy_schedule_run(schedule_strategy_id)
             ran.append(strategy_id)
             logger.info(f"[dispatch] done {strategy_id}")
         except Exception as exc:  # noqa: BLE001

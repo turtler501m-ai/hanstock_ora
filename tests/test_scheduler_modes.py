@@ -103,6 +103,77 @@ class SchedulerModeTests(unittest.TestCase):
             run_type="scheduled",
         )
 
+    def test_ai_schedule_slot_runs_strategy_applied_in_ai_tab(self):
+        schedule = {
+            "strategy_id": "ai_stock_default_v1",
+            "market": "KR",
+            "mode": "execute",
+            "auto_approve": True,
+        }
+        applied = {
+            "id": "easy_aggressive_live",
+            "selected": True,
+            "status": "paper_passed",
+        }
+        with patch.object(
+            strategy_scheduler,
+            "list_strategy_schedules",
+            return_value=[schedule],
+        ), patch.object(
+            strategy_scheduler, "is_schedule_due", return_value=True
+        ), patch(
+            "src.db.repository.load_ai_strategies",
+            return_value=[applied],
+        ), patch(
+            "src.ai_stock.automation_service.run_strategy",
+            return_value={"automation": {}},
+        ) as autonomy_run, patch.object(
+            strategy_scheduler, "save_scheduler_result"
+        ), patch.object(
+            strategy_scheduler, "mark_strategy_schedule_run"
+        ) as mark:
+            ran = strategy_scheduler.dispatch_due_schedules()
+
+        self.assertEqual(ran, ["easy_aggressive_live"])
+        autonomy_run.assert_called_once_with(
+            market="KR",
+            strategy_id="easy_aggressive_live",
+            run_type="scheduled",
+        )
+        mark.assert_called_once_with("ai_stock_default_v1")
+
+    def test_ai_schedule_slot_does_not_duplicate_explicit_schedule(self):
+        from src.strategy_ids import resolve_ai_schedule_strategy_ids
+
+        resolved = resolve_ai_schedule_strategy_ids(
+            [
+                "seven_split",
+                "ai_stock_default_v1",
+                "issue_sector_rotation_strategy",
+            ],
+            strategies=[
+                {
+                    "id": "issue_sector_rotation_strategy",
+                    "selected": True,
+                    "status": "approved",
+                },
+                {
+                    "id": "easy_safe_live",
+                    "selected": True,
+                    "status": "approved",
+                },
+            ],
+        )
+
+        self.assertEqual(
+            resolved,
+            [
+                "seven_split",
+                "issue_sector_rotation_strategy",
+                "easy_safe_live",
+            ],
+        )
+
     def test_strategy_dispatch_routes_issue_sector_through_trader(self):
         schedule = {
             "strategy_id": "issue_sector_rotation_strategy",

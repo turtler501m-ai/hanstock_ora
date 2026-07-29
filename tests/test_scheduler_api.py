@@ -112,6 +112,39 @@ class SchedulerApiTests(unittest.TestCase):
         self.assertEqual(schedule["mode_label"], "주문실행")
         self.assertEqual(schedule["auto_approve_label"], "자동승인")
 
+    @patch("src.db.repository.load_strategy_universe", return_value=[])
+    @patch(
+        "src.db.repository.list_strategy_schedules",
+        return_value=[{
+            "strategy_id": "ai_stock_default_v1",
+            "enabled": 1,
+            "interval_minutes": 5,
+            "start_hm": "0900",
+            "end_hm": "1530",
+            "weekdays": "1-5",
+            "mode": "execute",
+            "auto_approve": 1,
+            "last_run_at": None,
+        }],
+    )
+    @patch(
+        "src.db.repository.load_ai_strategies",
+        return_value=[{
+            "id": "easy_aggressive_live",
+            "model": "none",
+            "name": "쉬운 공격형 전략",
+            "selected": True,
+            "status": "paper_passed",
+        }],
+    )
+    def test_scheduler_status_names_ai_slot_after_applied_strategy(
+        self, mock_load, mock_schedules, mock_universe
+    ):
+        status = get_scheduler_status()
+
+        schedule = status["strategy_dispatch"]["schedules"][0]
+        self.assertEqual(schedule["display_name"], "AI 적용: 쉬운 공격형 전략")
+
     def test_get_scheduler_status_merges_last_30_days_scheduler_results(self):
         from datetime import datetime, timedelta
         from src.db.scheduler_repository import KST

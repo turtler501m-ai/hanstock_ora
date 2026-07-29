@@ -3837,18 +3837,24 @@ def _run_scheduled_cycles_for_strategies(
     from src.config import config
     from src.dashboard.services.analysis_cycle_service import ISOLATED_STRATEGY_IDS
 
-    requested_strategy_ids = list(dict.fromkeys(strategy_ids))
-
     try:
         from src.db.repository import load_ai_strategies
 
+        registered_strategies = load_ai_strategies()
         registered_ai_ids = {
             str(item.get("id"))
-            for item in load_ai_strategies()
+            for item in registered_strategies
             if item.get("id")
         }
     except Exception:
+        registered_strategies = []
         registered_ai_ids = set()
+    from src.strategy_ids import resolve_ai_schedule_strategy_ids
+
+    requested_strategy_ids = resolve_ai_schedule_strategy_ids(
+        strategy_ids,
+        strategies=registered_strategies,
+    )
 
     runs = []
     errors = []
