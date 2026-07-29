@@ -105,16 +105,23 @@ class AnalysisCycleLifecycleTests(unittest.TestCase):
                 start_analysis_cycle({"strategy_id": "missing-strategy"})
         self.assertEqual(raised.exception.status_code, 404)
 
-    def test_common_scheduler_rejects_isolated_strategy(self):
-        with self.assertRaises(HTTPException) as raised:
-            trigger_scheduler_run(
+    def test_common_scheduler_accepts_isolated_strategy_for_isolated_runner(self):
+        with patch(
+            "src.dashboard.routes.stock._dashboard_scheduler_service.claim",
+            return_value=True,
+        ), patch(
+            "src.dashboard.routes.stock.threading.Thread",
+        ) as thread:
+            result = trigger_scheduler_run(
                 {
                     "mode": "analysis_only",
                     "strategy_ids": ["plunge_bounce_strategy"],
                 }
             )
-        self.assertEqual(raised.exception.status_code, 400)
-        self.assertIn("own dashboard tabs", raised.exception.detail)
+
+        self.assertEqual(result["status"], "started")
+        self.assertEqual(result["strategy_ids"], ["plunge_bounce_strategy"])
+        thread.return_value.start.assert_called_once()
 
 
 if __name__ == "__main__":

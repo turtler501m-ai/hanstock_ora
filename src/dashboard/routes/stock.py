@@ -2775,18 +2775,6 @@ def trigger_scheduler_run(payload: dict = Body(...)):
         strategy_ids = [force_strategy_id]
     if not strategy_ids:
         strategy_ids = ["seven_split"]
-    from src.dashboard.services.analysis_cycle_service import ISOLATED_STRATEGY_IDS
-
-    isolated_requested = [sid for sid in strategy_ids if sid in ISOLATED_STRATEGY_IDS]
-    if isolated_requested:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "isolated strategies must be run from their own dashboard tabs: "
-                + ", ".join(isolated_requested)
-            ),
-        )
-
     if not _dashboard_scheduler_service.claim(
         mode=mode,
         strategy_id=",".join(strategy_ids),

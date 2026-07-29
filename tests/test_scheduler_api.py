@@ -222,6 +222,7 @@ class SchedulerApiTests(unittest.TestCase):
         self.assertEqual(result["summary_counts"]["plan_count"], 120)
         self.assertEqual(result["summary_counts"]["queue_count"], 119)
         self.assertEqual(result["summary_counts"]["approved_count"], 1)
+        self.assertEqual(result["summary_counts"]["success_count"], 1)
         self.assertLessEqual(len(result["results"][0]["reason"]), 500)
 
     def test_scheduler_status_compaction_summarizes_candidate_scan(self):

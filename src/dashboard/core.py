@@ -3837,11 +3837,7 @@ def _run_scheduled_cycles_for_strategies(
     from src.config import config
     from src.dashboard.services.analysis_cycle_service import ISOLATED_STRATEGY_IDS
 
-    common_strategy_ids = [
-        strategy_id
-        for strategy_id in dict.fromkeys(strategy_ids)
-        if strategy_id not in ISOLATED_STRATEGY_IDS
-    ]
+    requested_strategy_ids = list(dict.fromkeys(strategy_ids))
 
     try:
         from src.db.repository import load_ai_strategies
@@ -3856,7 +3852,28 @@ def _run_scheduled_cycles_for_strategies(
 
     runs = []
     errors = []
-    for strategy_id in common_strategy_ids:
+    for strategy_id in requested_strategy_ids:
+        if strategy_id in ISOLATED_STRATEGY_IDS:
+            try:
+                result = run_scheduled_cycle(
+                    mode,
+                    include_ai_rebalance=False,
+                    auto_approve=auto_approve,
+                    force_strategy_id=strategy_id,
+                    allowed_categories={"candidate"},
+                )
+                runs.append({
+                    "strategy_id": strategy_id,
+                    "cycle_id": None,
+                    "result": result,
+                })
+            except Exception as exc:
+                errors.append({
+                    "strategy_id": strategy_id,
+                    "message": str(exc),
+                })
+            continue
+
         from src.dashboard.services.analysis_cycle_service import start_common_analysis_cycle
         from src.db.analysis_repository import set_analysis_cycle_status
 
@@ -3908,7 +3925,7 @@ def _run_scheduled_cycles_for_strategies(
     return {
         "status": "failed" if errors and not runs else "success",
         "ok": bool(runs),
-        "strategy_ids": common_strategy_ids,
+        "strategy_ids": requested_strategy_ids,
         "runs": runs,
         "errors": errors,
     }

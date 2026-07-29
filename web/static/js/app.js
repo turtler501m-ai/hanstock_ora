@@ -3868,7 +3868,8 @@ async function renderScheduleInfo() {
             const totalPlanCount = summaryCounts.plan_count ?? results.length;
             const queuedCreatedCount = results.filter(r => r.decision === 'queue').length;
             const totalQueuedCount = summaryCounts.queue_count ?? Math.max(0, queuedCreatedCount - approved.length - approvalErrors.length);
-            const totalApprovedCount = summaryCounts.approved_count ?? approved.filter(a => a.status === 'executed').length;
+            const totalApprovedCount = summaryCounts.approved_count ?? approved.length + approvalErrors.length;
+            const totalSuccessCount = summaryCounts.success_count ?? approved.filter(a => a.status === 'executed').length;
             const totalFailedCount = summaryCounts.failed_count ?? approved.filter(a => a.status === 'failed').length + approvalErrors.length + runErrors.length;
             
             const planCntEl = document.getElementById('sched-result-plan-cnt');
@@ -3879,6 +3880,9 @@ async function renderScheduleInfo() {
             
             const approvedCntEl = document.getElementById('sched-result-approved-cnt');
             if (approvedCntEl) approvedCntEl.textContent = `${totalApprovedCount}건`;
+
+            const successCntEl = document.getElementById('sched-result-success-cnt');
+            if (successCntEl) successCntEl.textContent = `${totalSuccessCount}건`;
             
             const failedCntEl = document.getElementById('sched-result-failed-cnt');
             if (failedCntEl) failedCntEl.textContent = `${totalFailedCount}건`;
@@ -3953,7 +3957,8 @@ async function renderScheduleInfo() {
                         const roundData = uniqueRounds.get(round);
                         const isExpanded = window._expandedRounds.has(round);
                         const planCount = roundData.results.length;
-                        const approvedCount = roundData.approved.filter(a => a.status === 'executed').length;
+                        const approvedCount = roundData.approved.length + roundData.approvalErrors.length;
+                        const successCount = roundData.approved.filter(a => a.status === 'executed').length;
                         const failedCount = roundData.approved.filter(a => a.status === 'failed').length + roundData.approvalErrors.length;
                         const hasFailure = failedCount > 0;
                         const timeVal = roundData.time || '-';
@@ -3982,6 +3987,7 @@ async function renderScheduleInfo() {
                                     <span style="font-size: 0.85rem; color: var(--text-muted);" class="d-none d-sm-inline">
                                         계획 <strong style="color: var(--text);">${planCount}</strong>건 | 
                                         승인 <strong style="color: var(--success);">${approvedCount}</strong>건 | 
+                                        성공 <strong style="color: var(--success);">${successCount}</strong>건 |
                                         실패 <strong style="color: var(--danger);">${failedCount}</strong>건
                                     </span>
                                     <span class="badge" style="background: ${hasFailure ? 'rgba(var(--danger-rgb, 220, 53, 69), 0.1)' : 'rgba(var(--success-rgb, 40, 167, 69), 0.1)'}; color: ${hasFailure ? 'var(--danger)' : 'var(--success)'}; border: 1px solid ${hasFailure ? 'rgba(var(--danger-rgb), 0.2)' : 'rgba(var(--success-rgb), 0.2)'}; font-size: 0.8rem; padding: 0.2rem 0.5rem; border-radius: 4px;">
@@ -4168,7 +4174,7 @@ async function renderSchedulerStrategyChecklist(schedules = []) {
     const scheduled = new Set(schedules.filter((row) => row.enabled).map((row) => String(row.strategy_id)));
     const activeStrategyId = getActiveStrategyId();
     const strategies = (data.strategies || []).filter(
-        (row) => row.status !== 'retired' && !ISOLATED_STRATEGY_IDS.has(String(row.id || ''))
+        (row) => row.status !== 'retired'
     );
     container.innerHTML = strategies.map((strategy) => {
         const checked = scheduled.has(String(strategy.id))

@@ -111,6 +111,7 @@ def _compact_scheduler_status_result(last_result: dict | None, item_limit: int =
             "errors": [_trim_text(item) for item in errors],
             "summary_counts": {
                 "run_count": len(compact_runs),
+                "success_count": len(compact_runs),
                 "blocked_count": blocked_count,
                 "failed_count": len(errors),
             },
@@ -167,7 +168,8 @@ def _compact_scheduler_status_result(last_result: dict | None, item_limit: int =
         "summary_counts": {
             "plan_count": len(plan_items),
             "queue_count": max(0, queued_created - len(approved_items) - len(approval_errors)),
-            "approved_count": approved_executed,
+            "approved_count": len(approved_items) + len(approval_errors),
+            "success_count": approved_executed,
             "failed_count": approved_failed + len(approval_errors) + len(run_errors),
             "shown_plan_count": min(len(plan_items), item_limit),
             "shown_approved_count": min(len(approved_items), item_limit),

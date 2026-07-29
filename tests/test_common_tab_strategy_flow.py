@@ -205,7 +205,33 @@ class CommonTabStrategyFlowTests(unittest.TestCase):
             ],
         )
 
-    def test_isolated_strategies_are_excluded_from_common_multi_strategy_cycle(self):
+    def test_scheduler_routes_isolated_strategy_without_common_cycle(self):
+        with patch(
+            "src.scheduler.run_scheduled_cycle",
+            return_value={"strategy_id": "plunge_bounce_strategy", "plan": []},
+        ) as run_cycle, patch(
+            "src.db.repository.load_ai_strategies",
+            return_value=[],
+        ):
+            result = dashboard._run_scheduled_cycles_for_strategies(
+                mode="analysis_only",
+                include_ai_rebalance=True,
+                auto_approve=False,
+                strategy_ids=["plunge_bounce_strategy"],
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["strategy_ids"], ["plunge_bounce_strategy"])
+        self.assertIsNone(result["runs"][0]["cycle_id"])
+        run_cycle.assert_called_once_with(
+            "analysis_only",
+            include_ai_rebalance=False,
+            auto_approve=False,
+            force_strategy_id="plunge_bounce_strategy",
+            allowed_categories={"candidate"},
+        )
+
+    def test_isolated_strategies_use_candidate_only_path_in_multi_strategy_cycle(self):
         requested_ids = [
             COMMON_STRATEGY_ID,
             "plunge_bounce_strategy",
@@ -229,17 +255,23 @@ class CommonTabStrategyFlowTests(unittest.TestCase):
                 strategy_ids=requested_ids,
             )
 
-        common_ids = [COMMON_STRATEGY_ID, "seven_split"]
-        self.assertEqual(result["strategy_ids"], common_ids)
+        self.assertEqual(result["strategy_ids"], requested_ids)
         self.assertEqual(
             [row["strategy_id"] for row in result["runs"]],
-            common_ids,
+            requested_ids,
         )
-        dispatched_ids = {
-            invocation.kwargs["force_strategy_id"]
+        calls_by_id = {
+            invocation.kwargs["force_strategy_id"]: invocation
             for invocation in run_cycle.call_args_list
         }
-        self.assertTrue(dispatched_ids.isdisjoint(ISOLATED_STRATEGY_IDS))
+        for strategy_id in ISOLATED_STRATEGY_IDS:
+            self.assertEqual(
+                calls_by_id[strategy_id].kwargs["allowed_categories"],
+                {"candidate"},
+            )
+            self.assertFalse(
+                calls_by_id[strategy_id].kwargs["include_ai_rebalance"]
+            )
 
     def test_execution_plan_consumes_the_same_cycle_candidate_snapshot(self):
         candidate_scan = {
