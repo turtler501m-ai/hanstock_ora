@@ -4170,12 +4170,18 @@ async function renderScheduleInfo() {
 async function renderSchedulerStrategyChecklist(schedules = []) {
     const container = document.getElementById('scheduler-strategy-checklist');
     if (!container) return;
-    const data = await fetchJson('/api/ai-strategies');
     const scheduled = new Set(schedules.filter((row) => row.enabled).map((row) => String(row.strategy_id)));
     const activeStrategyId = getActiveStrategyId();
-    const strategies = (data.strategies || []).filter(
-        (row) => row.status !== 'retired'
-    );
+    // The common scheduler must reflect persisted schedule registrations,
+    // not the independently editable AI-strategy catalog. Narrative momentum
+    // owns a dedicated schedule tab and is therefore omitted here.
+    const strategies = schedules
+        .filter((row) => row.strategy_id && String(row.strategy_id) !== 'narrative_momentum_strategy')
+        .map((row) => ({
+            id: String(row.strategy_id),
+            name: row.display_name || row.strategy_name || String(row.strategy_id),
+            selected: Boolean(row.enabled),
+        }));
     container.innerHTML = strategies.map((strategy) => {
         const checked = scheduled.has(String(strategy.id))
             || String(strategy.id) === activeStrategyId

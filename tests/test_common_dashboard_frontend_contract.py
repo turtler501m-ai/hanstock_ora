@@ -44,12 +44,13 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("'/api/trades/local-cleanup?limit=200'", APP_JS)
         self.assertIn("`/api/trades/local/${tradeId}?confirm=true`", APP_JS)
 
-    def test_scheduler_checklist_keeps_isolated_registered_strategies_visible(self):
+    def test_scheduler_checklist_uses_persisted_schedule_registrations(self):
         scheduler_renderer = APP_JS.split(
             "async function renderSchedulerStrategyChecklist", 1
         )[1].split("function getScheduledStrategyIds", 1)[0]
-        self.assertIn("(row) => row.status !== 'retired'", scheduler_renderer)
-        self.assertNotIn("!ISOLATED_STRATEGY_IDS.has", scheduler_renderer)
+        self.assertNotIn("fetchJson('/api/ai-strategies')", scheduler_renderer)
+        self.assertIn("row.strategy_id", scheduler_renderer)
+        self.assertIn("narrative_momentum_strategy", scheduler_renderer)
 
     def test_scheduler_summary_tracks_approval_success_and_failure(self):
         self.assertIn('id="sched-result-success-cnt"', INDEX_HTML)
