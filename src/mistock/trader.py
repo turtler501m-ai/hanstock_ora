@@ -8,6 +8,7 @@ from src.mistock import db
 from src.mistock.strategy import NASDAQ_UNIVERSE, fetch_history, normalize_symbol, quote, strategy_profile, symbol_name
 from src.strategy.indicators import calc_bollinger
 from src.utils.exchange_rate import get_usd_krw_rate
+from src.utils.logger import logger
 
 
 _kis_client_cache = None
@@ -851,6 +852,12 @@ def save_trade(symbol: str, name: str, action: str, qty: float, price: float, re
             int(config.dry_run), order_status, response_msg, json.dumps({"env": config.trading_env}, ensure_ascii=False),
             fee, tax, exchange_rate, strategy_id,
         ),
+    )
+    logger.info(
+        "[TRADE_CREATE] "
+        f"market=US symbol={symbol} name={name} action={action} qty={qty} price={price} "
+        f"ok={bool(ok)} status={order_status} strategy_id={strategy_id or '-'} "
+        f"response={response_msg or '-'}"
     )
 
 

@@ -29,6 +29,14 @@ def normalize_kr_symbol(symbol: Any) -> str:
     return value
 
 
+def normalize_kr_order_symbol(symbol: Any) -> str:
+    """Return the six-character KIS balance/order code for domestic instruments."""
+    value = normalize_kr_symbol(symbol)
+    if len(value) == 7 and value.startswith("Q") and value[1:].isdigit():
+        return value[1:]
+    return value
+
+
 def is_placeholder_stock_name(name: Any, symbol: Any = "") -> bool:
     value = str(name or "").strip()
     return (

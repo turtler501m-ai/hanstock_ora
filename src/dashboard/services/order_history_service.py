@@ -2,6 +2,7 @@ import json
 
 from src import trader
 from src.dashboard.services.balance_service import to_int as _to_int
+from src.market_metadata import normalize_kr_order_symbol
 
 
 def _broker_order_id_from_history(row: dict) -> str:
@@ -131,8 +132,8 @@ def _history_trade_key(trade: dict) -> tuple:
 def _history_matches_tracked_order(row: dict, trade: dict) -> bool:
     if _broker_order_id_from_history(row) != str(trade.get("broker_order_id") or "").strip():
         return False
-    row_symbol = _history_symbol(row)
-    trade_symbol = str(trade.get("symbol") or "")
+    row_symbol = normalize_kr_order_symbol(_history_symbol(row))
+    trade_symbol = normalize_kr_order_symbol(trade.get("symbol"))
     if row_symbol and trade_symbol and row_symbol != trade_symbol:
         return False
     row_action = _history_action(row)
@@ -172,4 +173,3 @@ def _history_row_to_trade(row: dict) -> dict:
         "response_msg": "KIS trade history import",
         "broker_result": json.dumps(row, ensure_ascii=False),
     }
-

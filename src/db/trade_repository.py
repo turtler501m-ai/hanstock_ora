@@ -121,6 +121,15 @@ def save_trade(
         data_json_path.parent.mkdir(parents=True, exist_ok=True)
         with open(data_json_path, "w", encoding="utf-8") as f:
             json.dump(trades, f, ensure_ascii=False, indent=2)
+
+        logger.info(
+            "[TRADE_CREATE] "
+            f"symbol={symbol} name={name} action={action} qty={int(qty or 0)} "
+            f"price={int(price or 0)} ok={bool(ok)} status={order_status} "
+            f"filled_qty={filled_qty} filled_price={filled_price} "
+            f"broker_order_id={broker_order_id or '-'} strategy_id={strategy_id or '-'} "
+            f"response={response_msg or '-'}"
+        )
             
     except (sqlite3.Error, OSError, ValueError, TypeError) as e:
         logger.warning(f"Failed to save trade history: {e}")
@@ -143,6 +152,16 @@ def update_trade_order_status(
     with connect_db() as conn:
         where_sql = "id = ?" if trade_id is not None else "broker_order_id = ?"
         where_value = int(trade_id) if trade_id is not None else broker_order_id
+        existing = conn.execute(
+            f"""
+            SELECT id, symbol, action, qty, order_status
+            FROM trades
+            WHERE {where_sql}
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (where_value,),
+        ).fetchone()
         cursor = conn.execute(
             f"""
             UPDATE trades
@@ -162,7 +181,86 @@ def update_trade_order_status(
                 where_value,
             ),
         )
-        return int(cursor.rowcount)
+        updated_count = int(cursor.rowcount)
+
+    if updated_count:
+        existing_values = tuple(existing) if existing is not None else (trade_id, "", "", 0, "")
+        logger.info(
+            "[TRADE_STATUS] "
+            f"trade_id={existing_values[0] or trade_id or '-'} "
+            f"symbol={existing_values[1] or '-'} action={existing_values[2] or '-'} "
+            f"qty={int(existing_values[3] or 0)} "
+            f"from={existing_values[4] or '-'} to={order_status} "
+            f"filled_qty={int(filled_qty or 0)} filled_price={int(filled_price or 0)} "
+            f"broker_order_id={broker_order_id} response={response_msg or '-'}"
+        )
+    return updated_count
+
+
+def list_local_trade_cleanup_candidates(limit: int = 200) -> list[dict]:
+    """Return unresolved local rows that an operator may remove after review."""
+    safe_limit = max(1, min(int(limit or 200), 1000))
+    init_db()
+    with connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, ts, symbol, name, action, qty, price, broker_order_id,
+                   order_status, filled_qty, filled_price, response_msg, strategy_id
+            FROM trades
+            WHERE COALESCE(order_status, '') IN ('failed', 'submitted', 'broker_unknown')
+              AND COALESCE(filled_qty, 0) = 0
+            ORDER BY ts DESC, id DESC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+
+    candidates = []
+    for row in rows:
+        item = dict(row)
+        status = str(item.get("order_status") or "")
+        symbol = str(item.get("symbol") or "")
+        if status == "failed" and not item.get("broker_order_id"):
+            cleanup_reason = "broker rejected before order number was issued"
+            risk = "low"
+        elif symbol.startswith("Q") and symbol[1:].isdigit():
+            cleanup_reason = f"symbol alias requires reconciliation with {symbol[1:]}"
+            risk = "high"
+        else:
+            cleanup_reason = "broker order exists but local status is unresolved"
+            risk = "high"
+        item["cleanup_reason"] = cleanup_reason
+        item["cleanup_risk"] = risk
+        candidates.append(item)
+    return candidates
+
+
+def delete_local_trade_record(trade_id: int) -> dict:
+    """Delete one unresolved local record, never a filled/open/partial order."""
+    init_db()
+    with connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM trades WHERE id = ?", (int(trade_id),)).fetchone()
+        if row is None:
+            raise LookupError(f"local trade {trade_id} was not found")
+        item = dict(row)
+        status = str(item.get("order_status") or "")
+        filled_qty = int(item.get("filled_qty") or 0)
+        if filled_qty > 0 or status not in {"failed", "submitted", "broker_unknown"}:
+            raise ValueError(
+                f"local trade {trade_id} is protected (status={status or '-'}, filled_qty={filled_qty})"
+            )
+        conn.execute("DELETE FROM trades WHERE id = ?", (int(trade_id),))
+
+    logger.warning(
+        "[TRADE_LOCAL_DELETE] "
+        f"trade_id={trade_id} symbol={item.get('symbol') or '-'} "
+        f"action={item.get('action') or '-'} qty={int(item.get('qty') or 0)} "
+        f"status={status} broker_order_id={item.get('broker_order_id') or '-'} "
+        "scope=local_only"
+    )
+    return item
 
 def save_decision_log(symbol: str, name: str, action: str, qty: int, price: int, reason: str, indicators: dict, approved: bool) -> None:
     ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
@@ -444,4 +542,4 @@ def refresh_scanned_candidate_forward_returns(
         "skipped_count": skipped_count,
         "days": list(supported_days),
     }
-__all__ = ['KST', '_extract_broker_order_id', 'save_trade', 'update_trade_order_status', 'save_decision_log', 'save_scanned_candidate', 'get_scanned_candidates_history', 'get_latest_scanned_candidates', 'delete_scanned_candidate', '_candidate_date', '_chart_close_on_or_after', '_target_date', 'refresh_scanned_candidate_forward_returns']
+__all__ = ['KST', '_extract_broker_order_id', 'save_trade', 'update_trade_order_status', 'list_local_trade_cleanup_candidates', 'delete_local_trade_record', 'save_decision_log', 'save_scanned_candidate', 'get_scanned_candidates_history', 'get_latest_scanned_candidates', 'delete_scanned_candidate', '_candidate_date', '_chart_close_on_or_after', '_target_date', 'refresh_scanned_candidate_forward_returns']

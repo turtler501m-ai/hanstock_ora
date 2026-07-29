@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from src.market_metadata import (
     normalize_kr_symbol,
+    normalize_kr_order_symbol,
     resolve_stock_name,
     resolve_stock_sector,
 )
@@ -12,6 +13,10 @@ class MarketMetadataTests(unittest.TestCase):
     def test_normalize_kr_symbol_pads_numeric_codes(self):
         self.assertEqual(normalize_kr_symbol("5930"), "005930")
         self.assertEqual(normalize_kr_symbol("q530107"), "Q530107")
+
+    def test_normalize_kr_order_symbol_removes_kis_market_prefix(self):
+        self.assertEqual(normalize_kr_order_symbol("Q530107"), "530107")
+        self.assertEqual(normalize_kr_order_symbol("005930"), "005930")
 
     def test_resolve_stock_name_replaces_placeholder_from_metadata(self):
         with patch(

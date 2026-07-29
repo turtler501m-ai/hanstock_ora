@@ -266,7 +266,13 @@ class KIStockAPI:
             self._record_result(data)
             if data.get("rt_cd") != "0":
                 return []
-            codes = [row.get("mksc_shrn_iscd", "").strip() for row in data.get("output", []) if row.get("mksc_shrn_iscd", "").strip()]
+            from src.market_metadata import normalize_kr_order_symbol
+
+            codes = [
+                normalize_kr_order_symbol(row.get("mksc_shrn_iscd", ""))
+                for row in data.get("output", [])
+                if row.get("mksc_shrn_iscd", "").strip()
+            ]
             return codes[:top_n]
         except Exception:
             self._fail()

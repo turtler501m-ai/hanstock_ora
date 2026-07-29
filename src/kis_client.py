@@ -408,8 +408,10 @@ class KISClient:
                 )
                 return []
             self.mark_success()
+            from src.market_metadata import normalize_kr_order_symbol
+
             return [
-                row.get("mksc_shrn_iscd", "").strip()
+                normalize_kr_order_symbol(row.get("mksc_shrn_iscd", ""))
                 for row in data.get("output", [])
                 if row.get("mksc_shrn_iscd", "").strip()
             ][:top_n]

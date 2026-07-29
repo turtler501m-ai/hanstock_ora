@@ -3323,6 +3323,14 @@ def _sync_filled_trades_from_history(
                         ),
                     )
                     updated_count += int(cursor.rowcount)
+                    if cursor.rowcount:
+                        logger.info(
+                            "[TRADE_IMPORT_UPDATE] "
+                            f"symbol={trade['symbol']} action={trade['action']} "
+                            f"qty={trade['qty']} status={trade['order_status']} "
+                            f"filled_qty={trade['filled_qty']} filled_price={trade['filled_price']} "
+                            f"broker_order_id={trade['broker_order_id'] or '-'}"
+                        )
                 skipped_count += 1
                 continue
 
@@ -3353,6 +3361,13 @@ def _sync_filled_trades_from_history(
                     trade["response_msg"],
                     trade["broker_result"],
                 ),
+            )
+            logger.info(
+                "[TRADE_IMPORT] "
+                f"symbol={trade['symbol']} action={trade['action']} qty={trade['qty']} "
+                f"price={trade['price']} status={trade['order_status']} "
+                f"filled_qty={trade['filled_qty']} filled_price={trade['filled_price']} "
+                f"broker_order_id={trade['broker_order_id'] or '-'}"
             )
             existing.add(key)
             imported_count += 1

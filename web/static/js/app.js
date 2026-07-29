@@ -2878,13 +2878,21 @@ async function renderTrades() {
                 ? '<span class="badge badge-buy">매수</span>'
                 : '<span class="badge badge-sell">매도</span>';
             const [datePart = '-', timePart = '-'] = String(trade.ts || '').split(' ');
-            const reason = escapeHtml(translateReason(trade.reason || '-'));
+            const baseReason = translateReason(trade.reason || '-');
+            const cause = trade.response_msg || trade.cleanup_reason || '';
+            const reason = escapeHtml(cause ? `${baseReason} | 원인: ${cause}` : baseReason);
             const orderStatus = orderStatusLabel(trade.order_status);
             const filledQty = Number(trade.filled_qty || 0);
             const filledPrice = Number(trade.filled_price || 0);
             const filledText = filledQty > 0
                 ? `${filledQty.toLocaleString()} @ ${formatCurrency(filledPrice)}`
                 : '-';
+            const canDeleteLocal = trade.local_id
+                && filledQty === 0
+                && ['failed', 'submitted', 'broker_unknown'].includes(String(trade.order_status || '').toLowerCase());
+            const cleanupButton = canDeleteLocal
+                ? `<button type="button" class="button-ghost delete-local-trade" data-id="${Number(trade.local_id)}" title="증권사 주문은 건드리지 않고 로컬 기록만 삭제합니다">로컬삭제</button>`
+                : '';
 
             const tr = document.createElement('tr');
             tr.innerHTML = `
@@ -2900,10 +2908,26 @@ async function renderTrades() {
                 <td>
                     <span class="badge">${escapeHtml(orderStatus)}</span>
                     ${trade.broker_order_id ? `<div class="time-muted">#${escapeHtml(trade.broker_order_id)}</div>` : ''}
+                    ${cleanupButton}
                 </td>
                 <td>${escapeHtml(filledText)}</td>
             `;
             tbodyTrades.appendChild(tr);
+        });
+
+        tbodyTrades.querySelectorAll('.delete-local-trade').forEach((button) => {
+            button.addEventListener('click', async () => {
+                const tradeId = Number(button.dataset.id || 0);
+                if (!tradeId || !window.confirm('이 기록을 로컬 DB에서만 삭제할까요? 증권사 주문/체결 내역은 삭제되지 않습니다.')) return;
+                try {
+                    const response = await fetch(`/api/trades/local/${tradeId}?confirm=true`, { method: 'DELETE' });
+                    const payload = await response.json();
+                    if (!response.ok) throw new Error(payload.detail || '로컬 거래 삭제 실패');
+                    await renderTrades();
+                } catch (error) {
+                    window.alert(error.message || '로컬 거래 삭제 실패');
+                }
+            });
         });
         
         await renderPeriodicPerformance();

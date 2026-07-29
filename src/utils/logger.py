@@ -1,3 +1,4 @@
+import logging
 import sys
 from loguru import logger
 from src.config import config
@@ -29,3 +30,26 @@ logger.add(
     retention="30 days",
     encoding="utf-8"
 )
+
+
+class _InterceptHandler(logging.Handler):
+    """Route standard-library logs through the project's Loguru sinks."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        frame = logging.currentframe()
+        depth = 2
+        while frame is not None and frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
+
+# Some trading integrations use the standard logging module.  Intercepting the
+# root logger keeps their order/execution records in the same trader.log file.
+logging.basicConfig(handlers=[_InterceptHandler()], level=logging.INFO, force=True)

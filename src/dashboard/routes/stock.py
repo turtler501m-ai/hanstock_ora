@@ -2157,7 +2157,7 @@ def sync_trades(days: int = 90):
             conn.row_factory = sqlite3.Row
             rows = conn.execute("SELECT * FROM trades ORDER BY ts ASC").fetchall()
             local_trades = [dict(row) for row in rows]
-            
+
         merged_trades = {}
         for t in cloud_trades + local_trades:
             ts = t.get("ts") or t.get("timestamp")
@@ -2279,13 +2279,26 @@ def get_trades(limit: int = 50, strategy_id: str | None = None):
             conn.row_factory = sqlite3.Row
             rows = conn.execute("SELECT * FROM trades ORDER BY ts ASC").fetchall()
             local_trades = [dict(row) for row in rows]
-            
+            for trade in local_trades:
+                trade["_local_id"] = trade.get("id")
+
+        from src.db.trade_repository import list_local_trade_cleanup_candidates
+
+        cleanup_by_id = {
+            int(item["id"]): item
+            for item in list_local_trade_cleanup_candidates(max(limit, 200))
+        }
+
         merged_trades = {}
         for t in cloud_trades + local_trades:
             ts = t.get("ts") or t.get("timestamp")
             if not ts: continue
+            raw_local_id = t.get("_local_id")
+            local_id = int(raw_local_id) if str(raw_local_id or "").isdigit() else None
+            cleanup_item = cleanup_by_id.get(local_id) or {}
             key = f"{ts}_{t.get('symbol')}_{t.get('action')}"
             merged_trades[key] = {
+                "local_id": local_id,
                 "ts": ts,
                 "symbol": t.get("symbol"),
                 "name": t.get("name", t.get("symbol")),
@@ -2305,6 +2318,8 @@ def get_trades(limit: int = 50, strategy_id: str | None = None):
                 "strategy_version": t.get("strategy_version"),
                 "profile_hash": t.get("profile_hash", ""),
                 "source_approval_id": t.get("source_approval_id"),
+                "cleanup_reason": cleanup_item.get("cleanup_reason"),
+                "cleanup_risk": cleanup_item.get("cleanup_risk"),
             }
             
         trades = _account_trades(list(merged_trades.values()))
@@ -2314,6 +2329,35 @@ def get_trades(limit: int = 50, strategy_id: str | None = None):
         return {"trades": trades[:limit]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/trades/local-cleanup")
+def get_local_trade_cleanup_candidates(limit: int = 200):
+    from src.db.trade_repository import list_local_trade_cleanup_candidates
+
+    return {"trades": list_local_trade_cleanup_candidates(limit)}
+
+
+@router.delete("/api/trades/local/{trade_id}")
+def delete_local_trade(trade_id: int, confirm: bool = False):
+    if not confirm:
+        raise HTTPException(status_code=400, detail="confirm=true is required")
+
+    from src.db.trade_repository import delete_local_trade_record
+
+    try:
+        deleted = delete_local_trade_record(trade_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "deleted_id": trade_id,
+        "scope": "local_only",
+        "symbol": deleted.get("symbol"),
+        "order_status": deleted.get("order_status"),
+    }
 
 
 
