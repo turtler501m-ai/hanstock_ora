@@ -804,7 +804,7 @@ def find_candidates(
                     needs_sync = True
 
                 if needs_sync and api is not None:
-                    logger.info(f"[SCAN] {code}의 캐시 데이터가 부족하여 KIS API에서 시세를 가져옵니다.")
+                    logger.debug(f"[SCAN] {code}의 캐시 데이터가 부족하여 KIS API에서 시세를 가져옵니다.")
                     try:
                         kis_data = api.get_daily(code, n=120)
                         if kis_data:
@@ -868,7 +868,7 @@ def find_candidates(
                     candidates.append(entry)
                     logger.info(f"[CANDIDATE] {code} (하이브리드) score={score} ({', '.join(reasons)})")
                 else:
-                    logger.info(f"[SKIP] {code} (하이브리드) score={score}/{min_score}")
+                    logger.debug(f"[SKIP] {code} (하이브리드) score={score}/{min_score}")
             except Exception as err:
                 logger.warning(f"[SCAN] {code} 하이브리드 스캔 중 예외 발생: {err}")
                 
@@ -999,7 +999,7 @@ def find_candidates(
                 candidates.append(entry)
                 logger.info(f"[CANDIDATE] {code} score={score} ({', '.join(reasons)})")
             else:
-                logger.info(f"[SKIP] {code} score={score}/{min_score} ({', '.join(reasons) if reasons else '신호없음'})")
+                logger.debug(f"[SKIP] {code} score={score}/{min_score} ({', '.join(reasons) if reasons else '신호없음'})")
         except Exception as e:
             logger.info(f"[WARN] Candidate scan failed for {code}: {e}")
 

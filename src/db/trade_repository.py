@@ -239,13 +239,18 @@ def update_trade_order_status(
     if not broker_order_id:
         return 0
     init_db()
-    broker_result_json = json.dumps(broker_result or {}, ensure_ascii=False)
+    broker_result_json = json.dumps(
+        broker_result or {},
+        ensure_ascii=False,
+        sort_keys=True,
+    )
     with connect_db() as conn:
         where_sql = "id = ?" if trade_id is not None else "broker_order_id = ?"
         where_value = int(trade_id) if trade_id is not None else broker_order_id
         existing = conn.execute(
             f"""
-            SELECT id, symbol, action, qty, order_status
+            SELECT id, symbol, action, qty, order_status,
+                   filled_qty, filled_price, response_msg, broker_result
             FROM trades
             WHERE {where_sql}
             ORDER BY id DESC
@@ -253,6 +258,34 @@ def update_trade_order_status(
             """,
             (where_value,),
         ).fetchone()
+        if existing is None:
+            return 0
+        current = tuple(existing)
+        requested_state = (
+            str(order_status or ""),
+            int(filled_qty or 0),
+            int(filled_price or 0),
+            str(response_msg or ""),
+            broker_result_json,
+        )
+        current_broker_result = str(current[8] or "{}")
+        try:
+            current_broker_result = json.dumps(
+                json.loads(current_broker_result),
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+        current_state = (
+            str(current[4] or ""),
+            int(current[5] or 0),
+            int(current[6] or 0),
+            str(current[7] or ""),
+            current_broker_result,
+        )
+        if current_state == requested_state:
+            return 0
         cursor = conn.execute(
             f"""
             UPDATE trades
@@ -275,7 +308,7 @@ def update_trade_order_status(
         updated_count = int(cursor.rowcount)
 
     if updated_count:
-        existing_values = tuple(existing) if existing is not None else (trade_id, "", "", 0, "")
+        existing_values = tuple(existing)
         logger.info(
             "[TRADE_STATUS] "
             f"trade_id={existing_values[0] or trade_id or '-'} "

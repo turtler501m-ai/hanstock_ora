@@ -7,6 +7,7 @@ from src.notifications import (
     build_candidates_payload,
     build_error_payload,
     build_order_payload,
+    build_order_summary_payload,
     build_session_end_payload,
     build_session_start_payload,
     post_slack_payload,
@@ -82,7 +83,7 @@ def slack_order(
     ok: bool,
     indicators: dict,
 ) -> None:
-    payload = build_order_payload(name, symbol, action, qty, price, reason, ok, indicators)
+    payload = build_order_summary_payload(name, symbol, action, qty, price, reason, ok, indicators)
     post_slack_payload(config.slack_webhook_url, payload, HTTP, log_fn=logger.warning)
 
 
@@ -98,7 +99,17 @@ def mistock_slack_order(
 ) -> None:
     from src.utils.exchange_rate import get_usd_krw_rate
     rate = get_usd_krw_rate()
-    payload = build_order_payload(name, symbol, action, qty, price, reason, ok, indicators, exchange_rate=rate)
+    payload = build_order_summary_payload(
+        name,
+        symbol,
+        action,
+        qty,
+        price,
+        reason,
+        ok,
+        indicators,
+        exchange_rate=rate,
+    )
     post_slack_payload(config.mistock_slack_webhook_url or "", payload, HTTP, log_fn=logger.warning)
 
 

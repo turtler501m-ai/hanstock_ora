@@ -65,6 +65,21 @@ class LocalTradeCleanupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             trade_repository.delete_local_trade_record(open_id)
 
+    def test_order_status_update_skips_identical_state(self):
+        trade_id = self._insert_trade(status="filled", filled_qty=10)
+
+        updated = trade_repository.update_trade_order_status(
+            "1234",
+            trade_id=trade_id,
+            order_status="filled",
+            filled_qty=10,
+            filled_price=0,
+            response_msg="",
+            broker_result={},
+        )
+
+        self.assertEqual(updated, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

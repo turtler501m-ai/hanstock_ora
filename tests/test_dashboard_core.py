@@ -1463,6 +1463,7 @@ class DashboardCoreTests(unittest.TestCase):
                 api = _FakeAPI()
 
                 result = dashboard._sync_filled_trades_from_history(api, days=30)
+                repeated = dashboard._sync_filled_trades_from_history(api, days=30)
 
                 self.assertEqual(result["history_count"], 1)
                 self.assertEqual(result["imported_count"], 1)
@@ -1479,6 +1480,9 @@ class DashboardCoreTests(unittest.TestCase):
                 self.assertEqual(row["qty"], 3)
                 self.assertEqual(row["price"], 70100)
                 self.assertEqual(row["order_status"], "filled")
+                self.assertEqual(repeated["imported_count"], 0)
+                self.assertEqual(repeated["updated_count"], 0)
+                self.assertEqual(repeated["items"][0]["sync_result"], "skipped")
         finally:
             dashboard.trader.config.trade_db_path = original_db_path
             dashboard.fetch_cloud_trades = original_fetch_cloud_trades
@@ -1519,7 +1523,11 @@ class DashboardCoreTests(unittest.TestCase):
                 stock_routes._clear_balance_cache = lambda: None
                 stock_routes.trader.DRY_RUN = False
 
-                result = stock_routes.sync_trades(days=1)
+                result = stock_routes._execute_trade_sync(
+                    days=1,
+                    run_id="test-balance-sync",
+                    started_at="2026-07-30T10:00:00+09:00",
+                )
 
                 self.assertEqual(result["balance_synced_count"], 1)
                 with sqlite3.connect(db_path) as conn:
@@ -1617,7 +1625,11 @@ class DashboardCoreTests(unittest.TestCase):
                 stock_routes._clear_balance_cache = lambda: None
                 stock_routes.trader.DRY_RUN = False
 
-                result = stock_routes.sync_trades(days=1)
+                result = stock_routes._execute_trade_sync(
+                    days=1,
+                    run_id="test-cleanup-sync",
+                    started_at="2026-07-30T10:00:00+09:00",
+                )
 
                 self.assertEqual(result["removed_mismatch_count"], 1)
                 self.assertTrue(result["order_status_sync"]["ok"])

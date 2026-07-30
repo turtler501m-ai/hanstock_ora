@@ -1285,13 +1285,15 @@ def run(
     )
     logger.info(f"Cash={cash:,} KRW | Total={total_eval:,} KRW | PnL={pnl:+,} KRW | Holdings={len(stocks)}")
 
-    slack_session_start(
-        cash=cash,
-        total=total_eval,
-        stock_count=len(stocks),
-        order_submission_enabled=flags.order_submission_enabled,
-        real_orders_enabled=flags.real_orders_enabled,
-    )
+    notify_session = mode != "analysis_only"
+    if notify_session:
+        slack_session_start(
+            cash=cash,
+            total=total_eval,
+            stock_count=len(stocks),
+            order_submission_enabled=flags.order_submission_enabled,
+            real_orders_enabled=flags.real_orders_enabled,
+        )
 
     daily_loss_halted = check_daily_loss(pnl)
 
@@ -1305,7 +1307,7 @@ def run(
     daily_loss_halted = daily_loss_halted or bool(runtime_bundle.get("daily_loss_halt"))
 
     candidates = runtime_bundle.get("candidate_scan", {}).get("candidates", [])
-    if candidates:
+    if candidates and notify_session:
         slack_candidates(candidates)
 
     context: dict = {"mode": mode}
@@ -1367,7 +1369,8 @@ def run(
             execution_buying_cash = max(0, execution_buying_cash - _estimated_buy_cost(row))
 
     remaining_cash = runtime_bundle.get("remaining_cash", cash)
-    slack_session_end(results=results, cash=remaining_cash, total=total_eval, pnl=pnl)
+    if notify_session:
+        slack_session_end(results=results, cash=remaining_cash, total=total_eval, pnl=pnl)
 
     logger.info("Seven Split finished")
     return {

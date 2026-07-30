@@ -4,6 +4,10 @@ from loguru import logger
 from src.config import config
 import os
 
+LOG_LEVEL = os.environ.get("HANSTOCK_LOG_LEVEL", "INFO").upper()
+LOG_ROTATION = os.environ.get("HANSTOCK_LOG_ROTATION", "5 MB")
+LOG_RETENTION = os.environ.get("HANSTOCK_LOG_RETENTION", "14 days")
+
 # Remove default handler
 logger.remove()
 
@@ -13,7 +17,7 @@ if console_sink is not None:
     logger.add(
         console_sink,
         format="<green>{time:YYYY-MM-DD HH:mm:ss KST}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-        level="INFO",
+        level=LOG_LEVEL,
         colorize=True,
     )
 
@@ -25,9 +29,10 @@ if log_dir:
 logger.add(
     config.log_file,
     format="{time:YYYY-MM-DD HH:mm:ss KST} | {level: <8} | {name}:{function}:{line} - {message}",
-    level="INFO",
-    rotation="10 MB",
-    retention="30 days",
+    level=LOG_LEVEL,
+    rotation=LOG_ROTATION,
+    retention=LOG_RETENTION,
+    compression="zip",
     encoding="utf-8"
 )
 

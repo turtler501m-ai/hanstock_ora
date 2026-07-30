@@ -212,13 +212,9 @@ def _slack_enabled() -> bool:
 
 
 def _slack_cycle_start(*, mode: str) -> None:
-    if mode != "daily_auto" or not _slack_enabled():
-        return
-    now = datetime.now(trader.KST).strftime("%Y-%m-%d %H:%M KST")
-    send_slack(
-        text=f"[한스톡 VM] AI 자동매매 점검 시작 - {now}",
-        color="#2196F3",
-    )
+    # A single completion/error summary is enough for scheduled cycles.
+    # Keeping this hook as a no-op preserves compatibility with older callers.
+    return
 
 
 def _slack_cycle_result(result: dict, *, mode: str) -> None:

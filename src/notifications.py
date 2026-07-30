@@ -205,31 +205,30 @@ def build_order_summary_payload(
 def build_candidates_payload(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
     if not candidates:
         return None
-    
-    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": f"*매수 후보 종목 ({len(candidates)}개)*"}}]
-    current_chunk = []
-    current_length = 0
-    
-    for item in candidates:
+
+    visible = candidates[:5]
+    lines = []
+    for item in visible:
         ticker = item["ticker"]
         label = item.get("name") or ticker
-        line = f"*{label}* (`{ticker}`) {item['current_price']:,.0f}원 | 점수 {item['score']} | {', '.join(item['reasons'])}"
-        line_len = len(line) + 1
-        
-        if current_length + line_len > 2800:
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(current_chunk)}})
-            current_chunk = [line]
-            current_length = line_len
-        else:
-            current_chunk.append(line)
-            current_length += line_len
-            
-    if current_chunk:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(current_chunk)}})
-        
+        reasons = ", ".join(list(item.get("reasons") or [])[:2]) or "-"
+        lines.append(
+            f"*{label}* (`{ticker}`) {item['current_price']:,.0f}원 "
+            f"| 점수 {item['score']} | {reasons}"
+        )
+    hidden = len(candidates) - len(visible)
+    if hidden:
+        lines.append(f"• 외 {hidden}종목")
+    text = f"매수 후보 {len(candidates)}종목\n" + "\n".join(lines)
     return build_slack_payload(
-        text=f"신규 매수 후보 {len(candidates)}종목",
-        blocks=blocks,
+        text=text.replace("*", ""),
+        blocks=[
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*매수 후보 {len(candidates)}종목*"},
+            },
+            {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(lines)}},
+        ],
         color="#9C27B0",
     )
 
@@ -243,51 +242,48 @@ def build_session_end_payload(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     ts = format_kst_timestamp(now)
-    if not results:
+    actionable = [
+        item
+        for item in results
+        if item.get("decision", "execute") in {"execute", "queue"}
+    ]
+    if not actionable:
         return build_slack_payload(
-            text=f"세븐 스플릿 자동매매 종료 - {ts}: 주문 없음",
+            text=f"자동매매 완료 | 주문 없음 | {ts}",
             color="#9E9E9E",
         )
 
-    executed = [item for item in results if item.get("decision", "execute") == "execute"]
-    queued_count = sum(1 for item in results if item.get("decision") == "queue")
+    executed = [item for item in actionable if item.get("decision", "execute") == "execute"]
+    queued_count = sum(1 for item in actionable if item.get("decision") == "queue")
     buy_count = sum(1 for item in executed if item["action"] == "buy" and item["ok"])
     sell_count = sum(1 for item in executed if item["action"] == "sell" and item["ok"])
     fail_count = sum(1 for item in executed if not item["ok"])
     
     summary_text = (
-        f"*세븐 스플릿 자동매매 종료* | {ts}\n"
-        f"평가: {total:,}원 | 예수금: {cash:,}원 | 손익: {pnl:+,}원\n"
-        f"매수성공: {buy_count}건 | 매도성공: {sell_count}건 | 승인대기: {queued_count}건 | 실패: {fail_count}건"
+        f"*자동매매 완료* | 매수성공: {buy_count}건 | 매도성공: {sell_count}건 | "
+        f"승인대기: {queued_count}건 | 실패: {fail_count}건\n"
+        f"평가 {total:,}원 | 현금 {cash:,}원 | 손익 {pnl:+,}원 | {ts}"
     )
-    blocks = [
-        {"type": "section", "text": {"type": "mrkdwn", "text": summary_text}}
-    ]
-
-    current_chunk = []
-    current_length = 0
-    
-    for item in results:
+    detail_lines = []
+    for item in actionable[:5]:
         if item.get("decision") == "queue":
             prefix = "승인대기"
         else:
             prefix = "매수" if item["action"] == "buy" else "매도"
-        line = f"• {prefix} {item['name']} {item['qty']}주 - {item['reason']}"
-        line_len = len(line) + 1
-        
-        if current_length + line_len > 2800:
-            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(current_chunk)}})
-            current_chunk = [line]
-            current_length = line_len
-        else:
-            current_chunk.append(line)
-            current_length += line_len
-            
-    if current_chunk:
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(current_chunk)}})
+        detail_lines.append(
+            f"• {prefix} {item.get('name') or item.get('symbol', '-')} "
+            f"{item.get('qty', 0)}주 - {item.get('reason', '-')}"
+        )
+    if len(actionable) > 5:
+        detail_lines.append(f"… 외 {len(actionable) - 5}건")
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": summary_text}}]
+    if detail_lines:
+        blocks.append(
+            {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(detail_lines)}}
+        )
 
     return build_slack_payload(
-        text=f"세븐 스플릿 자동매매 종료 - {ts}",
+        text=summary_text.replace("*", ""),
         blocks=blocks,
         color="#36a64f" if pnl >= 0 else "#e74c3c",
     )

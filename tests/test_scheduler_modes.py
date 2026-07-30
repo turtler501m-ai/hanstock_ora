@@ -514,7 +514,7 @@ class SchedulerModeTests(unittest.TestCase):
         self.assertEqual(result["auto_approval_errors"][0]["message"], "broker busy")
         self.assertEqual(approve_mock.call_count, 3)
 
-    def test_daily_auto_sends_slack_start_and_result_summary(self):
+    def test_daily_auto_sends_single_slack_result_summary(self):
         expected = {
             "plan": [{"category": "ai_rebalance"}],
             "results": [{"approval_id": 123, "category": "ai_rebalance", "decision": "queue"}],
@@ -528,9 +528,8 @@ class SchedulerModeTests(unittest.TestCase):
         ), patch.object(scheduler, "send_slack") as send_slack:
             scheduler.run_scheduled_cycle(mode="daily_auto")
 
-        self.assertEqual(send_slack.call_count, 2)
-        self.assertIn("점검 시작", send_slack.call_args_list[0].kwargs["text"])
-        self.assertIn("정상 완료", send_slack.call_args_list[1].kwargs["text"])
+        self.assertEqual(send_slack.call_count, 1)
+        self.assertIn("정상 완료", send_slack.call_args_list[0].kwargs["text"])
 
     def test_daily_auto_slack_summary_counts_only_unprocessed_queue(self):
         expected = {

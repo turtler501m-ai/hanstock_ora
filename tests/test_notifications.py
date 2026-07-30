@@ -166,8 +166,7 @@ class NotificationTests(unittest.TestCase):
         text = payload["attachments"][0]["blocks"][1]["text"]["text"]
         self.assertIn("*005930* (`005930`) 70,123원 | 점수 4 | rsi, macd", text)
 
-    def test_build_candidates_payload_chunks_long_lists(self):
-        # Create enough candidates to exceed the 2800 character chunk limit
+    def test_build_candidates_payload_limits_long_lists(self):
         candidates = []
         for i in range(40):
             candidates.append({
@@ -179,11 +178,9 @@ class NotificationTests(unittest.TestCase):
             })
         payload = build_candidates_payload(candidates)
         blocks = payload["attachments"][0]["blocks"]
-        # It should have a section block and at least two section blocks due to chunking
-        self.assertGreaterEqual(len(blocks), 3)
+        self.assertEqual(len(blocks), 2)
         self.assertEqual(blocks[0]["type"], "section")
-        self.assertEqual(blocks[1]["type"], "section")
-        self.assertEqual(blocks[2]["type"], "section")
+        self.assertIn("외 35종목", blocks[1]["text"]["text"])
 
     def test_build_session_end_payload_summarizes_results(self):
         payload = build_session_end_payload(
@@ -205,7 +202,7 @@ class NotificationTests(unittest.TestCase):
         self.assertIn("승인대기: 1건", text)
         self.assertIn("승인대기 Naver 3주 - queue", orders)
 
-    def test_build_session_end_payload_chunks_long_lists(self):
+    def test_build_session_end_payload_limits_long_lists(self):
         # Create enough results to exceed the 2800 character chunk limit
         results = []
         for i in range(40):
@@ -219,11 +216,10 @@ class NotificationTests(unittest.TestCase):
             })
         payload = build_session_end_payload(results, cash=1000, total=2000, pnl=100)
         blocks = payload["attachments"][0]["blocks"]
-        # Summary section and at least two section blocks for chunked order history
-        self.assertGreaterEqual(len(blocks), 3)
+        self.assertEqual(len(blocks), 2)
         self.assertEqual(blocks[0]["type"], "section")
         self.assertEqual(blocks[1]["type"], "section")
-        self.assertEqual(blocks[2]["type"], "section")
+        self.assertIn("외 35건", blocks[1]["text"]["text"])
 
     def test_build_session_end_payload_handles_empty_results(self):
         payload = build_session_end_payload(results=[], cash=1, total=2, pnl=3)

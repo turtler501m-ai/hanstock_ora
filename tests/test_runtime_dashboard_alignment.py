@@ -233,7 +233,7 @@ class RuntimeDashboardAlignmentTests(unittest.TestCase):
         self.assertTrue(all(row["decision"] == "queue" for row in result["results"]))
         build_runtime_plan.assert_called_once_with(api, api.get_balance.return_value)
         self.assertEqual(execute_plan_row.call_count, 2)
-        slack_candidates.assert_called_once_with(runtime_bundle["candidate_scan"]["candidates"])
+        slack_candidates.assert_not_called()
 
 
 if __name__ == "__main__":

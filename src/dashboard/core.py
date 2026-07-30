@@ -3466,7 +3466,10 @@ def _sync_filled_trades_from_history(
         history = api.get_trade_history(start_date, end_date)
     trader.init_db()
 
-    existing = {_history_trade_key(item) for item in _load_merged_trades()}
+    existing = {
+        _history_trade_key(item): item
+        for item in _load_merged_trades()
+    }
     imported_count = 0
     skipped_count = 0
     updated_count = 0
@@ -3496,7 +3499,20 @@ def _sync_filled_trades_from_history(
             if key in existing:
                 item_result = "skipped"
                 item_message = "이미 저장된 체결 기록"
-                if trade["broker_order_id"]:
+                stored = existing[key]
+                stored_state = (
+                    str(stored.get("order_status") or ""),
+                    _to_int(stored.get("filled_qty")),
+                    _to_int(stored.get("filled_price")),
+                    str(stored.get("response_msg") or ""),
+                )
+                incoming_state = (
+                    "filled",
+                    _to_int(trade.get("filled_qty")),
+                    _to_int(trade.get("filled_price")),
+                    str(trade.get("response_msg") or ""),
+                )
+                if trade["broker_order_id"] and stored_state != incoming_state:
                     cursor = conn.execute(
                         """
                         UPDATE trades
@@ -3584,7 +3600,7 @@ def _sync_filled_trades_from_history(
                 f"filled_qty={trade['filled_qty']} filled_price={trade['filled_price']} "
                 f"broker_order_id={trade['broker_order_id'] or '-'}"
             )
-            existing.add(key)
+            existing[key] = trade
             imported_count += 1
             items.append({
                 "sync_type": "history",
