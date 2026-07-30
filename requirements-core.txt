@@ -1,0 +1,20 @@
+# Dashboard, persistence, market data, and trading engine.
+# Upper bounds prevent an unattended major-version upgrade in production.
+requests>=2.31.0,<3
+python-dateutil>=2.8.2,<3
+yfinance>=0.2.54,<2
+pandas>=2.2.0,<4
+exchange-calendars>=4.5.0,<5
+fastapi>=0.100.0,<1
+uvicorn>=0.23.0,<1
+python-dotenv>=1.0.0,<2
+jinja2>=3.1.2,<4
+pydantic-settings>=2.0.0,<3
+loguru>=0.7.0,<1
+tenacity>=8.0.0,<10
+python-multipart>=0.0.9,<1
+lxml>=4.9.0,<7
+
+# Optional model training dependencies:
+# stable-baselines3>=2.3.0,<3
+# gymnasium>=0.29.1,<2

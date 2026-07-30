@@ -364,6 +364,8 @@ def init_db() -> None:
         except (sqlite3.Error, OSError, ValueError, TypeError) as m_err:
             logger.warning(f"Failed to run watchlist migration clean up: {m_err}")
         try:
+            from src.db.custom_strategy_registry import sync_custom_rules_to_db
+
             sync_custom_rules_to_db(conn)
         except (sqlite3.Error, OSError, ValueError, TypeError) as sc_err:
             logger.warning(f"Failed to sync custom rules to DB on init: {sc_err}")
@@ -406,3 +408,26 @@ from src.db.strategy_repository import *  # noqa: F401,F403,E402
 from src.db.scheduler_repository import *  # noqa: F401,F403,E402
 from src.db.market_repository import *  # noqa: F401,F403,E402
 from src.db.analysis_repository import *  # noqa: F401,F403,E402
+
+
+_COMPATIBILITY_REPOSITORIES = (
+    "src.db.trade_repository",
+    "src.db.usage_repository",
+    "src.db.strategy_repository",
+    "src.db.scheduler_repository",
+    "src.db.market_repository",
+    "src.db.analysis_repository",
+)
+
+
+def __getattr__(name: str):
+    """Resolve facade exports lazily when a bounded repository caused a cycle."""
+    import importlib
+
+    for module_name in _COMPATIBILITY_REPOSITORIES:
+        module = importlib.import_module(module_name)
+        if name in getattr(module, "__all__", ()) or hasattr(module, name):
+            value = getattr(module, name)
+            globals()[name] = value
+            return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -1,0 +1,5 @@
+# External signal, LLM, exchange, and process-monitoring integrations.
+telethon>=1.34.0,<2
+anthropic>=0.20.0,<1
+pybit>=5.0.0,<6
+psutil>=5.9.0,<8

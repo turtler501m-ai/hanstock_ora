@@ -1,0 +1,4 @@
+# Local voice dashboard only. Not required by the VM trading service.
+faster-whisper>=1.0.0,<2
+imageio-ffmpeg>=0.5.1,<1
+soundcard>=0.4.6,<1
