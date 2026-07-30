@@ -205,7 +205,10 @@ NASDAQ_NAMES = {
 
 
 def normalize_symbol(symbol: str) -> str:
-    return "".join(ch for ch in str(symbol or "").upper().strip() if ch.isalnum() or ch in {".", "-"}).replace("-", ".")
+    raw = str(symbol or "").upper().strip()
+    index_prefix = "^" if raw.startswith("^") else ""
+    normalized = "".join(ch for ch in raw.lstrip("^") if ch.isalnum() or ch in {".", "-"})
+    return index_prefix + normalized.replace("-", ".")
 
 
 def symbol_name(symbol: str) -> str:

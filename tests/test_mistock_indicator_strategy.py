@@ -70,6 +70,16 @@ class MistockIndicatorStrategyTests(unittest.TestCase):
         self.assertEqual(result, {"close": [], "high": [], "volume": []})
         self.assertEqual(download.call_args.args[0], "BRK-B")
 
+    def test_fetch_history_preserves_yahoo_index_prefix(self):
+        empty = MagicMock()
+        empty.empty = True
+        with patch("src.online_access.require_online_access"), \
+                patch("src.mistock.strategy.yf.download", return_value=empty) as download:
+            result = strategy.fetch_history("^KS11")
+
+        self.assertEqual(result, {"close": [], "high": [], "volume": []})
+        self.assertEqual(download.call_args.args[0], "^KS11")
+
 
 class RsiDivergenceTests(unittest.TestCase):
     def test_calc_rsi_series_length(self):
