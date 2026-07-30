@@ -56,6 +56,7 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn('id="table-trade-sync-items"', INDEX_HTML)
         self.assertIn("result.sync_items", APP_JS)
         self.assertIn("동기화 전체 항목 보기", INDEX_HTML)
+        self.assertIn("details.hidden = false", APP_JS)
 
     def test_scheduler_checklist_uses_persisted_schedule_registrations(self):
         scheduler_renderer = APP_JS.split(

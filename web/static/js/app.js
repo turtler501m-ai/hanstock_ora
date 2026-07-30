@@ -2839,8 +2839,8 @@ function renderTradeSyncResult(result) {
     }
 
     const items = Array.isArray(result.sync_items) ? result.sync_items : [];
-    if (details) details.hidden = items.length === 0;
-    if (count) count.textContent = items.length ? `(${items.length.toLocaleString()}건)` : '';
+    if (details) details.hidden = false;
+    if (count) count.textContent = `(${items.length.toLocaleString()}건)`;
     if (tbody) {
         const typeLabels = {
             history: '체결 내역',
