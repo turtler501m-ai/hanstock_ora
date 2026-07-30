@@ -1463,6 +1463,11 @@ class DashboardCoreTests(unittest.TestCase):
                 api = _FakeAPI()
 
                 result = dashboard._sync_filled_trades_from_history(api, days=30)
+                with sqlite3.connect(db_path) as conn:
+                    conn.execute(
+                        "UPDATE trades SET response_msg = ? WHERE broker_order_id = ?",
+                        ("legacy broker response", "H12345"),
+                    )
                 repeated = dashboard._sync_filled_trades_from_history(api, days=30)
 
                 self.assertEqual(result["history_count"], 1)

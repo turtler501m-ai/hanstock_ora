@@ -3504,13 +3504,11 @@ def _sync_filled_trades_from_history(
                     str(stored.get("order_status") or ""),
                     _to_int(stored.get("filled_qty")),
                     _to_int(stored.get("filled_price")),
-                    str(stored.get("response_msg") or ""),
                 )
                 incoming_state = (
                     "filled",
                     _to_int(trade.get("filled_qty")),
                     _to_int(trade.get("filled_price")),
-                    str(trade.get("response_msg") or ""),
                 )
                 if trade["broker_order_id"] and stored_state != incoming_state:
                     cursor = conn.execute(
