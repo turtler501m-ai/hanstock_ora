@@ -76,6 +76,14 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         runs_map = body.index("runs.map")
         self.assertGreater(body.index("const runStatus", runs_map), runs_map)
 
+    def test_holdings_tab_has_refresh_control(self):
+        self.assertIn(
+            'data-dashboard-tab="portfolio">보유종목</button>',
+            INDEX_HTML,
+        )
+        self.assertIn('id="btn-refresh-holdings"', INDEX_HTML)
+        self.assertIn("await renderBalance()", APP_JS)
+
     def test_scheduler_checklist_uses_persisted_schedule_registrations(self):
         scheduler_renderer = APP_JS.split(
             "async function renderSchedulerStrategyChecklist", 1
