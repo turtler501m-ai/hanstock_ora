@@ -1304,6 +1304,30 @@ tbody tr:hover {
     font-weight: 500;
 }
 
+.sortable-header {
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.sortable-header:hover,
+.sortable-header:focus-visible {
+    color: var(--primary);
+}
+
+.strategy-validation-reason {
+    display: block;
+    margin-top: 0.2rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
 .ai-modal-card {
     margin: 8vh auto;
     max-width: 720px;

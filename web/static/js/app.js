@@ -466,7 +466,12 @@ function renderPerformanceDetailPanel(item) {
         return;
     }
 
-    const rows = details.map((detail) => {
+    const detailColumns = [
+        ['ts', '시간'], ['symbol', '종목'], ['name', '종목명'], ['action', '구분'],
+        ['qty', '수량'], ['price', '단가'], ['amount', '금액'], ['realized_pnl', '실현손익'],
+        ['realized_pnl_rate', '수익률'], ['strategy_name', '매매 전략'], ['reason', '사유']
+    ];
+    const renderRows = (sortedDetails) => sortedDetails.map((detail) => {
         const action = String(detail.action || '').toLowerCase();
         const pnl = Number(detail.realized_pnl || 0);
         const pnlClass = pnl > 0 ? 'text-success' : (pnl < 0 ? 'text-danger' : '');
@@ -481,6 +486,10 @@ function renderPerformanceDetailPanel(item) {
                 <td>${formatCurrency(detail.amount)}</td>
                 <td class="${pnlClass}">${pnl > 0 ? '+' : ''}${formatCurrency(pnl)}</td>
                 <td class="${pnlClass}">${formatPercent(detail.realized_pnl_rate || 0)}</td>
+                <td>
+                    <strong>${escapeHtml(detail.strategy_name || detail.strategy_id || '전략 미기록')}</strong>
+                    ${detail.strategy_id ? `<div class="time-muted">${escapeHtml(detail.strategy_id)}</div>` : ''}
+                </td>
                 <td>${escapeHtml(translateReason(detail.reason || '-'))}</td>
             </tr>
         `;
@@ -492,22 +501,35 @@ function renderPerformanceDetailPanel(item) {
             <table class="performance-detail-table">
                 <thead>
                     <tr>
-                        <th>시간</th>
-                        <th>종목</th>
-                        <th>종목명</th>
-                        <th>구분</th>
-                        <th>수량</th>
-                        <th>단가</th>
-                        <th>금액</th>
-                        <th>실현손익</th>
-                        <th>수익률</th>
-                        <th>사유</th>
+                        ${detailColumns.map(([key, label]) => `<th><button type="button" class="sortable-header" data-sort-key="${key}" aria-label="${label} 기준 정렬">${label} ↕</button></th>`).join('')}
                     </tr>
                 </thead>
-                <tbody>${rows}</tbody>
+                <tbody>${renderRows(details)}</tbody>
             </table>
         </div>
     `;
+    let sortKey = '';
+    let sortDirection = 1;
+    bodyEl.querySelectorAll('.sortable-header').forEach((button) => {
+        button.addEventListener('click', () => {
+            const nextKey = button.dataset.sortKey;
+            sortDirection = sortKey === nextKey ? sortDirection * -1 : 1;
+            sortKey = nextKey;
+            const sorted = [...details].sort((left, right) => {
+                const leftValue = left[sortKey] ?? '';
+                const rightValue = right[sortKey] ?? '';
+                const numeric = ['qty', 'price', 'amount', 'realized_pnl', 'realized_pnl_rate'].includes(sortKey);
+                if (numeric) return (Number(leftValue) - Number(rightValue)) * sortDirection;
+                return String(leftValue).localeCompare(String(rightValue), 'ko') * sortDirection;
+            });
+            const tbody = bodyEl.querySelector('.performance-detail-table tbody');
+            if (tbody) tbody.innerHTML = renderRows(sorted);
+            bodyEl.querySelectorAll('.sortable-header').forEach((header) => {
+                const active = header.dataset.sortKey === sortKey;
+                header.textContent = `${detailColumns.find(([key]) => key === header.dataset.sortKey)?.[1] || ''}${active ? (sortDirection > 0 ? ' ▲' : ' ▼') : ' ↕'}`;
+            });
+        });
+    });
     setPerformanceDetailPanelOpen(true);
     panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
@@ -3090,7 +3112,7 @@ function updatePeriodicPerformanceUI() {
     if (tbody) {
         tbody.innerHTML = '';
         if (!dataList.length) {
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 2rem; color: #94a3b8;">성과 분석 데이터가 없습니다.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; padding: 2rem; color: #94a3b8;">성과 분석 데이터가 없습니다.</td></tr>`;
         } else {
             // Sort to display latest data first in the table
             const tableDataList = [...dataList].reverse();
@@ -3108,6 +3130,10 @@ function updatePeriodicPerformanceUI() {
                     <td class="${pnlClass}">${pnl > 0 ? '+' : ''}${formatCurrency(pnl)}</td>
                     <td class="${pnlClass}">${pnlRate > 0 ? '+' : ''}${pnlRate.toFixed(2)}%</td>
                     <td class="${pnl > 0 ? 'text-success' : (pnl < 0 ? 'text-danger' : '')}">${formatCurrency(item.net_cashflow)}</td>
+                    <td>${formatMarketIndex(item.kospi, item.kospi_change_pct)}</td>
+                    <td>${formatOptionalPercent(item.kospi_volatility)}</td>
+                    <td>${formatMarketIndex(item.kosdaq, item.kosdaq_change_pct)}</td>
+                    <td>${formatOptionalPercent(item.kosdaq_volatility)}</td>
                 `;
                 const periodCell = tr.querySelector('td');
                 if (periodCell) {
@@ -3126,6 +3152,8 @@ function updatePeriodicPerformanceUI() {
             });
         }
     }
+
+    renderStrategyValidation(periodicDataCache.strategy_validation || []);
     
     // 2. Render Chart.js with defense
     if (typeof Chart === 'undefined') {
@@ -3259,6 +3287,48 @@ function updatePeriodicPerformanceUI() {
     } catch (chartErr) {
         console.error('Chart initialization failed:', chartErr);
     }
+}
+
+function formatOptionalPercent(value) {
+    return value === null || typeof value === 'undefined' ? '-' : `${Number(value).toFixed(2)}%`;
+}
+
+function formatMarketIndex(value, changePct) {
+    if (value === null || typeof value === 'undefined') return '-';
+    const change = changePct === null || typeof changePct === 'undefined'
+        ? ''
+        : ` (${Number(changePct) > 0 ? '+' : ''}${Number(changePct).toFixed(2)}%)`;
+    return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}${change}`;
+}
+
+function renderStrategyValidation(items) {
+    const tbody = document.querySelector('#table-strategy-validation tbody');
+    if (!tbody) return;
+    if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="9">전략이 기록된 성과 데이터가 없습니다.</td></tr>';
+        return;
+    }
+    const statusLabels = {
+        effective: '유효', monitor: '관찰', review: '재검토', insufficient: '표본 부족'
+    };
+    tbody.innerHTML = items.map((item) => {
+        const pnl = Number(item.realized_pnl || 0);
+        const statusKind = item.validation_status === 'effective' ? 'buy'
+            : item.validation_status === 'review' ? 'sell' : 'hold';
+        return `
+            <tr>
+                <td><strong>${escapeHtml(item.strategy_name || item.strategy_id)}</strong><div class="time-muted">${escapeHtml(item.strategy_id || '')}</div></td>
+                <td>${Number(item.order_count || 0).toLocaleString()}건</td>
+                <td>${Number(item.closed_count || 0).toLocaleString()}건</td>
+                <td>${formatOptionalPercent(item.win_rate)}</td>
+                <td>${item.profit_factor === null || typeof item.profit_factor === 'undefined' ? '-' : Number(item.profit_factor).toFixed(2)}</td>
+                <td>${item.expectancy === null || typeof item.expectancy === 'undefined' ? '-' : formatCurrency(item.expectancy)}</td>
+                <td class="${pnl > 0 ? 'text-success' : pnl < 0 ? 'text-danger' : ''}">${formatCurrency(pnl)}</td>
+                <td>${formatCurrency(item.max_drawdown || 0)}</td>
+                <td>${pill(statusLabels[item.validation_status] || item.validation_status, statusKind)}<small class="strategy-validation-reason">${escapeHtml(item.validation_reason || '')}</small></td>
+            </tr>
+        `;
+    }).join('');
 }
 
 async function renderExecutionPlan() {

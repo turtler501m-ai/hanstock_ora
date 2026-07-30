@@ -61,7 +61,8 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
             {"ok": 1, "dry_run": 1, "reason": "sell", "symbol": "005930", "action": "sell", "qty": 5, "price": 77000, "ts": "2026-05-27 11:00:00"},
         ]
 
-        perf = _build_periodic_performance(trades)
+        with patch("src.dashboard.core._load_index_rows", return_value={}):
+            perf = _build_periodic_performance(trades)
         daily = perf["daily"]
         
         self.assertEqual(len(daily), 1)
@@ -123,9 +124,66 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
             },
         ]
 
-        perf = _build_periodic_performance(trades)
+        with patch("src.dashboard.core._load_index_rows", return_value={}):
+            perf = _build_periodic_performance(trades)
 
         self.assertEqual(perf["daily"][0]["realized_pnl"], -23700)
+
+    def test_periodic_performance_adds_strategy_validation_and_attribution(self):
+        trader.DRY_RUN = True
+        trades = []
+        for day in range(1, 7):
+            strategy_id = "alpha"
+            trades.extend([
+                {
+                    "ok": 1, "dry_run": 1, "strategy_id": strategy_id,
+                    "symbol": f"00000{day}", "name": f"종목{day}", "action": "buy",
+                    "qty": 1, "price": 100, "ts": f"2026-05-{day:02d} 10:00:00",
+                },
+                {
+                    "ok": 1, "dry_run": 1, "strategy_id": strategy_id,
+                    "symbol": f"00000{day}", "name": f"종목{day}", "action": "sell",
+                    "qty": 1, "price": 110, "ts": f"2026-05-{day:02d} 11:00:00",
+                },
+            ])
+
+        with patch("src.dashboard.core._load_index_rows", return_value={}):
+            perf = _build_periodic_performance(trades)
+
+        detail = perf["daily"][0]["details"][0]
+        self.assertEqual(detail["strategy_id"], "alpha")
+        self.assertEqual(detail["strategy_name"], "alpha")
+        validation = perf["strategy_validation"][0]
+        self.assertEqual(validation["closed_count"], 6)
+        self.assertEqual(validation["win_rate"], 100.0)
+        self.assertEqual(validation["validation_status"], "effective")
+
+    def test_periodic_performance_adds_daily_indices_and_volatility(self):
+        trader.DRY_RUN = True
+        trades = [{
+            "ok": 1, "dry_run": 1, "symbol": "005930", "action": "buy",
+            "qty": 1, "price": 70000, "ts": "2026-05-03 10:00:00",
+        }]
+        indices = {
+            "KOSPI": [
+                {"date": "2026-05-01", "close": 2500},
+                {"date": "2026-05-02", "close": 2525},
+                {"date": "2026-05-03", "close": 2500},
+            ],
+            "KOSDAQ": [
+                {"date": "2026-05-01", "close": 800},
+                {"date": "2026-05-02", "close": 808},
+                {"date": "2026-05-03", "close": 816},
+            ],
+        }
+
+        with patch("src.dashboard.core._load_index_rows", return_value=indices):
+            row = _build_periodic_performance(trades)["daily"][0]
+
+        self.assertEqual(row["kospi"], 2500.0)
+        self.assertEqual(row["kosdaq"], 816.0)
+        self.assertIsNotNone(row["kospi_volatility"])
+        self.assertIsNotNone(row["kosdaq_volatility"])
 
 
 if __name__ == "__main__":

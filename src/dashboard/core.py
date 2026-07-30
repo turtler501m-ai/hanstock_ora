@@ -3170,10 +3170,171 @@ def _period_bucket() -> dict:
     }
 
 
+def _strategy_label(strategy_id: str) -> str:
+    strategy_id = str(strategy_id or "").strip()
+    if not strategy_id or strategy_id == "unattributed":
+        return "전략 미기록"
+    try:
+        from src.db.strategy_repository import load_ai_strategies
+
+        strategy = next(
+            (item for item in load_ai_strategies() if str(item.get("id") or "") == strategy_id),
+            None,
+        )
+        if strategy:
+            return str(strategy.get("name") or strategy.get("title") or strategy_id)
+    except Exception:
+        pass
+    defaults = {
+        "seven_split": "7분할 매매",
+        "volatility_breakout": "변동성 돌파",
+        "rsi_limit_strategy": "RSI 지정가",
+        "plunge_bounce_strategy": "급락 반등",
+        "issue_sector_rotation_strategy": "이슈 섹터 순환",
+        "heikin_ashi_scalping_strategy": "하이킨아시 스캘핑",
+    }
+    return defaults.get(strategy_id, strategy_id)
+
+
+def _strategy_validation(strategy_stats: dict[str, dict]) -> list[dict]:
+    result = []
+    for strategy_id, stats in strategy_stats.items():
+        pnls = list(stats.pop("_pnls", []))
+        closed_count = len(pnls)
+        wins = [value for value in pnls if value > 0]
+        losses = [value for value in pnls if value < 0]
+        gross_profit = sum(wins)
+        gross_loss = abs(sum(losses))
+        win_rate = (len(wins) / closed_count * 100) if closed_count else None
+        profit_factor = (gross_profit / gross_loss) if gross_loss else (None if not gross_profit else gross_profit)
+        expectancy = (sum(pnls) / closed_count) if closed_count else None
+        equity = 0
+        peak = 0
+        max_drawdown = 0
+        for pnl in pnls:
+            equity += pnl
+            peak = max(peak, equity)
+            max_drawdown = max(max_drawdown, peak - equity)
+
+        if closed_count < 5:
+            status, reason = "insufficient", "청산 표본 5건 미만"
+        elif sum(pnls) > 0 and (win_rate or 0) >= 50 and (profit_factor or 0) >= 1.2:
+            status, reason = "effective", "누적손익 양수·승률 50% 이상·손익비 1.2 이상"
+        elif sum(pnls) <= 0 or (profit_factor is not None and profit_factor < 1):
+            status, reason = "review", "누적손익 또는 손익비가 기준 미달"
+        else:
+            status, reason = "monitor", "추가 표본과 안정성 확인 필요"
+
+        result.append({
+            **stats,
+            "strategy_id": strategy_id,
+            "strategy_name": _strategy_label(strategy_id),
+            "closed_count": closed_count,
+            "win_count": len(wins),
+            "loss_count": len(losses),
+            "win_rate": round(win_rate, 2) if win_rate is not None else None,
+            "profit_factor": round(profit_factor, 2) if profit_factor is not None else None,
+            "expectancy": round(expectancy, 0) if expectancy is not None else None,
+            "max_drawdown": round(max_drawdown, 0),
+            "validation_status": status,
+            "validation_reason": reason,
+        })
+    return sorted(result, key=lambda item: (-item["realized_pnl"], item["strategy_name"]))
+
+
+_INDEX_ROWS_CACHE: tuple[float, dict[str, list[dict]]] = (0.0, {})
+
+
+def _load_index_rows() -> dict[str, list[dict]]:
+    """Load benchmark closes from local charts first, then best-effort Yahoo data."""
+    global _INDEX_ROWS_CACHE
+    cached_at, cached_rows = _INDEX_ROWS_CACHE
+    if time.monotonic() - cached_at < 300:
+        return cached_rows
+    aliases = {
+        "KOSPI": ("^KS11", "KOSPI", "0001", "069500"),
+        "KOSDAQ": ("^KQ11", "KOSDAQ", "1001", "229200"),
+    }
+    series: dict[str, list[dict]] = {}
+    try:
+        from src.db.repository import connect_db
+
+        with connect_db() as conn:
+            conn.row_factory = sqlite3.Row
+            for name, symbols in aliases.items():
+                for symbol in symbols:
+                    rows = conn.execute(
+                        "SELECT date, close FROM daily_charts WHERE symbol=? AND close>0 "
+                        "ORDER BY date DESC LIMIT 90",
+                        (symbol,),
+                    ).fetchall()
+                    if rows:
+                        series[name] = [
+                            {"date": str(row["date"])[:10], "close": float(row["close"])}
+                            for row in reversed(rows)
+                        ]
+                        break
+    except Exception:
+        pass
+
+    missing = [name for name in aliases if name not in series]
+    if missing:
+        try:
+            from src.online_access import require_online_access
+            import yfinance as yf
+
+            require_online_access("성과 탭 시장지수 조회")
+            for name in missing:
+                ticker = aliases[name][0]
+                data = yf.download(
+                    ticker, period="6mo", interval="1d", auto_adjust=False,
+                    progress=False, threads=False, timeout=5,
+                )
+                if data is None or data.empty:
+                    continue
+                close = data["Close"]
+                if getattr(close, "ndim", 1) > 1:
+                    close = close.iloc[:, 0]
+                series[name] = [
+                    {"date": str(index)[:10], "close": float(value)}
+                    for index, value in close.dropna().items()
+                ]
+        except Exception as exc:
+            logger.info(f"Performance benchmark data unavailable: {exc}")
+    _INDEX_ROWS_CACHE = (time.monotonic(), series)
+    return series
+
+
+def _daily_market_context(index_rows: dict[str, list[dict]]) -> dict[str, dict]:
+    context: dict[str, dict] = {}
+    for name, rows in index_rows.items():
+        closes = [float(row["close"]) for row in rows]
+        for idx, row in enumerate(rows):
+            change_pct = None
+            if idx and closes[idx - 1] > 0:
+                change_pct = (closes[idx] / closes[idx - 1] - 1) * 100
+            returns = [
+                closes[pos] / closes[pos - 1] - 1
+                for pos in range(max(1, idx - 19), idx + 1)
+                if closes[pos - 1] > 0
+            ]
+            volatility = None
+            if len(returns) >= 2:
+                mean = sum(returns) / len(returns)
+                variance = sum((value - mean) ** 2 for value in returns) / (len(returns) - 1)
+                volatility = math.sqrt(variance) * math.sqrt(252) * 100
+            day = context.setdefault(row["date"], {})
+            day[name.lower()] = round(float(row["close"]), 2)
+            day[f"{name.lower()}_change_pct"] = round(change_pct, 2) if change_pct is not None else None
+            day[f"{name.lower()}_volatility"] = round(volatility, 2) if volatility is not None else None
+    return context
+
+
 def _build_periodic_performance(trades: list[dict]) -> dict:
     daily: dict[str, dict] = {}
     monthly: dict[str, dict] = {}
-    holdings: dict[str, dict] = {}
+    holdings: dict[tuple[str, str], dict] = {}
+    strategy_stats: dict[str, dict] = {}
 
     for trade in _account_trades(trades):
         ts = str(trade.get("ts") or "")
@@ -3184,6 +3345,8 @@ def _build_periodic_performance(trades: list[dict]) -> dict:
         month_key = ts[:7]
         action = str(trade.get("action") or "").lower()
         symbol = str(trade.get("symbol") or "")
+        strategy_id = str(trade.get("strategy_id") or "unattributed")
+        strategy_name = _strategy_label(strategy_id)
         qty = _to_int(trade.get("qty"))
         price = _to_int(trade.get("price"))
         amount = qty * price
@@ -3202,9 +3365,16 @@ def _build_periodic_performance(trades: list[dict]) -> dict:
                 bucket["sell_count"] += 1
                 bucket["sell_amount"] += amount
 
-        if symbol not in holdings:
-            holdings[symbol] = {"qty": 0, "avg_cost": 0.0}
-        holding = holdings[symbol]
+        holding_key = (strategy_id, symbol)
+        if holding_key not in holdings:
+            holdings[holding_key] = {"qty": 0, "avg_cost": 0.0}
+        holding = holdings[holding_key]
+        stats = strategy_stats.setdefault(strategy_id, {
+            "order_count": 0, "buy_count": 0, "sell_count": 0,
+            "realized_pnl": 0, "_pnls": [],
+        })
+        stats["order_count"] += 1
+        stats[f"{action}_count"] += 1
 
         if action == "buy":
             total_qty = holding["qty"] + qty
@@ -3224,6 +3394,8 @@ def _build_periodic_performance(trades: list[dict]) -> dict:
                 "realized_pnl_rate": 0.0,
                 "reason": trade.get("reason", ""),
                 "order_status": trade.get("order_status", ""),
+                "strategy_id": strategy_id,
+                "strategy_name": strategy_name,
             }
         else:
             sell_qty = min(qty, holding["qty"])
@@ -3234,6 +3406,9 @@ def _build_periodic_performance(trades: list[dict]) -> dict:
             month["realized_pnl"] += realized
             day["cost_of_sold"] += cost_of_shares_sold
             month["cost_of_sold"] += cost_of_shares_sold
+            stats["realized_pnl"] += realized
+            if sell_qty > 0:
+                stats["_pnls"].append(realized)
             
             holding["qty"] = max(0, holding["qty"] - sell_qty)
             if holding["qty"] <= 0:
@@ -3253,6 +3428,8 @@ def _build_periodic_performance(trades: list[dict]) -> dict:
                 else 0.0,
                 "reason": trade.get("reason", ""),
                 "order_status": trade.get("order_status", ""),
+                "strategy_id": strategy_id,
+                "strategy_name": strategy_name,
             }
 
         day["details"].append(detail)
@@ -3263,9 +3440,16 @@ def _build_periodic_performance(trades: list[dict]) -> dict:
             bucket["net_cashflow"] = bucket["sell_amount"] - bucket["buy_amount"]
             bucket["realized_pnl_rate"] = round((bucket["realized_pnl"] / bucket["cost_of_sold"] * 100), 2) if bucket["cost_of_sold"] > 0 else 0.0
 
+    market_context = _daily_market_context(_load_index_rows())
+    daily_rows = [
+        {"period": key, **value, **market_context.get(key, {})}
+        for key, value in sorted(daily.items())
+    ]
     return {
-        "daily": [{"period": key, **value} for key, value in sorted(daily.items())],
+        "daily": daily_rows,
         "monthly": [{"period": key, **value} for key, value in sorted(monthly.items())],
+        "strategy_validation": _strategy_validation(strategy_stats),
+        "market_data_available": bool(market_context),
     }
 
 

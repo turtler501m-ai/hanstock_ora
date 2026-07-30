@@ -44,6 +44,14 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("'/api/trades/local-cleanup?limit=200'", APP_JS)
         self.assertIn("`/api/trades/local/${tradeId}?confirm=true`", APP_JS)
 
+    def test_performance_tab_exposes_market_context_strategy_validation_and_sorting(self):
+        self.assertIn("코스피 변동성", INDEX_HTML)
+        self.assertIn("코스닥 변동성", INDEX_HTML)
+        self.assertIn('id="table-strategy-validation"', INDEX_HTML)
+        self.assertIn("strategy_name", APP_JS)
+        self.assertIn("sortable-header", APP_JS)
+        self.assertIn("data-sort-key", APP_JS)
+
     def test_scheduler_checklist_uses_persisted_schedule_registrations(self):
         scheduler_renderer = APP_JS.split(
             "async function renderSchedulerStrategyChecklist", 1
