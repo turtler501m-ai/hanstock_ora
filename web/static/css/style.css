@@ -1332,6 +1332,37 @@ tbody tr:hover {
     margin-top: 0.35rem;
 }
 
+.trade-sync-run-history {
+    display: grid;
+    gap: 0.45rem;
+    margin-top: 0.5rem;
+}
+
+.trade-sync-run-table-wrap {
+    max-height: 240px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+#table-trade-sync-runs {
+    min-width: 760px;
+    font-size: 0.82rem;
+}
+
+.trade-sync-run-button {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--primary);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.trade-sync-run-button:hover {
+    text-decoration: underline;
+}
+
 .trade-sync-result-details > summary {
     width: fit-content;
     color: var(--primary);

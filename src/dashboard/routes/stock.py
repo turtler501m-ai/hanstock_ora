@@ -2170,7 +2170,6 @@ def sync_trade_order_status(days: int = 30):
 def _remove_non_broker_trade_rows() -> dict:
     """Remove local-only rows that must not survive a broker-authoritative sync."""
     removable_statuses = (
-        "reconciled",
         "failed",
         "canceled",
         "rejected",
@@ -2241,13 +2240,30 @@ def _save_trade_sync_result(result: dict) -> None:
             "sync_items",
         )
     }
+    completed_at = trader.datetime.now(trader.KST).isoformat()
     payload.update({
-        "completed_at": trader.datetime.now(trader.KST).isoformat(),
+        "run_id": completed_at,
+        "completed_at": completed_at,
     })
     TRADE_SYNC_RESULT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    runs = []
+    if TRADE_SYNC_RESULT_PATH.exists():
+        try:
+            previous = json.loads(TRADE_SYNC_RESULT_PATH.read_text(encoding="utf-8"))
+            if isinstance(previous.get("runs"), list):
+                runs = [item for item in previous["runs"] if isinstance(item, dict)]
+            elif previous.get("completed_at"):
+                runs = [previous]
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            runs = []
+    runs.append(payload)
+    history_payload = {
+        "version": 2,
+        "runs": runs[-50:],
+    }
     temp_path = TRADE_SYNC_RESULT_PATH.with_suffix(".tmp")
     temp_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, default=str),
+        json.dumps(history_payload, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
     )
     temp_path.replace(TRADE_SYNC_RESULT_PATH)
@@ -2261,7 +2277,11 @@ def get_trade_sync_status():
         payload = json.loads(TRADE_SYNC_RESULT_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=500, detail=f"Failed to read trade sync status: {exc}") from exc
-    return {"available": True, **payload}
+    if isinstance(payload.get("runs"), list):
+        runs = [item for item in payload["runs"] if isinstance(item, dict)]
+        latest = runs[-1] if runs else {}
+        return {"available": bool(runs), **latest, "runs": list(reversed(runs))}
+    return {"available": True, **payload, "runs": [payload]}
 
 
 

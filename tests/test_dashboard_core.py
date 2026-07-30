@@ -1560,20 +1560,24 @@ class DashboardCoreTests(unittest.TestCase):
 
                 result = stock_routes._remove_non_broker_trade_rows()
 
-                self.assertEqual(result["removed_count"], 2)
+                self.assertEqual(result["removed_count"], 1)
                 with sqlite3.connect(dashboard.trader.config.trade_db_path) as conn:
                     conn.row_factory = sqlite3.Row
                     rows = conn.execute(
                         "SELECT symbol, broker_order_id, order_status FROM trades"
                     ).fetchall()
-                self.assertEqual(
-                    [dict(row) for row in rows],
-                    [{
+                self.assertEqual([dict(row) for row in rows], [
+                    {
+                        "symbol": "005930",
+                        "broker_order_id": "",
+                        "order_status": "reconciled",
+                    },
+                    {
                         "symbol": "000660",
                         "broker_order_id": "B123",
                         "order_status": "filled",
-                    }],
-                )
+                    },
+                ])
         finally:
             dashboard.trader.config.trade_db_path = original_db_path
 
@@ -1660,6 +1664,22 @@ class DashboardCoreTests(unittest.TestCase):
                 self.assertIn("completed_at", result)
                 self.assertNotIn("history_sync", result)
                 self.assertEqual(result["sync_items"][0]["symbol"], "005930")
+                self.assertEqual(len(result["runs"]), 1)
+
+                stock_routes._save_trade_sync_result({
+                    "ok": True,
+                    "synced_count": 0,
+                    "balance_synced_count": 0,
+                    "history_imported_count": 0,
+                    "history_updated_count": 0,
+                    "removed_mismatch_count": 0,
+                    "history_error": None,
+                    "order_status_error": None,
+                    "sync_items": [],
+                })
+                second = stock_routes.get_trade_sync_status()
+                self.assertEqual(len(second["runs"]), 2)
+                self.assertEqual(second["runs"][1]["sync_items"][0]["symbol"], "005930")
         finally:
             stock_routes.TRADE_SYNC_RESULT_PATH = original_path
 

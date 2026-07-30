@@ -2819,8 +2819,10 @@ function renderTradeSyncResult(result) {
     const time = document.getElementById('trade-sync-result-time');
     const error = document.getElementById('trade-sync-result-error');
     const details = document.getElementById('trade-sync-result-details');
+    const detailTitle = document.getElementById('trade-sync-detail-title');
     const count = document.getElementById('trade-sync-result-count');
     const tbody = document.querySelector('#table-trade-sync-items tbody');
+    const runsTbody = document.querySelector('#table-trade-sync-runs tbody');
     container.hidden = false;
     container.style.display = 'grid';
     if (summary) {
@@ -2838,10 +2840,18 @@ function renderTradeSyncResult(result) {
         error.textContent = errors.length ? `오류: ${errors.join(' / ')}` : '';
     }
 
-    const items = Array.isArray(result.sync_items) ? result.sync_items : [];
-    if (details) details.hidden = false;
-    if (count) count.textContent = `(${items.length.toLocaleString()}건)`;
-    if (tbody) {
+    const renderSyncItems = (run) => {
+        const items = Array.isArray(run.sync_items) ? run.sync_items : [];
+        if (details) details.hidden = false;
+        if (detailTitle) {
+            const completedAt = run.completed_at ? new Date(run.completed_at) : null;
+            const label = completedAt && !Number.isNaN(completedAt.getTime())
+                ? completedAt.toLocaleString('ko-KR')
+                : '선택한 동기화';
+            detailTitle.textContent = `${label} 전체 항목`;
+        }
+        if (count) count.textContent = `(${items.length.toLocaleString()}건)`;
+        if (!tbody) return;
         const typeLabels = {
             history: '체결 내역',
             order_status: '주문 상태',
@@ -2876,8 +2886,41 @@ function renderTradeSyncResult(result) {
                     <td><div class="reason-cell" title="${escapeHtml(item.message || '')}">${escapeHtml(item.message || '-')}</div></td>
                 </tr>
             `;
-        }).join('') : '<tr><td colspan="10">저장된 상세 동기화 항목이 없습니다.</td></tr>';
+        }).join('') : '<tr><td colspan="10">이 실행에 저장된 상세 동기화 항목이 없습니다.</td></tr>';
+    };
+
+    const runs = Array.isArray(result.runs) && result.runs.length ? result.runs : [result];
+    if (runsTbody) {
+        runsTbody.innerHTML = runs.map((run, index) => {
+            const completedAt = run.completed_at ? new Date(run.completed_at) : null;
+            const completedLabel = completedAt && !Number.isNaN(completedAt.getTime())
+                ? completedAt.toLocaleString('ko-KR')
+                : '-';
+            const itemCount = Array.isArray(run.sync_items) ? run.sync_items.length : 0;
+            const changed = Number(run.history_imported_count || 0) + Number(run.history_updated_count || 0);
+            return `
+                <tr>
+                    <td><button type="button" class="trade-sync-run-button" data-run-index="${index}">${escapeHtml(completedLabel)}</button></td>
+                    <td>${itemCount.toLocaleString()}건</td>
+                    <td>${changed.toLocaleString()}건</td>
+                    <td>${Number(run.balance_synced_count || 0).toLocaleString()}건</td>
+                    <td>${Number(run.removed_mismatch_count || 0).toLocaleString()}건</td>
+                    <td>${run.ok === false ? '<span class="text-danger">오류</span>' : '<span class="text-success">완료</span>'}</td>
+                </tr>
+            `;
+        }).join('');
+        runsTbody.querySelectorAll('.trade-sync-run-button').forEach((button) => {
+            button.addEventListener('click', () => {
+                const run = runs[Number(button.dataset.runIndex || 0)];
+                if (!run) return;
+                renderSyncItems(run);
+                if (details) details.open = true;
+                details?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            });
+        });
     }
+
+    renderSyncItems(runs[0] || result);
 }
 
 async function loadTradeSyncResult() {

@@ -632,8 +632,26 @@
                         <span id="trade-sync-result-summary">동기화 기록이 없습니다.</span>
                         <small id="trade-sync-result-time"></small>
                         <small id="trade-sync-result-error" class="text-danger" hidden></small>
+                        <div id="trade-sync-run-history" class="trade-sync-run-history">
+                            <strong>동기화 실행 이력</strong>
+                            <div class="table-responsive trade-sync-run-table-wrap">
+                                <table id="table-trade-sync-runs">
+                                    <thead>
+                                        <tr>
+                                            <th>실행 시각</th>
+                                            <th>조회 항목</th>
+                                            <th>신규/갱신</th>
+                                            <th>잔고 보정</th>
+                                            <th>불일치 정리</th>
+                                            <th>결과</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
                         <details id="trade-sync-result-details" class="trade-sync-result-details">
-                            <summary>동기화 전체 항목 보기 <span id="trade-sync-result-count"></span></summary>
+                            <summary><span id="trade-sync-detail-title">동기화 전체 항목 보기</span> <span id="trade-sync-result-count"></span></summary>
                             <div class="table-responsive trade-sync-table-wrap">
                                 <table id="table-trade-sync-items">
                                     <thead>
