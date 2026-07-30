@@ -24,30 +24,41 @@ class AiStrategyPresetTests(unittest.TestCase):
         selected = [item for item in strategies if item.get("selected")]
         self.assertTrue(result["ok"])
         self.assertEqual(result["preset"], "balanced")
-        self.assertEqual(len(selected), 1)
-        self.assertEqual(selected[0]["id"], result["strategy"]["id"])
-        self.assertEqual(selected[0]["status"], "approved")
-        self.assertEqual(selected[0]["provider"], "none")
-        self.assertNotIn("paper_trading_required_days", selected[0]["profile"]["risk"])
-        self.assertNotIn("backtest", selected[0]["profile"])
-        self.assertEqual(selected[0]["profile"]["risk"]["max_total_open_risk_pct"], 2.0)
-        self.assertEqual(selected[0]["profile"]["risk"]["max_strategy_exposure_pct"], 30.0)
-        self.assertTrue(selected[0]["profile"]["market_regime_filter"])
+        applied = next(
+            item for item in selected
+            if item["id"] == result["strategy"]["id"]
+        )
+        self.assertGreaterEqual(len(selected), 1)
+        self.assertEqual(applied["status"], "approved")
+        self.assertEqual(applied["provider"], "none")
+        self.assertNotIn("paper_trading_required_days", applied["profile"]["risk"])
+        self.assertNotIn("backtest", applied["profile"])
+        self.assertEqual(applied["profile"]["risk"]["max_total_open_risk_pct"], 2.0)
+        self.assertEqual(applied["profile"]["risk"]["max_strategy_exposure_pct"], 30.0)
+        self.assertTrue(applied["profile"]["market_regime_filter"])
 
     def test_unknown_hanstock_preset_is_rejected(self):
         with self.assertRaises(Exception):
             stock.apply_ai_strategy_preset("unknown")
 
     def test_applying_strategy_prepares_disabled_ai_schedule_slot(self):
-        strategy = {
-            "id": "approved_ai",
-            "selected": True,
-            "status": "approved",
-            "strategy_version": 1,
-        }
+        strategies = [
+            {
+                "id": "approved_ai_1",
+                "selected": True,
+                "status": "approved",
+                "strategy_version": 1,
+            },
+            {
+                "id": "approved_ai_2",
+                "selected": True,
+                "status": "approved",
+                "strategy_version": 2,
+            },
+        ]
         with patch(
             "src.db.repository.load_ai_strategies",
-            return_value=[dict(strategy)],
+            return_value=[dict(strategy) for strategy in strategies],
         ), patch(
             "src.db.repository.record_ai_strategy_event",
         ), patch(
@@ -59,6 +70,11 @@ class AiStrategyPresetTests(unittest.TestCase):
             result = stock.apply_selected_ai_strategies()
 
         self.assertTrue(result["ok"])
+        self.assertEqual(
+            result["applied_strategy_ids"],
+            ["approved_ai_1", "approved_ai_2"],
+        )
+        self.assertEqual(result["schedule_strategy_id"], "ai_stock_default_v1")
         save_schedule.assert_called_once_with(
             "ai_stock_default_v1",
             enabled=False,

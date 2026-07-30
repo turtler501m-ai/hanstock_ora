@@ -50,7 +50,7 @@ class AiStrategyLifecycleTests(unittest.TestCase):
         self.assertTrue(context["active_strategy"]["approval_gate"]["ok"])
         self.assertTrue(context["active_strategy"]["operation_status"]["ready"])
 
-    def test_selecting_strategy_is_exclusive(self):
+    def test_selecting_multiple_strategies_is_supported(self):
         self._create("First", selected=True)
         second = self._create("Second")
 
@@ -64,7 +64,18 @@ class AiStrategyLifecycleTests(unittest.TestCase):
             for item in repository.load_ai_strategies()
             if item.get("selected")
         ]
-        self.assertEqual(selected, [second["id"]])
+        self.assertEqual(set(selected), {"first", second["id"]})
+
+        dashboard.select_ai_strategy(
+            second["id"],
+            dashboard.SelectStrategyPayload(selected=False),
+        )
+        selected = [
+            item["id"]
+            for item in repository.load_ai_strategies()
+            if item.get("selected")
+        ]
+        self.assertEqual(selected, ["first"])
 
     def test_duplicate_strategy_name_is_rejected(self):
         self._create("Unique Name")

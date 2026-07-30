@@ -189,8 +189,6 @@ def create_ai_strategy_record(strategy: dict) -> dict:
         ).fetchone():
             conn.rollback()
             raise ValueError("strategy name already exists")
-        if item.get("selected"):
-            conn.execute("UPDATE ai_strategies SET selected=0")
         _insert_ai_strategy(conn, item)
         conn.execute(
             """
@@ -272,8 +270,6 @@ def set_ai_strategy_selected(strategy_id: str, selected: bool) -> dict:
         if not row:
             conn.rollback()
             raise ValueError("strategy not found")
-        if selected:
-            conn.execute("UPDATE ai_strategies SET selected=0")
         conn.execute(
             "UPDATE ai_strategies SET selected=? WHERE id=?",
             (1 if selected else 0, str(strategy_id)),

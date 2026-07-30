@@ -812,31 +812,32 @@ def _auto_validate_selected_strategy(strategy_id: str) -> dict:
 
 @router.post("/api/ai-strategies/apply-selected")
 def apply_selected_ai_strategies():
-    """Apply the single selected strategy for demo-account performance testing."""
+    """Apply every selected strategy to the shared AI schedule slot."""
     from src.db.repository import (
         load_ai_strategies,
         record_ai_strategy_event,
     )
 
-    selected = next(
-        (
-            item for item in load_ai_strategies()
+    selected = [
+        item for item in load_ai_strategies()
             if item.get("selected")
             and str(item.get("status") or "") not in {
                 "retired", "suspended", "review_required"
             }
-        ),
-        None,
-    )
+    ]
     if not selected:
         raise HTTPException(status_code=409, detail="Select at least one AI strategy")
-    strategy_id = str(selected["id"])
-    record_ai_strategy_event(
-        strategy_id,
-        "applied_for_demo_trading",
-        {"verification_mode": "demo_account_trading"},
-        selected.get("strategy_version"),
-    )
+    strategy_ids = [str(item["id"]) for item in selected]
+    for strategy in selected:
+        record_ai_strategy_event(
+            str(strategy["id"]),
+            "applied_to_shared_schedule",
+            {
+                "verification_mode": "demo_account_trading",
+                "applied_strategy_ids": strategy_ids,
+            },
+            strategy.get("strategy_version"),
+        )
     from src.db.repository import list_strategy_schedules, save_strategy_schedule
     from src.strategy_ids import AI_STOCK_SCHEDULE_ID
 
@@ -853,8 +854,9 @@ def apply_selected_ai_strategies():
         )
     return {
         "ok": True,
-        "applied_strategy_ids": [strategy_id],
+        "applied_strategy_ids": strategy_ids,
         "excluded_strategy_ids": [],
+        "schedule_strategy_id": AI_STOCK_SCHEDULE_ID,
         "verification_mode": "demo_account_trading",
     }
 

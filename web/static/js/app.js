@@ -1665,7 +1665,7 @@ async function renderAiStrategies() {
             const operationSummary = strategyOperationLabel(operation);
             tr.innerHTML = `
                 <td style="text-align:center;">
-                    <input type="radio" name="active-ai-strategy" class="strategy-select-checkbox" data-id="${escapeHtml(strategy.id)}" ${strategy.selected ? 'checked' : ''}>
+                    <input type="checkbox" class="strategy-select-checkbox" data-id="${escapeHtml(strategy.id)}" ${strategy.selected ? 'checked' : ''}>
                 </td>
                 <td>
                     <div class="symbol-name">${escapeHtml(strategyDisplayName(strategy))}</div>
@@ -1702,8 +1702,8 @@ async function renderAiStrategies() {
         tbody.querySelectorAll('.strategy-select-checkbox').forEach((input) => {
             input.addEventListener('change', async () => {
                 const id = input.getAttribute('data-id');
-                await postJson(`/api/ai-strategies/${id}/select`, { selected: true });
-                localStorage.setItem('hanstock_ai_ranker', id);
+                await postJson(`/api/ai-strategies/${id}/select`, { selected: input.checked });
+                if (input.checked) localStorage.setItem('hanstock_ai_ranker', id);
                 await Promise.all([syncStrategiesToDropdown(), renderStrategyContext(), renderAiStrategies()]);
                 await renderStrategyAudit(id);
                 setStatus(`AI 전략 ${input.checked ? '선택' : '해제'}: ${id}`, true);
