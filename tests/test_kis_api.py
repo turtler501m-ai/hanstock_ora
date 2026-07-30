@@ -74,7 +74,7 @@ class KIStockAPITests(unittest.TestCase):
             kis_api._KIS_MIN_INTERVAL = 0
             with patch.object(kis_api.config, "kistock_account", "1234567801"), \
                     patch.object(kis_api.config, "trading_env", "demo"), \
-                    patch.object(kis_api.HTTP, "get", return_value=response) as get:
+                    patch.object(kis_api.HISTORY_HTTP, "get", return_value=response) as get:
                 rows = api.get_trade_history("20260523", "20260524")
 
             self.assertEqual(rows, [{"odno": "D12345"}])
@@ -110,7 +110,7 @@ class KIStockAPITests(unittest.TestCase):
             kis_api._KIS_MIN_INTERVAL = 0
             with patch.object(kis_api.config, "kistock_account", "1234567801"), \
                     patch.object(kis_api.config, "trading_env", "demo"), \
-                    patch.object(kis_api.HTTP, "get", side_effect=[first, second]) as get:
+                    patch.object(kis_api.HISTORY_HTTP, "get", side_effect=[first, second]) as get:
                 rows = api.get_trade_history("20260501", "20260524")
 
             self.assertEqual(rows, [{"odno": "D12345"}, {"odno": "D67890"}])
@@ -141,7 +141,7 @@ class KIStockAPITests(unittest.TestCase):
             kis_api._KIS_MIN_INTERVAL = 0
             with patch.object(kis_api.config, "kistock_account", "1234567801"), \
                     patch.object(kis_api.config, "trading_env", "demo"), \
-                    patch.object(kis_api.HTTP, "get", return_value=response) as get:
+                    patch.object(kis_api.HISTORY_HTTP, "get", return_value=response) as get:
                 rows = api.get_trade_history("20260501", "20260524")
 
             self.assertEqual(rows, [{"odno": "D12345"}])

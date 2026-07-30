@@ -69,6 +69,13 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("result.status === 'running'", APP_JS)
         self.assertIn("백그라운드에서 시작했습니다", APP_JS)
 
+    def test_trade_sync_history_status_is_scoped_inside_run_renderer(self):
+        start = APP_JS.index("function renderTradeSyncResult")
+        end = APP_JS.index("async function loadTradeSyncResult", start)
+        body = APP_JS[start:end]
+        runs_map = body.index("runs.map")
+        self.assertGreater(body.index("const runStatus", runs_map), runs_map)
+
     def test_scheduler_checklist_uses_persisted_schedule_registrations(self):
         scheduler_renderer = APP_JS.split(
             "async function renderSchedulerStrategyChecklist", 1

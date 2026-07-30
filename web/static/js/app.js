@@ -2884,11 +2884,6 @@ function renderTradeSyncResult(result) {
         tbody.innerHTML = items.length ? items.map((item) => {
             const action = String(item.action || '').toLowerCase();
             const actionLabel = action === 'buy' ? '매수' : action === 'sell' ? '매도' : '-';
-            const runStatus = run.status === 'running'
-                ? '<span class="text-warning">진행 중</span>'
-                : (run.status === 'failed' || run.ok === false)
-                    ? '<span class="text-danger">실패</span>'
-                    : '<span class="text-success">완료</span>';
             return `
                 <tr>
                     <td>${escapeHtml(typeLabels[item.sync_type] || item.sync_type || '-')}</td>
@@ -2920,6 +2915,11 @@ function renderTradeSyncResult(result) {
                 run.sync_item_count ?? (Array.isArray(run.sync_items) ? run.sync_items.length : 0)
             );
             const changed = Number(run.history_imported_count || 0) + Number(run.history_updated_count || 0);
+            const runStatus = run.status === 'running'
+                ? '<span class="text-warning">진행 중</span>'
+                : (run.status === 'failed' || run.ok === false)
+                    ? '<span class="text-danger">실패</span>'
+                    : '<span class="text-success">완료</span>';
             return `
                 <tr>
                     <td><button type="button" class="trade-sync-run-button" data-run-index="${index}">${escapeHtml(completedLabel)}</button></td>

@@ -2573,8 +2573,14 @@ def _execute_trade_sync(*, days: int, run_id: str, started_at: str) -> dict:
 
 def _run_trade_sync_background(*, days: int, run_id: str, started_at: str) -> None:
     global _trade_sync_thread
+    logger.info(f"[TRADE_SYNC] started run_id={run_id} days={days}")
     try:
-        _execute_trade_sync(days=days, run_id=run_id, started_at=started_at)
+        result = _execute_trade_sync(days=days, run_id=run_id, started_at=started_at)
+        logger.info(
+            f"[TRADE_SYNC] finished run_id={run_id} "
+            f"status={result.get('status')} synced={result.get('synced_count', 0)} "
+            f"error={result.get('error') or '-'}"
+        )
     finally:
         with _trade_sync_lock:
             _trade_sync_thread = None

@@ -29,6 +29,11 @@ _adapter = HTTPAdapter(
 HTTP.mount("http://", _adapter)
 HTTP.mount("https://", _adapter)
 
+HISTORY_HTTP = requests.Session()
+HISTORY_HTTP.trust_env = False
+HISTORY_HTTP.mount("http://", HTTPAdapter(max_retries=0))
+HISTORY_HTTP.mount("https://", HTTPAdapter(max_retries=0))
+
 # KIS API 전역 스로틀: 초당 최대 1회 요청 강제 (EGW00201 방지)
 _KIS_THROTTLE_LOCK = threading.Lock()
 _KIS_LAST_CALL: float = 0.0
@@ -465,7 +470,7 @@ class KIStockAPI:
 
     @retry(
         retry=retry_if_not_exception_type(NON_RETRYABLE_KIS_ERRORS),
-        stop=stop_after_attempt(3),
+        stop=stop_after_attempt(1),
         wait=wait_exponential(multiplier=1, min=2, max=10),
     )
     def get_trade_history(self, start_date: str, end_date: str) -> list:
@@ -515,7 +520,12 @@ class KIStockAPI:
                         if tr_cont:
                             headers["tr_cont"] = tr_cont
                         try:
-                            r = HTTP.get(url, headers=headers, params=page_params, timeout=15)
+                            r = HISTORY_HTTP.get(
+                                url,
+                                headers=headers,
+                                params=page_params,
+                                timeout=8,
+                            )
                             data = self._response_json(r, "Trade history")
                         except Exception as page_exc:
                             if rows:
