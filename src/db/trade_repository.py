@@ -19,6 +19,81 @@ def connect_db():
 def init_db() -> None:
     _root.init_db()
 
+
+def init_trade_sync_runs() -> None:
+    """Create durable broker-sync run storage without depending on runtime files."""
+    with connect_db() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trade_sync_runs (
+                run_id TEXT PRIMARY KEY,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                status TEXT NOT NULL,
+                ok INTEGER NOT NULL DEFAULT 0,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+
+
+def save_trade_sync_run(run: dict) -> dict:
+    init_trade_sync_runs()
+    run_id = str(run.get("run_id") or "").strip()
+    if not run_id:
+        raise ValueError("trade sync run_id is required")
+    now = datetime.now(KST).isoformat()
+    payload = json.dumps(run, ensure_ascii=False, default=str)
+    with connect_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO trade_sync_runs (
+                run_id, started_at, completed_at, status, ok, payload, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(run_id) DO UPDATE SET
+                started_at=excluded.started_at,
+                completed_at=excluded.completed_at,
+                status=excluded.status,
+                ok=excluded.ok,
+                payload=excluded.payload,
+                updated_at=excluded.updated_at
+            """,
+            (
+                run_id,
+                str(run.get("started_at") or now),
+                run.get("completed_at"),
+                str(run.get("status") or ("completed" if run.get("ok") else "failed")),
+                1 if run.get("ok") else 0,
+                payload,
+                now,
+            ),
+        )
+        old_rows = conn.execute(
+            "SELECT run_id FROM trade_sync_runs ORDER BY started_at DESC LIMIT 1000 OFFSET 50"
+        ).fetchall()
+        for row in old_rows:
+            conn.execute("DELETE FROM trade_sync_runs WHERE run_id=?", (str(row[0]),))
+    return run
+
+
+def list_trade_sync_runs(limit: int = 50) -> list[dict]:
+    init_trade_sync_runs()
+    with connect_db() as conn:
+        rows = conn.execute(
+            "SELECT payload FROM trade_sync_runs ORDER BY started_at DESC LIMIT ?",
+            (max(1, min(int(limit or 50), 200)),),
+        ).fetchall()
+    runs = []
+    for row in rows:
+        try:
+            payload = json.loads(row[0])
+            if isinstance(payload, dict):
+                runs.append(payload)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return runs
+
 def _extract_broker_order_id(broker_result: dict | None) -> str:
     if not isinstance(broker_result, dict):
         return ""

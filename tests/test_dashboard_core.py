@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import asyncio
+import json
 import math
 import sqlite3
 from datetime import datetime
@@ -1632,13 +1633,15 @@ class DashboardCoreTests(unittest.TestCase):
             stock_routes._clear_balance_cache = original_clear_balance_cache
             stock_routes.trader.DRY_RUN = original_dry_run
 
-    def test_trade_sync_status_persists_compact_result(self):
+    def test_trade_sync_status_persists_runs_in_database(self):
         import src.dashboard.routes.stock as stock_routes
 
         original_path = stock_routes.TRADE_SYNC_RESULT_PATH
+        original_db_path = dashboard.trader.config.trade_db_path
         try:
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
                 stock_routes.TRADE_SYNC_RESULT_PATH = Path(tmpdir) / "last-sync.json"
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
                 stock_routes._save_trade_sync_result({
                     "ok": True,
                     "synced_count": 12,
@@ -1701,8 +1704,38 @@ class DashboardCoreTests(unittest.TestCase):
                 self.assertEqual(len(same_runs), 1)
                 self.assertEqual(same_runs[0]["status"], "failed")
                 self.assertEqual(same_runs[0]["error"], "broker timeout")
+                with sqlite3.connect(dashboard.trader.config.trade_db_path) as conn:
+                    count = conn.execute("SELECT COUNT(*) FROM trade_sync_runs").fetchone()[0]
+                self.assertEqual(count, 3)
         finally:
             stock_routes.TRADE_SYNC_RESULT_PATH = original_path
+            dashboard.trader.config.trade_db_path = original_db_path
+
+    def test_trade_sync_status_migrates_legacy_runtime_file_to_database(self):
+        import src.dashboard.routes.stock as stock_routes
+
+        original_path = stock_routes.TRADE_SYNC_RESULT_PATH
+        original_db_path = dashboard.trader.config.trade_db_path
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                stock_routes.TRADE_SYNC_RESULT_PATH = Path(tmpdir) / "last-sync.json"
+                stock_routes.TRADE_SYNC_RESULT_PATH.write_text(json.dumps({
+                    "ok": True,
+                    "completed_at": "2026-07-30T09:00:00+09:00",
+                    "sync_items": [{"symbol": "005930"}],
+                }), encoding="utf-8")
+
+                result = stock_routes.get_trade_sync_status()
+
+                self.assertEqual(len(result["runs"]), 1)
+                self.assertEqual(result["runs"][0]["sync_items"][0]["symbol"], "005930")
+                with sqlite3.connect(dashboard.trader.config.trade_db_path) as conn:
+                    count = conn.execute("SELECT COUNT(*) FROM trade_sync_runs").fetchone()[0]
+                self.assertEqual(count, 1)
+        finally:
+            stock_routes.TRADE_SYNC_RESULT_PATH = original_path
+            dashboard.trader.config.trade_db_path = original_db_path
 
     def test_sell_all_holdings_queues_market_sell_for_each_current_holding(self):
         original_db_path = dashboard.trader.config.trade_db_path

@@ -2226,6 +2226,8 @@ def _remove_non_broker_trade_rows() -> dict:
 
 
 def _save_trade_sync_result(result: dict) -> None:
+    from src.db.trade_repository import save_trade_sync_run
+
     payload = {
         key: result.get(key)
         for key in (
@@ -2253,50 +2255,41 @@ def _save_trade_sync_result(result: dict) -> None:
         "started_at": result.get("started_at") or now,
         "completed_at": completed_at,
     })
-    TRADE_SYNC_RESULT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    runs = []
-    if TRADE_SYNC_RESULT_PATH.exists():
-        try:
-            previous = json.loads(TRADE_SYNC_RESULT_PATH.read_text(encoding="utf-8"))
-            if isinstance(previous.get("runs"), list):
-                runs = [item for item in previous["runs"] if isinstance(item, dict)]
-            elif previous.get("completed_at"):
-                runs = [previous]
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            runs = []
-    existing_index = next(
-        (index for index, item in enumerate(runs) if str(item.get("run_id") or "") == run_id),
-        None,
-    )
-    if existing_index is None:
-        runs.append(payload)
-    else:
-        runs[existing_index] = {**runs[existing_index], **payload}
-    history_payload = {
-        "version": 2,
-        "runs": runs[-50:],
-    }
-    temp_path = TRADE_SYNC_RESULT_PATH.with_suffix(".tmp")
-    temp_path.write_text(
-        json.dumps(history_payload, ensure_ascii=False, indent=2, default=str),
-        encoding="utf-8",
-    )
-    temp_path.replace(TRADE_SYNC_RESULT_PATH)
+    save_trade_sync_run(payload)
+
+
+def _migrate_trade_sync_file_to_db() -> None:
+    """Import pre-DB runtime history once for backward compatibility."""
+    from src.db.trade_repository import list_trade_sync_runs, save_trade_sync_run
+
+    if list_trade_sync_runs(limit=1) or not TRADE_SYNC_RESULT_PATH.exists():
+        return
+    try:
+        previous = json.loads(TRADE_SYNC_RESULT_PATH.read_text(encoding="utf-8"))
+        file_runs = previous.get("runs") if isinstance(previous.get("runs"), list) else [previous]
+        for index, item in enumerate(file_runs):
+            if not isinstance(item, dict) or not item.get("completed_at"):
+                continue
+            completed_at = str(item["completed_at"])
+            save_trade_sync_run({
+                **item,
+                "run_id": str(item.get("run_id") or f"legacy-{completed_at}-{index}"),
+                "started_at": str(item.get("started_at") or completed_at),
+                "status": str(item.get("status") or ("completed" if item.get("ok") else "failed")),
+            })
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        logger.warning(f"Failed to migrate trade sync runtime history: {exc}")
 
 
 @router.get("/api/trades/sync/status")
 def get_trade_sync_status():
-    if not TRADE_SYNC_RESULT_PATH.exists():
-        return {"ok": True, "available": False}
-    try:
-        payload = json.loads(TRADE_SYNC_RESULT_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to read trade sync status: {exc}") from exc
-    if isinstance(payload.get("runs"), list):
-        runs = [item for item in payload["runs"] if isinstance(item, dict)]
-        latest = runs[-1] if runs else {}
-        return {"available": bool(runs), **latest, "runs": list(reversed(runs))}
-    return {"available": True, **payload, "runs": [payload]}
+    from src.db.trade_repository import list_trade_sync_runs
+
+    _migrate_trade_sync_file_to_db()
+    runs = list_trade_sync_runs(limit=50)
+    if not runs:
+        return {"ok": True, "available": False, "runs": []}
+    return {"available": True, **runs[0], "runs": runs}
 
 
 
