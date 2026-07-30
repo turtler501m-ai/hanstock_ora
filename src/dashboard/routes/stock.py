@@ -2178,6 +2178,21 @@ def _remove_non_broker_trade_rows() -> dict:
     )
     placeholders = ",".join("?" for _ in removable_statuses)
     with trader.connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            f"""
+            SELECT id, ts, symbol, name, action, qty, price, order_status, response_msg
+            FROM trades
+            WHERE COALESCE(env, ?) = ?
+              AND COALESCE(broker_order_id, '') = ''
+              AND (
+                    COALESCE(order_status, '') IN ({placeholders})
+                    OR COALESCE(ok, 0) = 0
+                  )
+            ORDER BY ts ASC
+            """,
+            (trader.TRADING_ENV, trader.TRADING_ENV, *removable_statuses),
+        ).fetchall()
         cursor = conn.execute(
             f"""
             DELETE FROM trades
@@ -2199,6 +2214,15 @@ def _remove_non_broker_trade_rows() -> dict:
         "ok": True,
         "removed_count": removed_count,
         "scope": "local rows without broker order id",
+        "items": [
+            {
+                **dict(row),
+                "sync_type": "cleanup",
+                "sync_result": "removed",
+                "message": row["response_msg"] or "증권사 주문번호가 없는 불일치 기록 정리",
+            }
+            for row in rows
+        ],
     }
 
 
@@ -2214,6 +2238,7 @@ def _save_trade_sync_result(result: dict) -> None:
             "removed_mismatch_count",
             "history_error",
             "order_status_error",
+            "sync_items",
         )
     }
     payload.update({
@@ -2318,6 +2343,7 @@ def sync_trades(days: int = 90):
                 db_holdings[sym] = max(0, db_holdings[sym] - qty)
                 
         synced_count = 0
+        balance_sync_items = []
         
         # 1. Sync missing buys (broker has more)
         for sym, ch in current_holdings.items():
@@ -2344,6 +2370,19 @@ def sync_trades(days: int = 90):
                     filled_price=price,
                 )
                 synced_count += 1
+                balance_sync_items.append({
+                    "sync_type": "balance",
+                    "sync_result": "reconciled",
+                    "ts": trader.datetime.now(trader.KST).strftime("%Y-%m-%d %H:%M:%S"),
+                    "symbol": sym,
+                    "name": ch["name"],
+                    "action": action,
+                    "qty": abs(diff),
+                    "price": price,
+                    "broker_order_id": "",
+                    "order_status": "reconciled",
+                    "message": f"증권사 잔고 {broker_qty}주 / 기록 잔고 {db_qty}주 차이 보정",
+                })
                 
         # Calculate db average costs to use for selling missing items without affecting PnL
         db_costs = {}
@@ -2381,11 +2420,42 @@ def sync_trades(days: int = 90):
                     filled_price=avg_cost,
                 )
                 synced_count += 1
+                balance_sync_items.append({
+                    "sync_type": "balance",
+                    "sync_result": "reconciled",
+                    "ts": trader.datetime.now(trader.KST).strftime("%Y-%m-%d %H:%M:%S"),
+                    "symbol": sym,
+                    "name": names.get(sym, sym),
+                    "action": "sell",
+                    "qty": db_qty,
+                    "price": avg_cost,
+                    "broker_order_id": "",
+                    "order_status": "reconciled",
+                    "message": "증권사에 없는 로컬 보유수량 전량 보정",
+                })
                 
         imported_count = _to_int(history_sync.get("imported_count")) if history_sync else 0
         updated_count = _to_int(history_sync.get("updated_count")) if history_sync else 0
         # 동기화로 보유/거래가 바뀌었으니 잔고·파생 보유탭 스냅샷을 무효화해 현행화한다.
         _clear_balance_cache()
+        history_items = list((history_sync or {}).get("items") or [])
+        order_status_items = [
+            {
+                "sync_type": "order_status",
+                "sync_result": "updated" if item.get("balance_confirmed", True) else "checked",
+                "ts": "",
+                "symbol": item.get("symbol", ""),
+                "name": item.get("name", ""),
+                "action": item.get("action", ""),
+                "qty": item.get("filled_qty", 0),
+                "price": item.get("filled_price", 0),
+                "broker_order_id": item.get("broker_order_id", ""),
+                "order_status": item.get("order_status", ""),
+                "message": "주문 상태 확인",
+            }
+            for item in ((order_status_sync or {}).get("orders") or [])
+        ]
+        sync_items = history_items + order_status_items + balance_sync_items + list(cleanup.get("items") or [])
         response = {
             "ok": True,
             "synced_count": synced_count + imported_count,
@@ -2398,6 +2468,7 @@ def sync_trades(days: int = 90):
             "order_status_error": order_status_error,
             "removed_mismatch_count": cleanup["removed_count"],
             "cleanup": cleanup,
+            "sync_items": sync_items,
         }
         _save_trade_sync_result(response)
         return response

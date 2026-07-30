@@ -2818,6 +2818,9 @@ function renderTradeSyncResult(result) {
     const summary = document.getElementById('trade-sync-result-summary');
     const time = document.getElementById('trade-sync-result-time');
     const error = document.getElementById('trade-sync-result-error');
+    const details = document.getElementById('trade-sync-result-details');
+    const count = document.getElementById('trade-sync-result-count');
+    const tbody = document.querySelector('#table-trade-sync-items tbody');
     container.hidden = false;
     container.style.display = 'grid';
     if (summary) {
@@ -2833,6 +2836,47 @@ function renderTradeSyncResult(result) {
     if (error) {
         error.hidden = errors.length === 0;
         error.textContent = errors.length ? `오류: ${errors.join(' / ')}` : '';
+    }
+
+    const items = Array.isArray(result.sync_items) ? result.sync_items : [];
+    if (details) details.hidden = items.length === 0;
+    if (count) count.textContent = items.length ? `(${items.length.toLocaleString()}건)` : '';
+    if (tbody) {
+        const typeLabels = {
+            history: '체결 내역',
+            order_status: '주문 상태',
+            balance: '잔고 보정',
+            cleanup: '불일치 정리'
+        };
+        const resultLabels = {
+            imported: '신규 추가',
+            updated: '상태 갱신',
+            skipped: '기존 항목',
+            reconciled: '잔고 보정',
+            removed: '삭제',
+            checked: '확인'
+        };
+        tbody.innerHTML = items.length ? items.map((item) => {
+            const action = String(item.action || '').toLowerCase();
+            const actionLabel = action === 'buy' ? '매수' : action === 'sell' ? '매도' : '-';
+            return `
+                <tr>
+                    <td>${escapeHtml(typeLabels[item.sync_type] || item.sync_type || '-')}</td>
+                    <td>${escapeHtml(resultLabels[item.sync_result] || item.sync_result || '-')}</td>
+                    <td>${escapeHtml(item.ts || '-')}</td>
+                    <td>
+                        <strong>${escapeHtml(item.name || item.symbol || '-')}</strong>
+                        ${item.symbol ? `<div class="time-muted">${escapeHtml(item.symbol)}</div>` : ''}
+                    </td>
+                    <td>${escapeHtml(actionLabel)}</td>
+                    <td>${Number(item.qty || 0).toLocaleString()}</td>
+                    <td>${Number(item.price || 0) > 0 ? formatCurrency(item.price) : '-'}</td>
+                    <td>${escapeHtml(item.broker_order_id || '-')}</td>
+                    <td>${escapeHtml(orderStatusLabel(item.order_status) || '-')}</td>
+                    <td><div class="reason-cell" title="${escapeHtml(item.message || '')}">${escapeHtml(item.message || '-')}</div></td>
+                </tr>
+            `;
+        }).join('') : '<tr><td colspan="10">저장된 상세 동기화 항목이 없습니다.</td></tr>';
     }
 }
 

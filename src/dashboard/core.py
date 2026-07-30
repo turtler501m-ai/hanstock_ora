@@ -3470,16 +3470,32 @@ def _sync_filled_trades_from_history(
     imported_count = 0
     skipped_count = 0
     updated_count = 0
+    items = []
 
     with trader.connect_db() as conn:
         for row in history:
             trade = _history_row_to_trade(row)
             if not trade:
                 skipped_count += 1
+                items.append({
+                    "sync_type": "history",
+                    "sync_result": "skipped",
+                    "ts": _history_timestamp(row),
+                    "symbol": _history_symbol(row),
+                    "name": _history_name(row),
+                    "action": _history_action(row),
+                    "qty": _history_fill_qty(row),
+                    "price": _history_fill_price(row),
+                    "broker_order_id": _broker_order_id_from_history(row),
+                    "order_status": "unrecognized",
+                    "message": "체결 거래로 해석할 수 없어 제외",
+                })
                 continue
 
             key = _history_trade_key(trade)
             if key in existing:
+                item_result = "skipped"
+                item_message = "이미 저장된 체결 기록"
                 if trade["broker_order_id"]:
                     cursor = conn.execute(
                         """
@@ -3508,6 +3524,8 @@ def _sync_filled_trades_from_history(
                     )
                     updated_count += int(cursor.rowcount)
                     if cursor.rowcount:
+                        item_result = "updated"
+                        item_message = "기존 거래의 체결 상태 갱신"
                         logger.info(
                             "[TRADE_IMPORT_UPDATE] "
                             f"symbol={trade['symbol']} action={trade['action']} "
@@ -3515,6 +3533,19 @@ def _sync_filled_trades_from_history(
                             f"filled_qty={trade['filled_qty']} filled_price={trade['filled_price']} "
                             f"broker_order_id={trade['broker_order_id'] or '-'}"
                         )
+                items.append({
+                    "sync_type": "history",
+                    "sync_result": item_result,
+                    "ts": trade["ts"],
+                    "symbol": trade["symbol"],
+                    "name": trade["name"],
+                    "action": trade["action"],
+                    "qty": trade["filled_qty"] or trade["qty"],
+                    "price": trade["filled_price"] or trade["price"],
+                    "broker_order_id": trade["broker_order_id"],
+                    "order_status": trade["order_status"],
+                    "message": item_message,
+                })
                 skipped_count += 1
                 continue
 
@@ -3555,6 +3586,19 @@ def _sync_filled_trades_from_history(
             )
             existing.add(key)
             imported_count += 1
+            items.append({
+                "sync_type": "history",
+                "sync_result": "imported",
+                "ts": trade["ts"],
+                "symbol": trade["symbol"],
+                "name": trade["name"],
+                "action": trade["action"],
+                "qty": trade["filled_qty"] or trade["qty"],
+                "price": trade["filled_price"] or trade["price"],
+                "broker_order_id": trade["broker_order_id"],
+                "order_status": trade["order_status"],
+                "message": "증권사 체결 기록 신규 추가",
+            })
 
     return {
         "ok": True,
@@ -3564,6 +3608,7 @@ def _sync_filled_trades_from_history(
         "imported_count": imported_count,
         "updated_count": updated_count,
         "skipped_count": skipped_count,
+        "items": items,
     }
 
 
@@ -3662,6 +3707,9 @@ def _sync_order_status_from_history(
         )
         orders.append({
             "broker_order_id": order_id,
+            "symbol": trade.get("symbol", ""),
+            "name": trade.get("name", ""),
+            "action": trade.get("action", ""),
             "order_status": order_status,
             "filled_qty": filled_qty,
             "filled_price": filled_price,
@@ -3759,6 +3807,9 @@ def _sync_order_status_from_balance(
                 )
                 orders.append({
                     "broker_order_id": order_id,
+                    "symbol": symbol,
+                    "name": trade.get("name", ""),
+                    "action": action,
                     "order_status": order_status,
                     "filled_qty": inferred_filled_qty,
                     "filled_price": current_price if inferred_filled_qty > 0 else 0,
@@ -3768,6 +3819,9 @@ def _sync_order_status_from_balance(
                 continue
             orders.append({
                 "broker_order_id": order_id,
+                "symbol": symbol,
+                "name": trade.get("name", ""),
+                "action": action,
                 "order_status": trade.get("order_status") or "submitted",
                 "balance_confirmed": False,
             })
@@ -3790,6 +3844,9 @@ def _sync_order_status_from_balance(
         )
         orders.append({
             "broker_order_id": order_id,
+            "symbol": symbol,
+            "name": trade.get("name", ""),
+            "action": action,
             "order_status": "filled",
             "filled_qty": requested_qty,
             "filled_price": current_price,

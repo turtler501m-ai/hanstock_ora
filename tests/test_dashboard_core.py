@@ -1465,6 +1465,9 @@ class DashboardCoreTests(unittest.TestCase):
 
                 self.assertEqual(result["history_count"], 1)
                 self.assertEqual(result["imported_count"], 1)
+                self.assertEqual(len(result["items"]), 1)
+                self.assertEqual(result["items"][0]["sync_result"], "imported")
+                self.assertEqual(result["items"][0]["broker_order_id"], "H12345")
                 self.assertNotEqual(api.window[0], api.window[1])
                 with sqlite3.connect(db_path) as conn:
                     conn.row_factory = sqlite3.Row
@@ -1642,6 +1645,11 @@ class DashboardCoreTests(unittest.TestCase):
                     "history_error": None,
                     "order_status_error": None,
                     "history_sync": {"orders": [{"large": "payload"}]},
+                    "sync_items": [{
+                        "sync_type": "history",
+                        "sync_result": "imported",
+                        "symbol": "005930",
+                    }],
                 })
 
                 result = stock_routes.get_trade_sync_status()
@@ -1651,6 +1659,7 @@ class DashboardCoreTests(unittest.TestCase):
                 self.assertEqual(result["removed_mismatch_count"], 13)
                 self.assertIn("completed_at", result)
                 self.assertNotIn("history_sync", result)
+                self.assertEqual(result["sync_items"][0]["symbol"], "005930")
         finally:
             stock_routes.TRADE_SYNC_RESULT_PATH = original_path
 

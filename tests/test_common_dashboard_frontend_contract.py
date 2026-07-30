@@ -52,6 +52,11 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("sortable-header", APP_JS)
         self.assertIn("data-sort-key", APP_JS)
 
+    def test_trade_sync_result_lists_every_processed_item(self):
+        self.assertIn('id="table-trade-sync-items"', INDEX_HTML)
+        self.assertIn("result.sync_items", APP_JS)
+        self.assertIn("동기화 전체 항목 보기", INDEX_HTML)
+
     def test_scheduler_checklist_uses_persisted_schedule_registrations(self):
         scheduler_renderer = APP_JS.split(
             "async function renderSchedulerStrategyChecklist", 1

@@ -632,6 +632,28 @@
                         <span id="trade-sync-result-summary">동기화 기록이 없습니다.</span>
                         <small id="trade-sync-result-time"></small>
                         <small id="trade-sync-result-error" class="text-danger" hidden></small>
+                        <details id="trade-sync-result-details" class="trade-sync-result-details">
+                            <summary>동기화 전체 항목 보기 <span id="trade-sync-result-count"></span></summary>
+                            <div class="table-responsive trade-sync-table-wrap">
+                                <table id="table-trade-sync-items">
+                                    <thead>
+                                        <tr>
+                                            <th>처리 구분</th>
+                                            <th>결과</th>
+                                            <th>일시</th>
+                                            <th>종목</th>
+                                            <th>매수/매도</th>
+                                            <th>수량</th>
+                                            <th>가격</th>
+                                            <th>주문번호</th>
+                                            <th>주문 상태</th>
+                                            <th>설명</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </details>
                     </div>
 
                     <div class="performance-summary">
