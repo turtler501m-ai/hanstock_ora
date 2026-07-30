@@ -129,21 +129,42 @@ class SchedulerApiTests(unittest.TestCase):
     )
     @patch(
         "src.db.repository.load_ai_strategies",
-        return_value=[{
-            "id": "easy_aggressive_live",
-            "model": "none",
-            "name": "쉬운 공격형 전략",
-            "selected": True,
-            "status": "approved",
-        }],
+        return_value=[
+            {
+                "id": "easy_aggressive_live",
+                "model": "none",
+                "name": "쉬운 공격형 전략",
+                "selected": True,
+                "status": "approved",
+            },
+            {
+                "id": "easy_balanced_live",
+                "model": "none",
+                "name": "쉬운 균형형 전략",
+                "selected": True,
+                "status": "approved",
+            },
+        ],
     )
     def test_scheduler_status_names_ai_slot_after_applied_strategy(
         self, mock_load, mock_schedules, mock_universe
     ):
         status = get_scheduler_status()
 
-        schedule = status["strategy_dispatch"]["schedules"][0]
-        self.assertEqual(schedule["display_name"], "AI 적용: 쉬운 공격형 전략")
+        schedules = status["strategy_dispatch"]["schedules"]
+        self.assertEqual(
+            [schedule["strategy_id"] for schedule in schedules],
+            ["easy_aggressive_live", "easy_balanced_live"],
+        )
+        self.assertEqual(
+            [schedule["display_name"] for schedule in schedules],
+            ["쉬운 공격형 전략", "쉬운 균형형 전략"],
+        )
+        self.assertTrue(all(schedule["shared_schedule"] for schedule in schedules))
+        self.assertTrue(all(
+            schedule["schedule_strategy_id"] == "ai_stock_default_v1"
+            for schedule in schedules
+        ))
 
     def test_get_scheduler_status_merges_last_30_days_scheduler_results(self):
         from datetime import datetime, timedelta

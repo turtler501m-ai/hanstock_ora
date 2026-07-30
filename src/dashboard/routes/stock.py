@@ -2946,6 +2946,7 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
             
     active_strategy_id = "seven_split"
     strategy_name_by_id = {}
+    applied_strategies = []
     active_strategy_name = "기본 룰베이스 (Seven Split)"
     try:
         from src.db.repository import load_ai_strategies
@@ -2960,12 +2961,16 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
             INDEPENDENT_STOCK_SCHEDULE_IDS,
         )
 
-        applied_names = [
-            _strategy_display_name(strategy.get("id"), strategy.get("name"))
+        applied_strategies = [
+            strategy
             for strategy in strategies
             if strategy.get("selected")
             and str(strategy.get("status") or "") == "approved"
             and str(strategy.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
+        ]
+        applied_names = [
+            _strategy_display_name(strategy.get("id"), strategy.get("name"))
+            for strategy in applied_strategies
         ]
         if applied_names:
             strategy_name_by_id[AI_STOCK_SCHEDULE_ID] = (
@@ -3021,6 +3026,23 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
         total_universe_count = 0
         for schedule in schedules:
             sid = schedule.get("strategy_id")
+            if str(sid or "") == AI_STOCK_SCHEDULE_ID and applied_strategies:
+                for strategy in applied_strategies:
+                    applied_id = str(strategy.get("id") or "")
+                    universe_count = len(load_strategy_universe(applied_id))
+                    total_universe_count += universe_count
+                    schedule_items.append({
+                        **schedule,
+                        "strategy_id": applied_id,
+                        "schedule_strategy_id": AI_STOCK_SCHEDULE_ID,
+                        "shared_schedule": True,
+                        **_schedule_display_payload(
+                            schedule,
+                            _strategy_display_name(applied_id, strategy.get("name")),
+                        ),
+                        "universe_count": universe_count,
+                    })
+                continue
             universe_count = len(load_strategy_universe(sid)) if sid else 0
             total_universe_count += universe_count
             display_name = strategy_name_by_id.get(str(sid or "")) or _strategy_display_name(sid)
