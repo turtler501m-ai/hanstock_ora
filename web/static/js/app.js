@@ -2807,6 +2807,19 @@ window.routeToTab = function(tabName) {
 };
 
 
+let tradeSyncPollInterval = null;
+let tradeSyncLastCompletedRunId = null;
+
+function updateTradeSyncButton(result) {
+    const button = document.getElementById('btn-sync-trades');
+    if (!button || !result) return;
+    const running = result.status === 'running';
+    button.disabled = running;
+    button.textContent = running ? '동기화 진행 중…' : '증권사 기록 동기화';
+    button.style.backgroundColor = running ? '#f59e0b' : '';
+    button.style.color = running ? 'white' : '';
+}
+
 function renderTradeSyncResult(result) {
     const container = document.getElementById('trade-sync-last-result');
     if (!container || !result || result.available === false) return;
@@ -2825,6 +2838,7 @@ function renderTradeSyncResult(result) {
     const runsTbody = document.querySelector('#table-trade-sync-runs tbody');
     container.hidden = false;
     container.style.display = 'grid';
+    updateTradeSyncButton(result);
     if (summary) {
         summary.textContent = `추가 ${added}건 · 불일치 정리 ${removed}건 · 체결 추가 ${imported}건 · 상태 갱신 ${updated}건`;
     }
@@ -2946,9 +2960,40 @@ async function loadTradeSyncResult() {
     try {
         const result = await fetchJson('/api/trades/sync/status', 10000);
         renderTradeSyncResult(result);
+        if (result.status === 'running') startTradeSyncPolling();
+        return result;
     } catch (_) {
         // The performance data itself remains usable when no saved sync result exists.
+        return null;
     }
+}
+
+function startTradeSyncPolling() {
+    if (tradeSyncPollInterval) return;
+    const poll = async () => {
+        const result = await loadTradeSyncResult();
+        if (!result || result.status === 'running') return;
+        clearInterval(tradeSyncPollInterval);
+        tradeSyncPollInterval = null;
+        updateTradeSyncButton(result);
+        if (result.run_id && result.run_id !== tradeSyncLastCompletedRunId) {
+            tradeSyncLastCompletedRunId = result.run_id;
+            await Promise.all([
+                renderBalance(),
+                renderPeriodicPerformance(),
+                renderExecutionPlan(),
+            ]);
+            const removed = Number(result.removed_mismatch_count || 0);
+            setStatus(
+                result.status === 'completed'
+                    ? `증권사 기록 동기화 완료 (추가 ${Number(result.synced_count || 0)}건, 불일치 정리 ${removed}건)`
+                    : `증권사 기록 동기화 실패: ${result.error || '알 수 없는 오류'}`,
+                result.status === 'completed'
+            );
+        }
+    };
+    tradeSyncPollInterval = setInterval(poll, 3000);
+    poll();
 }
 
 async function renderTrades() {
@@ -3794,30 +3839,9 @@ document.addEventListener('DOMContentLoaded', () => {
             btnSyncTrades.style.color = 'white';
             try {
                 const result = await postJson('/api/trades/sync', {});
-                const removedCount = Number(result.removed_mismatch_count || 0);
-                setStatus(`증권사 기록 동기화 완료 (추가 ${result.synced_count}건, 불일치 정리 ${removedCount}건)`, true);
                 renderTradeSyncResult(result);
-                // 동기화 후 보유 관련 탭들을 함께 현행화한다.
-                await Promise.all([
-                    renderTrades(),
-                    renderBalance(),
-                    renderPeriodicPerformance(),
-                    renderExecutionPlan(),
-                ]);
-                
-                btnSyncTrades.textContent = (result.synced_count > 0 || removedCount > 0)
-                    ? `동기화 완료 (+${result.synced_count}/-${removedCount})`
-                    : '동기화 완료 ✔️';
-                btnSyncTrades.style.backgroundColor = '#10b981'; // success green
-                btnSyncTrades.style.color = 'white';
-                
-                setTimeout(() => {
-                    btnSyncTrades.disabled = false;
-                    btnSyncTrades.textContent = '증권사 기록 동기화';
-                    btnSyncTrades.style.backgroundColor = '';
-                    btnSyncTrades.style.color = '';
-                }, 3000);
-                
+                setStatus('증권사 기록 동기화를 백그라운드에서 시작했습니다.', true);
+                startTradeSyncPolling();
             } catch (err) {
                 setStatus(`동기화 실패: ${err.message}`);
                 btnSyncTrades.textContent = '동기화 실패';

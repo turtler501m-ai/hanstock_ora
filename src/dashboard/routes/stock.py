@@ -21,6 +21,8 @@ TRADE_SYNC_RESULT_PATH = Path(".runtime/trade_sync_last_result.json")
 APPROVAL_BATCH_RESULT_PATH = Path(".runtime/approval_batch_last_result.json")
 _approval_batch_lock = threading.Lock()
 _approval_batch_state: dict = {}
+_trade_sync_lock = threading.Lock()
+_trade_sync_thread: threading.Thread | None = None
 
 class NewStrategyPayload(BaseModel):
     name: str = Field(..., min_length=1)
@@ -2289,6 +2291,19 @@ def get_trade_sync_status():
     runs = list_trade_sync_runs(limit=50)
     if not runs:
         return {"ok": True, "available": False, "runs": []}
+    if runs[0].get("status") == "running":
+        with _trade_sync_lock:
+            thread_alive = _trade_sync_thread is not None and _trade_sync_thread.is_alive()
+        if not thread_alive:
+            interrupted = {
+                **runs[0],
+                "status": "failed",
+                "ok": False,
+                "error": runs[0].get("error") or "서버 재기동으로 동기화가 중단되었습니다.",
+                "completed_at": trader.datetime.now(trader.KST).isoformat(),
+            }
+            _save_trade_sync_result(interrupted)
+            runs[0] = interrupted
     summaries = [
         {
             **run,
@@ -2312,10 +2327,7 @@ def get_trade_sync_run_detail(run_id: str):
 
 
 
-@router.post("/api/trades/sync")
-def sync_trades(days: int = 90):
-    started_at = trader.datetime.now(trader.KST).isoformat()
-    run_id = started_at
+def _execute_trade_sync(*, days: int, run_id: str, started_at: str) -> dict:
     if trader.DRY_RUN:
         message = "모의 실행(DRY_RUN) 모드에서는 증권사 계좌 동기화를 사용할 수 없습니다."
         _save_trade_sync_result({
@@ -2548,7 +2560,68 @@ def sync_trades(days: int = 90):
             "error": str(e),
             "sync_items": [],
         })
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Broker trade synchronization failed")
+        return {
+            "run_id": run_id,
+            "started_at": started_at,
+            "status": "failed",
+            "ok": False,
+            "error": str(e),
+            "sync_items": [],
+        }
+
+
+def _run_trade_sync_background(*, days: int, run_id: str, started_at: str) -> None:
+    global _trade_sync_thread
+    try:
+        _execute_trade_sync(days=days, run_id=run_id, started_at=started_at)
+    finally:
+        with _trade_sync_lock:
+            _trade_sync_thread = None
+
+
+@router.post("/api/trades/sync")
+def sync_trades(days: int = 90):
+    global _trade_sync_thread
+    started_at = trader.datetime.now(trader.KST).isoformat()
+    run_id = started_at
+    if trader.DRY_RUN:
+        message = "DRY_RUN 모드에서는 증권사 계좌 동기화를 실행할 수 없습니다."
+        _save_trade_sync_result({
+            "run_id": run_id,
+            "started_at": started_at,
+            "status": "failed",
+            "ok": False,
+            "error": message,
+            "sync_items": [],
+        })
+        raise HTTPException(status_code=400, detail=message)
+
+    with _trade_sync_lock:
+        if _trade_sync_thread is not None and _trade_sync_thread.is_alive():
+            raise HTTPException(status_code=409, detail="증권사 기록 동기화가 이미 실행 중입니다.")
+        _save_trade_sync_result({
+            "run_id": run_id,
+            "started_at": started_at,
+            "status": "running",
+            "ok": False,
+            "sync_items": [],
+        })
+        thread = threading.Thread(
+            target=_run_trade_sync_background,
+            kwargs={"days": days, "run_id": run_id, "started_at": started_at},
+            name="broker-trade-sync",
+            daemon=True,
+        )
+        _trade_sync_thread = thread
+        thread.start()
+
+    return {
+        "run_id": run_id,
+        "started_at": started_at,
+        "status": "running",
+        "ok": True,
+    }
 
 
 

@@ -63,6 +63,12 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("동기화 전체 항목 보기", INDEX_HTML)
         self.assertIn("details.hidden = false", APP_JS)
 
+    def test_trade_sync_continues_and_refreshes_across_tab_changes(self):
+        self.assertIn("startTradeSyncPolling()", APP_JS)
+        self.assertIn("tradeSyncPollInterval = setInterval(poll, 3000)", APP_JS)
+        self.assertIn("result.status === 'running'", APP_JS)
+        self.assertIn("백그라운드에서 시작했습니다", APP_JS)
+
     def test_scheduler_checklist_uses_persisted_schedule_registrations(self):
         scheduler_renderer = APP_JS.split(
             "async function renderSchedulerStrategyChecklist", 1
