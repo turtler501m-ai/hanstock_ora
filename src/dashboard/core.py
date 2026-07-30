@@ -3712,15 +3712,19 @@ def _sync_order_status_from_history(
         else:
             order_status = "filled"
         response_msg = f"KIS order history sync: {order_status}"
-        updated_count += trader.update_trade_order_status(
-            order_id,
-            trade_id=_to_int(trade.get("id")) or None,
-            order_status=order_status,
-            filled_qty=filled_qty,
-            filled_price=filled_price,
-            response_msg=response_msg,
-            broker_result=row,
-        )
+        status_changed = str(trade.get("order_status") or "") != order_status
+        quantity_changed = _to_int(trade.get("filled_qty")) != filled_qty
+        price_changed = filled_price > 0 and _to_int(trade.get("filled_price")) != filled_price
+        if status_changed or quantity_changed or price_changed:
+            updated_count += trader.update_trade_order_status(
+                order_id,
+                trade_id=_to_int(trade.get("id")) or None,
+                order_status=order_status,
+                filled_qty=filled_qty,
+                filled_price=filled_price,
+                response_msg=response_msg,
+                broker_result=row,
+            )
         orders.append({
             "broker_order_id": order_id,
             "symbol": trade.get("symbol", ""),
