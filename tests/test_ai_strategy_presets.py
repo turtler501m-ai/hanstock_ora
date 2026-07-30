@@ -41,6 +41,43 @@ class AiStrategyPresetTests(unittest.TestCase):
         with self.assertRaises(Exception):
             stock.apply_ai_strategy_preset("unknown")
 
+    def test_applying_strategy_prepares_disabled_ai_schedule_slot(self):
+        strategy = {
+            "id": "approved_ai",
+            "selected": True,
+            "status": "paper_passed",
+            "strategy_version": 1,
+        }
+        with patch(
+            "src.db.repository.load_ai_strategies",
+            side_effect=[
+                [dict(strategy)],
+                [{**strategy, "status": "approved"}],
+            ],
+        ), patch.object(
+            stock,
+            "_auto_validate_selected_strategy",
+            return_value={"ok": True, "strategy_id": "approved_ai"},
+        ), patch(
+            "src.db.repository.save_ai_strategies",
+        ), patch(
+            "src.db.repository.record_ai_strategy_event",
+        ), patch(
+            "src.db.repository.list_strategy_schedules",
+            return_value=[],
+        ), patch(
+            "src.db.repository.save_strategy_schedule",
+        ) as save_schedule:
+            result = stock.apply_selected_ai_strategies()
+
+        self.assertTrue(result["ok"])
+        save_schedule.assert_called_once_with(
+            "ai_stock_default_v1",
+            enabled=False,
+            mode="analysis_only",
+            auto_approve=False,
+        )
+
     def test_main_hanstock_ai_strategy_can_run_autonomy(self):
         expected = {
             "scan": {"status": "completed"},

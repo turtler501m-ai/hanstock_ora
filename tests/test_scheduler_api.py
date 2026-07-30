@@ -338,8 +338,12 @@ class SchedulerApiTests(unittest.TestCase):
         self.assertNotIn("result_compact", status["run_state"])
         self.assertEqual(len(status["run_state"]["result"]["results"]), 105)
 
+    @patch(
+        "src.db.repository.load_ai_strategies",
+        return_value=[{"id": "approved_ai", "selected": True, "status": "approved"}],
+    )
     @patch("src.dashboard.threading.Thread")
-    def test_trigger_scheduler_run_starts_background_thread(self, mock_thread):
+    def test_trigger_scheduler_run_starts_background_thread(self, mock_thread, _mock_strategies):
         mock_thread_instance = MagicMock()
         mock_thread.return_value = mock_thread_instance
 
@@ -350,8 +354,24 @@ class SchedulerApiTests(unittest.TestCase):
         mock_thread.assert_called_once()
         mock_thread_instance.start.assert_called_once()
 
+    @patch("src.db.repository.load_ai_strategies", return_value=[])
+    def test_trigger_scheduler_run_rejects_missing_execution_target(self, _mock_strategies):
+        from fastapi import HTTPException
+
+        with self.assertRaises(HTTPException) as ctx:
+            trigger_scheduler_run(payload={"mode": "analysis_only"})
+
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    @patch(
+        "src.db.repository.load_ai_strategies",
+        return_value=[
+            {"id": "alpha", "selected": True, "status": "approved"},
+            {"id": "beta", "selected": True, "status": "approved"},
+        ],
+    )
     @patch("src.dashboard.threading.Thread")
-    def test_trigger_scheduler_run_accepts_multiple_strategies(self, mock_thread):
+    def test_trigger_scheduler_run_accepts_multiple_strategies(self, mock_thread, _mock_strategies):
         mock_thread.return_value = MagicMock()
 
         response = trigger_scheduler_run(payload={
@@ -363,6 +383,20 @@ class SchedulerApiTests(unittest.TestCase):
         self.assertIsNone(response["strategy_id"])
         thread_args = mock_thread.call_args.kwargs["args"]
         self.assertEqual(thread_args[3], ["alpha", "beta"])
+
+    @patch(
+        "src.db.repository.load_ai_strategies",
+        return_value=[{"id": "draft_ai", "selected": True, "status": "verified"}],
+    )
+    def test_trigger_scheduler_run_rejects_unapproved_strategy(self, _mock_strategies):
+        from fastapi import HTTPException
+
+        with self.assertRaises(HTTPException) as ctx:
+            trigger_scheduler_run(
+                payload={"mode": "analysis_only", "strategy_ids": ["draft_ai"]}
+            )
+
+        self.assertEqual(ctx.exception.status_code, 409)
 
     @patch("src.dashboard.services.scheduler_service.PersistentRuntimeState")
     def test_dashboard_scheduler_service_forwards_strategy_ids(self, runtime_state):

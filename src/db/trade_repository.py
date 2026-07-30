@@ -307,17 +307,6 @@ def update_trade_order_status(
         )
         updated_count = int(cursor.rowcount)
 
-    if updated_count:
-        existing_values = tuple(existing)
-        logger.info(
-            "[TRADE_STATUS] "
-            f"trade_id={existing_values[0] or trade_id or '-'} "
-            f"symbol={existing_values[1] or '-'} action={existing_values[2] or '-'} "
-            f"qty={int(existing_values[3] or 0)} "
-            f"from={existing_values[4] or '-'} to={order_status} "
-            f"filled_qty={int(filled_qty or 0)} filled_price={int(filled_price or 0)} "
-            f"broker_order_id={broker_order_id} response={response_msg or '-'}"
-        )
     return updated_count
 
 

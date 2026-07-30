@@ -548,7 +548,11 @@ def save_plunge_bounce_settings(payload: dict = Body(...)):
 # 전략 일반화: 스케쥴 등록/제어, 전용 유니버스, 전용 포지션
 #   (plunge_bounce_strategy / heikin_ashi_scalping_strategy 등 strategy_id 기준)
 # ---------------------------------------------------------------------------
-_KNOWN_STRATEGY_IDS = {"plunge_bounce_strategy", "heikin_ashi_scalping_strategy"}
+_KNOWN_STRATEGY_IDS = {
+    "ai_stock_default_v1",
+    "plunge_bounce_strategy",
+    "heikin_ashi_scalping_strategy",
+}
 
 
 def _validate_strategy_id(strategy_id: str) -> str:

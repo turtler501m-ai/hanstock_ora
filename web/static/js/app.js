@@ -4034,6 +4034,7 @@ window.addEventListener('load', () => {
     const btnRunDailyAuto = document.getElementById('btn-run-daily-auto');
     const btnRunAnalysisOnly = document.getElementById('btn-run-analysis-only');
     const btnRunExecute = document.getElementById('btn-run-execute');
+    const btnSaveAiSchedule = document.getElementById('btn-save-ai-schedule');
 
     if (btnRunDailyAuto) {
         btnRunDailyAuto.addEventListener('click', () => triggerSchedule('daily_auto'));
@@ -4043,6 +4044,19 @@ window.addEventListener('load', () => {
     }
     if (btnRunExecute) {
         btnRunExecute.addEventListener('click', () => triggerSchedule('execute'));
+    }
+    if (btnSaveAiSchedule) {
+        btnSaveAiSchedule.addEventListener('click', async () => {
+            setButtonBusy(btnSaveAiSchedule, true);
+            try {
+                await saveAiScheduleSettings();
+                setStatus('AI 정기 스케줄을 저장했습니다.', true);
+            } catch (err) {
+                setStatus(`AI 정기 스케줄 저장 실패: ${err.message}`);
+            } finally {
+                setButtonBusy(btnSaveAiSchedule, false);
+            }
+        });
     }
 
     // Load initial schedule info
@@ -4055,12 +4069,62 @@ window.addEventListener('load', () => {
 // Scheduler Tab Rendering & Operation Helpers
 // ----------------------------------------------------
 
+const AI_SCHEDULE_ID = 'ai_stock_default_v1';
+
+function scheduleHmToInput(value, fallback) {
+    const clean = String(value || fallback).replace(':', '').padStart(4, '0');
+    return `${clean.slice(0, 2)}:${clean.slice(2, 4)}`;
+}
+
+async function loadAiScheduleSettings() {
+    const response = await fetchJson(`/api/strategy/${AI_SCHEDULE_ID}/schedule`);
+    const schedule = response.schedule || {};
+    const enabled = document.getElementById('ai-schedule-enabled');
+    const interval = document.getElementById('ai-schedule-interval');
+    const start = document.getElementById('ai-schedule-start');
+    const end = document.getElementById('ai-schedule-end');
+    const mode = document.getElementById('ai-schedule-mode');
+    const autoApprove = document.getElementById('ai-schedule-auto-approve');
+    if (enabled) enabled.checked = Boolean(schedule.enabled);
+    if (interval) interval.value = Number(schedule.interval_minutes || 15);
+    if (start) start.value = scheduleHmToInput(schedule.start_hm, '0900');
+    if (end) end.value = scheduleHmToInput(schedule.end_hm, '1530');
+    if (mode) mode.value = schedule.mode || 'analysis_only';
+    if (autoApprove) autoApprove.checked = Boolean(schedule.auto_approve);
+}
+
+async function saveAiScheduleSettings() {
+    const status = document.getElementById('ai-schedule-save-status');
+    const payload = {
+        enabled: Boolean(document.getElementById('ai-schedule-enabled')?.checked),
+        interval_minutes: Number(document.getElementById('ai-schedule-interval')?.value || 15),
+        start_hm: String(document.getElementById('ai-schedule-start')?.value || '09:00').replace(':', ''),
+        end_hm: String(document.getElementById('ai-schedule-end')?.value || '15:30').replace(':', ''),
+        weekdays: '1-5',
+        mode: document.getElementById('ai-schedule-mode')?.value || 'analysis_only',
+        auto_approve: Boolean(document.getElementById('ai-schedule-auto-approve')?.checked),
+    };
+    if (payload.enabled) {
+        const strategies = await fetchJson('/api/ai-strategies');
+        const applied = (strategies.strategies || []).filter(
+            (item) => item.selected && item.status === 'approved' && !item.independent_schedule
+        );
+        if (!applied.length) {
+            throw new Error('먼저 AI전략 탭에서 승인된 전략을 적용해 주세요.');
+        }
+    }
+    await postJson(`/api/strategy/${AI_SCHEDULE_ID}/schedule`, payload);
+    if (status) status.textContent = '저장됨';
+    await renderScheduleInfo();
+}
+
 async function renderScheduleInfo() {
     try {
         const strategyId = getActiveStrategyId();
         const query = strategyId ? `?strategy_id=${encodeURIComponent(strategyId)}` : '';
         const data = await fetchJson(`/api/scheduler/status${query}`);
         await renderSchedulerStrategyChecklist(data.strategy_dispatch?.schedules || []);
+        await loadAiScheduleSettings();
         
         // 1. Config / Settings
         const cronTzEl = document.getElementById('sched-cron-tz');

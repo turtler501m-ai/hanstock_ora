@@ -426,6 +426,41 @@
                                 <strong id="sched-active-strategy" style="color: #60a5fa; font-weight: bold;">-</strong>
                             </div>
                         </div>
+                        <div class="panel-sub" style="margin-top: 1rem;">
+                            <h3>AI전략 공용 정기 스케줄</h3>
+                            <p class="control-help">AI전략 탭에서 적용된 승인 전략들을 실행합니다. 전략 적용만으로 자동 실행되지는 않습니다.</p>
+                            <div class="settings-grid">
+                                <label class="setting-item">
+                                    <span class="label">정기 실행</span>
+                                    <input type="checkbox" id="ai-schedule-enabled">
+                                </label>
+                                <label class="setting-item">
+                                    <span class="label">실행 간격(분)</span>
+                                    <input type="number" id="ai-schedule-interval" min="1" value="15">
+                                </label>
+                                <label class="setting-item">
+                                    <span class="label">시작 시각</span>
+                                    <input type="time" id="ai-schedule-start" value="09:00">
+                                </label>
+                                <label class="setting-item">
+                                    <span class="label">종료 시각</span>
+                                    <input type="time" id="ai-schedule-end" value="15:30">
+                                </label>
+                                <label class="setting-item">
+                                    <span class="label">실행 모드</span>
+                                    <select id="ai-schedule-mode">
+                                        <option value="analysis_only">분석 전용</option>
+                                        <option value="execute">주문 실행</option>
+                                    </select>
+                                </label>
+                                <label class="setting-item">
+                                    <span class="label">자동 승인</span>
+                                    <input type="checkbox" id="ai-schedule-auto-approve">
+                                </label>
+                            </div>
+                            <button type="button" class="button-ghost" id="btn-save-ai-schedule" style="margin-top: .75rem;">AI 정기 스케줄 저장</button>
+                            <span id="ai-schedule-save-status" class="time-muted" role="status"></span>
+                        </div>
                     </section>
 
                     <!-- Instant Execution Trigger Card -->
@@ -433,7 +468,8 @@
                         <h2>스케쥴 즉시 실행</h2>
                         <p class="section-help">지정한 모드로 스케쥴러를 즉시 기동하여 신호를 추출하거나 주문을 실행합니다.</p>
                         <div class="panel-sub" style="margin-bottom: 1rem;">
-                            <h3>실행할 전략 (복수 선택)</h3>
+                            <h3>이번 즉시 실행 대상 (복수 선택)</h3>
+                            <p class="control-help">체크 상태는 정기 스케줄 설정으로 저장되지 않습니다.</p>
                             <div id="scheduler-strategy-checklist" style="display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:8px;"></div>
                         </div>
                         

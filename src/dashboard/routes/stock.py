@@ -911,6 +911,23 @@ def apply_selected_ai_strategies():
                 strategy.get("strategy_version"),
             )
     save_ai_strategies(strategies)
+    if passed_ids:
+        from src.db.repository import list_strategy_schedules, save_strategy_schedule
+        from src.strategy_ids import AI_STOCK_SCHEDULE_ID
+
+        existing_schedule_ids = {
+            str(item.get("strategy_id") or "")
+            for item in list_strategy_schedules(enabled_only=False)
+        }
+        if AI_STOCK_SCHEDULE_ID not in existing_schedule_ids:
+            # Applying a strategy prepares the stable schedule slot, but does
+            # not silently enable unattended execution.
+            save_strategy_schedule(
+                AI_STOCK_SCHEDULE_ID,
+                enabled=False,
+                mode="analysis_only",
+                auto_approve=False,
+            )
     return {
         "ok": bool(passed_ids),
         "applied_strategy_ids": sorted(passed_ids),
@@ -3143,20 +3160,69 @@ def trigger_scheduler_run(payload: dict = Body(...)):
     force_strategy_id = payload.get("strategy_id")
     if force_strategy_id is not None:
         force_strategy_id = str(force_strategy_id).strip() or None
+    registered_strategies = []
     if force_strategy_id is None and not strategy_ids:
         try:
             from src.db.repository import load_ai_strategies
+            registered_strategies = load_ai_strategies()
             strategy_ids = [
-                str(s.get("id")) for s in load_ai_strategies()
-                if s.get("selected") and s.get("id")
+                str(s.get("id")) for s in registered_strategies
+                if s.get("selected")
+                and str(s.get("status") or "") == "approved"
+                and s.get("id")
             ]
         except Exception:
             strategy_ids = []
+    if not registered_strategies:
+        try:
+            from src.db.repository import load_ai_strategies
+            registered_strategies = load_ai_strategies()
+        except Exception:
+            registered_strategies = []
 
     if force_strategy_id and not strategy_ids:
         strategy_ids = [force_strategy_id]
     if not strategy_ids:
-        strategy_ids = ["seven_split"]
+        raise HTTPException(
+            status_code=409,
+            detail="실행할 승인된 AI 전략 또는 스케줄 전략을 선택해 주세요.",
+        )
+    from src.strategy_ids import (
+        AI_STOCK_SCHEDULE_ID,
+        INDEPENDENT_STOCK_SCHEDULE_IDS,
+    )
+    registered_by_id = {
+        str(item.get("id") or ""): item
+        for item in registered_strategies
+        if item.get("id")
+    }
+    fixed_ids = {
+        "seven_split",
+        AI_STOCK_SCHEDULE_ID,
+        *INDEPENDENT_STOCK_SCHEDULE_IDS,
+    }
+    invalid_ids = []
+    for strategy_id in strategy_ids:
+        if strategy_id in fixed_ids:
+            continue
+        strategy = registered_by_id.get(strategy_id)
+        if not strategy or not strategy.get("selected") or str(strategy.get("status") or "") != "approved":
+            invalid_ids.append(strategy_id)
+    if invalid_ids:
+        raise HTTPException(
+            status_code=409,
+            detail=f"선택·승인되지 않은 전략은 실행할 수 없습니다: {', '.join(invalid_ids)}",
+        )
+    from src.strategy_ids import resolve_ai_schedule_strategy_ids
+    resolved_strategy_ids = resolve_ai_schedule_strategy_ids(
+        strategy_ids,
+        strategies=registered_strategies,
+    )
+    if not resolved_strategy_ids:
+        raise HTTPException(
+            status_code=409,
+            detail="AI 스케줄 슬롯에 적용된 승인 전략이 없습니다.",
+        )
     if not _dashboard_scheduler_service.claim(
         mode=mode,
         strategy_id=",".join(strategy_ids),

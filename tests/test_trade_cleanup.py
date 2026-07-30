@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from src.config import config
 from src.db import repository as repository_facade
@@ -79,6 +80,25 @@ class LocalTradeCleanupTests(unittest.TestCase):
         )
 
         self.assertEqual(updated, 0)
+
+    def test_order_status_update_does_not_emit_trade_status_log(self):
+        trade_id = self._insert_trade(status="submitted")
+
+        with patch("src.db.trade_repository.logger.info") as log_info:
+            updated = trade_repository.update_trade_order_status(
+                "1234",
+                trade_id=trade_id,
+                order_status="filled",
+                filled_qty=10,
+                filled_price=1000,
+                response_msg="filled",
+                broker_result={"rt_cd": "0"},
+            )
+
+        self.assertEqual(updated, 1)
+        self.assertFalse(
+            any("[TRADE_STATUS]" in str(call) for call in log_info.call_args_list)
+        )
 
 
 if __name__ == "__main__":
