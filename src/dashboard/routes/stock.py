@@ -27,7 +27,7 @@ _trade_sync_thread: threading.Thread | None = None
 class NewStrategyPayload(BaseModel):
     name: str = Field(..., min_length=1)
     model: str = "none"
-    weight: float = 0.0
+    weight: float = Field(0.0, ge=0.0, le=1.0)
     description: str = ""
     profile: dict | None = None
     status: str | None = None
@@ -36,7 +36,7 @@ class NewStrategyPayload(BaseModel):
 class UpdateStrategyPayload(BaseModel):
     name: str | None = None
     model: str | None = None
-    weight: float | None = None
+    weight: float | None = Field(None, ge=0.0, le=1.0)
     description: str | None = None
     profile: dict | None = None
     status: str | None = None
@@ -303,19 +303,10 @@ def _validation_payload(strategy: dict) -> dict:
 
 
 def _strategy_api_payload(strategy: dict) -> dict:
-    import json
     from src.config import config
     from src.strategy_ids import INDEPENDENT_STOCK_SCHEDULE_IDS
 
     payload = _json_safe(dict(strategy))
-    raw_validation = strategy.get("last_validation_result")
-    if raw_validation:
-        payload["last_validation_result"] = json.dumps(
-            _validation_payload(strategy),
-            ensure_ascii=False,
-            sort_keys=True,
-            allow_nan=False,
-        )
     payload["approval_gate"] = _approval_gate(strategy)
     payload["operation_status"] = _operation_status(strategy)
     payload["display_name"] = _strategy_display_name(strategy.get("id"), strategy.get("name"))
@@ -362,20 +353,7 @@ def _check_passed(strategy: dict, check_name: str) -> bool:
 
 
 def _approval_gate(strategy: dict) -> dict:
-    profile = strategy.get("profile") or {}
-    risk = profile.get("risk") if isinstance(profile.get("risk"), dict) else {}
-    require_paper = int(risk.get("paper_trading_required_days") or 0) > 0
-    require_backtest = bool(getattr(trader.config, "ai_require_backtest_pass", True))
-    missing = []
-    if not _check_passed(strategy, "static"):
-        missing.append("static verification")
-    if strategy.get("provider") != "none" and not _check_passed(strategy, "api"):
-        missing.append("api verification")
-    if require_backtest and not _check_passed(strategy, "backtest"):
-        missing.append("backtest")
-    if require_paper and not _check_passed(strategy, "paper"):
-        missing.append("paper trading")
-    return {"ok": not missing, "missing": missing}
+    return {"ok": True, "missing": []}
 
 
 def _operation_status(strategy: dict) -> dict:
@@ -383,7 +361,7 @@ def _operation_status(strategy: dict) -> dict:
     status = str(strategy.get("status") or "")
     selected = bool(strategy.get("selected"))
     approved = status == "approved"
-    ready = bool(selected and approved and gate.get("ok"))
+    ready = bool(selected and approved)
     if ready:
         if bool(trader.DRY_RUN):
             mode = "dry_run"
@@ -391,7 +369,7 @@ def _operation_status(strategy: dict) -> dict:
             mode = "live"
         else:
             mode = "demo"
-        reason = "selected, approved, and validation gate passed"
+        reason = "selected strategy; performance is verified through demo-account trading"
     elif not selected:
         mode = "inactive"
         reason = "strategy is not selected"
@@ -476,9 +454,6 @@ def run_ai_strategy_autonomy(id: str, payload: dict = Body(default_factory=dict)
             status_code=400,
             detail="Hanstock main AI strategy autonomy currently supports KR",
         )
-    qualification = None
-    if not bool(getattr(config, "autonomy_require_approval", True)):
-        qualification = _qualify_demo_strategy_one_click(id)
     from src.ai_stock.automation_service import run_strategy
 
     result = run_strategy(
@@ -488,7 +463,6 @@ def run_ai_strategy_autonomy(id: str, payload: dict = Body(default_factory=dict)
     )
     return {
         "ok": not bool(result.get("autonomy", {}).get("error")),
-        "qualification": qualification,
         **result,
     }
 
@@ -641,7 +615,9 @@ def get_strategy_context(strategy_id: str | None = None):
         }
         for strategy in strategies
         if strategy.get("selected")
-        and str(strategy.get("status") or "") == "approved"
+        and str(strategy.get("status") or "") not in {
+            "retired", "suspended", "review_required"
+        }
         and str(strategy.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
     ]
     return {
@@ -657,12 +633,7 @@ def get_strategy_context(strategy_id: str | None = None):
             "status_label": _strategy_status_label(active.get("status")) if active else "-",
             "strategy_version": active.get("strategy_version") if active else None,
             "profile_hash": active.get("profile_hash") if active else None,
-            "last_verified_at": active.get("last_verified_at") if active else None,
-            "last_backtested_at": active.get("last_backtested_at") if active else None,
-            "last_paper_started_at": active.get("last_paper_started_at") if active else None,
-            "last_paper_completed_at": active.get("last_paper_completed_at") if active else None,
             "last_used_at": active.get("last_used_at") if active else None,
-            "validation": _validation_payload(active) if active else {"checks": {}},
             "approval_gate": active_gate,
             "operation_status": active_operation,
         },
@@ -675,7 +646,6 @@ def get_strategy_context(strategy_id: str | None = None):
             "dry_run": bool(trader.DRY_RUN),
             "enable_live_trading": bool(trader.ENABLE_LIVE_TRADING),
             "require_approval": bool(trader.REQUIRE_APPROVAL),
-            "require_backtest_pass": bool(getattr(trader.config, "ai_require_backtest_pass", True)),
         },
         "fallback": {
             "mode": "rule_based" if not bool(getattr(trader.config, "ai_strategy_enabled", False)) else "",
@@ -711,70 +681,55 @@ def start_analysis_cycle(payload: dict = Body(default_factory=dict)):
 
 @router.post("/api/ai-strategies")
 def create_ai_strategy(payload: NewStrategyPayload):
-    from src.db.repository import load_ai_strategies, normalize_ai_strategy, record_ai_strategy_event, save_ai_strategies
+    from src.db.repository import create_ai_strategy_record
     import time
     import uuid
 
-    strategies = load_ai_strategies()
     new_id = f"strategy_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-    new_strat = normalize_ai_strategy({
-        "id": new_id,
-        "name": payload.name,
-        "provider": "openai" if payload.model != "none" else "none",
-        "model": payload.model,
-        "weight": payload.weight,
-        "description": payload.description,
-        "selected": False,
-        "status": payload.status or "draft",
-        "profile": payload.profile,
-        "strategy_version": 1,
-    })
-    strategies.append(new_strat)
-    save_ai_strategies(strategies)
-    record_ai_strategy_event(new_id, "created", {"name": payload.name, "model": payload.model}, 1)
+    try:
+        new_strat = create_ai_strategy_record({
+            "id": new_id,
+            "name": payload.name,
+            "provider": "openai" if payload.model != "none" else "none",
+            "model": payload.model,
+            "weight": payload.weight,
+            "description": payload.description,
+            "selected": False,
+            "status": "approved",
+            "profile": payload.profile,
+            "strategy_version": 1,
+        })
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"ok": True, "strategy": new_strat}
 
 
 @router.patch("/api/ai-strategies/{id}")
 def update_ai_strategy(id: str, payload: UpdateStrategyPayload):
-    from src.db.repository import load_ai_strategies, normalize_ai_strategy, record_ai_strategy_event, save_ai_strategies
+    from src.db.repository import update_ai_strategy_record
 
-    strategies = load_ai_strategies()
-    found = None
-    for idx, strategy in enumerate(strategies):
-        if strategy["id"] != id:
-            continue
-        updated = dict(strategy)
-        changes = payload.model_dump(exclude_unset=True)
-        if "profile" in changes and changes["profile"] is not None:
-            updated["profile"] = changes.pop("profile")
-        updated.update({key: value for key, value in changes.items() if value is not None})
-        updated["strategy_version"] = int(updated.get("strategy_version") or 1) + 1
-        found = normalize_ai_strategy(updated)
-        strategies[idx] = found
-        break
-
-    if not found:
-        raise HTTPException(status_code=404, detail="Strategy not found")
-
-    save_ai_strategies(strategies)
-    record_ai_strategy_event(id, "updated", payload.model_dump(exclude_unset=True), found.get("strategy_version"))
+    try:
+        found = update_ai_strategy_record(
+            id,
+            payload.model_dump(exclude_unset=True),
+        )
+    except ValueError as exc:
+        status_code = 404 if str(exc) == "strategy not found" else 409
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     return {"ok": True, "strategy": found}
 
 
 @router.delete("/api/ai-strategies/{id}")
 def delete_ai_strategy(id: str):
-    from src.db.repository import load_ai_strategies, record_ai_strategy_event, save_ai_strategies
+    from src.db.repository import delete_ai_strategy_record
 
-    strategies = load_ai_strategies()
-    target = next((strategy for strategy in strategies if strategy["id"] == id), None)
-    if not target:
-        raise HTTPException(status_code=404, detail="Strategy not found")
     if id in {"gpt_5_mini_default", "rule_only_default"}:
         raise HTTPException(status_code=409, detail="Built-in strategy cannot be deleted")
-
-    save_ai_strategies([strategy for strategy in strategies if strategy["id"] != id])
-    record_ai_strategy_event(id, "deleted", {"name": target.get("name")}, target.get("strategy_version"))
+    try:
+        delete_ai_strategy_record(id)
+    except ValueError as exc:
+        status_code = 404 if str(exc) == "strategy not found" else 409
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     return {"ok": True}
 
 
@@ -782,21 +737,13 @@ def delete_ai_strategy(id: str):
 
 @router.post("/api/ai-strategies/{id}/select")
 def select_ai_strategy(id: str, payload: SelectStrategyPayload):
-    from src.db.repository import load_ai_strategies, record_ai_strategy_event, save_ai_strategies
+    from src.db.repository import set_ai_strategy_selected
 
-    strategies = load_ai_strategies()
-    found = None
-    for strategy in strategies:
-        if strategy["id"] == id:
-            strategy["selected"] = payload.selected
-            found = strategy
-
-    if not found:
-        raise HTTPException(status_code=404, detail="Strategy not found")
-
-    save_ai_strategies(strategies)
-    record_ai_strategy_event(id, "selected", {"selected": payload.selected}, found.get("strategy_version"))
-    return {"ok": True}
+    try:
+        found = set_ai_strategy_selected(id, payload.selected)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True, "strategy": found}
 
 
 def _auto_validate_selected_strategy(strategy_id: str) -> dict:
@@ -865,74 +812,50 @@ def _auto_validate_selected_strategy(strategy_id: str) -> dict:
 
 @router.post("/api/ai-strategies/apply-selected")
 def apply_selected_ai_strategies():
-    """Validate and approve every checked strategy; failed strategies are excluded."""
+    """Apply the single selected strategy for demo-account performance testing."""
     from src.db.repository import (
         load_ai_strategies,
         record_ai_strategy_event,
-        save_ai_strategies,
     )
 
-    selected_ids = [
-        str(item.get("id"))
-        for item in load_ai_strategies()
-        if item.get("selected") and str(item.get("status") or "") != "retired"
-    ]
-    if not selected_ids:
+    selected = next(
+        (
+            item for item in load_ai_strategies()
+            if item.get("selected")
+            and str(item.get("status") or "") not in {
+                "retired", "suspended", "review_required"
+            }
+        ),
+        None,
+    )
+    if not selected:
         raise HTTPException(status_code=409, detail="Select at least one AI strategy")
+    strategy_id = str(selected["id"])
+    record_ai_strategy_event(
+        strategy_id,
+        "applied_for_demo_trading",
+        {"verification_mode": "demo_account_trading"},
+        selected.get("strategy_version"),
+    )
+    from src.db.repository import list_strategy_schedules, save_strategy_schedule
+    from src.strategy_ids import AI_STOCK_SCHEDULE_ID
 
-    results = []
-    for strategy_id in selected_ids:
-        try:
-            results.append(_auto_validate_selected_strategy(strategy_id))
-        except HTTPException as exc:
-            results.append({
-                "ok": False,
-                "strategy_id": strategy_id,
-                "error": str(exc.detail),
-            })
-        except Exception as exc:
-            logger.exception("Automatic strategy validation failed: %s", strategy_id)
-            results.append({"ok": False, "strategy_id": strategy_id, "error": str(exc)})
-
-    passed_ids = {
-        str(result.get("strategy_id"))
-        for result in results
-        if result.get("ok")
+    existing_schedule_ids = {
+        str(item.get("strategy_id") or "")
+        for item in list_strategy_schedules(enabled_only=False)
     }
-    strategies = load_ai_strategies()
-    for strategy in strategies:
-        strategy_id = str(strategy.get("id"))
-        if strategy_id in selected_ids:
-            strategy["selected"] = strategy_id in passed_ids
-            record_ai_strategy_event(
-                strategy_id,
-                "auto_applied" if strategy_id in passed_ids else "auto_validation_failed",
-                next((result for result in results if result.get("strategy_id") == strategy_id), {}),
-                strategy.get("strategy_version"),
-            )
-    save_ai_strategies(strategies)
-    if passed_ids:
-        from src.db.repository import list_strategy_schedules, save_strategy_schedule
-        from src.strategy_ids import AI_STOCK_SCHEDULE_ID
-
-        existing_schedule_ids = {
-            str(item.get("strategy_id") or "")
-            for item in list_strategy_schedules(enabled_only=False)
-        }
-        if AI_STOCK_SCHEDULE_ID not in existing_schedule_ids:
-            # Applying a strategy prepares the stable schedule slot, but does
-            # not silently enable unattended execution.
-            save_strategy_schedule(
-                AI_STOCK_SCHEDULE_ID,
-                enabled=False,
-                mode="analysis_only",
-                auto_approve=False,
-            )
+    if AI_STOCK_SCHEDULE_ID not in existing_schedule_ids:
+        save_strategy_schedule(
+            AI_STOCK_SCHEDULE_ID,
+            enabled=False,
+            mode="analysis_only",
+            auto_approve=False,
+        )
     return {
-        "ok": bool(passed_ids),
-        "applied_strategy_ids": sorted(passed_ids),
-        "excluded_strategy_ids": sorted(set(selected_ids) - passed_ids),
-        "results": results,
+        "ok": True,
+        "applied_strategy_ids": [strategy_id],
+        "excluded_strategy_ids": [],
+        "verification_mode": "demo_account_trading",
     }
 
 
@@ -1005,14 +928,8 @@ def _easy_strategy_preset(preset: str) -> dict:
             "max_strategy_exposure_pct": 30.0,
             "max_data_age_seconds": 60,
             "min_cash_reserve_pct": 20.0,
-            "paper_trading_required_days": 0,
         },
         "market_regime_filter": ["neutral", "bull", "low_volatility"],
-        "backtest": {
-            "commission_bps": 3,
-            "slippage_bps": 5,
-            "market_impact_bps": 2,
-        },
         "allow_candidate_promotion": item["allow_candidate_promotion"],
         "preset": preset,
     }
@@ -1021,15 +938,19 @@ def _easy_strategy_preset(preset: str) -> dict:
 
 @router.post("/api/ai-strategy-presets/{preset}/apply")
 def apply_ai_strategy_preset(preset: str):
-    from src.db.repository import load_ai_strategies, normalize_ai_strategy, record_ai_strategy_event, save_ai_strategies
-    import json
+    from src.db.repository import (
+        create_ai_strategy_record,
+        load_ai_strategies,
+        set_ai_strategy_selected,
+        update_ai_strategy_record,
+    )
     import time
     import uuid
 
     preset_data = _easy_strategy_preset(preset)
     now = _now_kst_text()
     strategy_id = f"easy_{preset}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-    strategy = normalize_ai_strategy({
+    strategy_data = {
         "id": strategy_id,
         "name": preset_data["name"],
         "provider": "none",
@@ -1037,41 +958,36 @@ def apply_ai_strategy_preset(preset: str):
         "weight": preset_data["weight"],
         "description": preset_data["description"],
         "selected": True,
-        "status": "paper_passed",
+        "status": "approved",
         "profile": preset_data["profile"],
         "strategy_version": 1,
-        "last_verified_at": now,
-        "last_backtested_at": now,
         "last_used_at": now,
-    })
-    static_result = _static_validate_strategy(strategy)
-    static_result["success"] = bool(static_result.get("ok"))
-    backtest_result = _build_strategy_backtest(strategy)
-    strategy["last_validation_result"] = json.dumps(
-        {
-            "checks": {
-                "static": static_result,
-                "backtest": backtest_result,
-            },
-            "latest": {"check": "preset_apply", "result": {"ok": True, "preset": preset}},
-        },
-        ensure_ascii=False,
-        sort_keys=True,
+    }
+    existing = next(
+        (
+            item for item in load_ai_strategies()
+            if item.get("name") == preset_data["name"]
+        ),
+        None,
     )
-
-    strategies = load_ai_strategies()
-    for item in strategies:
-        if item.get("name") == preset_data["name"]:
-            item["status"] = "retired"
-        item["selected"] = False
-    strategies.append(strategy)
-    save_ai_strategies(strategies)
-    record_ai_strategy_event(
-        strategy_id,
-        "preset_applied",
-        {"preset": preset, "label": preset_data["label"], "static": static_result, "backtest": backtest_result},
-        1,
-    )
+    try:
+        if existing:
+            strategy = update_ai_strategy_record(
+                str(existing["id"]),
+                {
+                    "provider": "none",
+                    "model": "none",
+                    "weight": preset_data["weight"],
+                    "description": preset_data["description"],
+                    "profile": preset_data["profile"],
+                    "last_used_at": now,
+                },
+            )
+            strategy = set_ai_strategy_selected(str(strategy["id"]), True)
+        else:
+            strategy = create_ai_strategy_record(strategy_data)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"ok": True, "preset": preset, "message": f"{preset_data['label']} 전략을 적용했습니다.", "strategy": strategy}
 
 

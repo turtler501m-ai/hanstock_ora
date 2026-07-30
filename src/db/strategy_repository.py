@@ -39,12 +39,6 @@ def _default_strategy_profile(strategy: dict) -> dict:
         "focus": ["rsi2_oversold", "bollinger_lower_band", "volume_recovery"],
         "avoid": ["high_volatility_breakdown", "overheated_rsi", "weak_liquidity"],
         "market_regime_filter": ["neutral", "bull", "low_volatility"],
-        "backtest": {
-            "min_warmup_periods": 60,
-            "commission_bps": 15,
-            "slippage_bps": 5,
-            "market_impact_bps": 5,
-        },
         "risk": {
             "max_ai_weight": weight,
             "max_risk_per_trade_pct": 0.5,
@@ -55,7 +49,6 @@ def _default_strategy_profile(strategy: dict) -> dict:
             "max_data_age_seconds": 60,
             "min_cash_reserve_pct": 20.0,
             "max_daily_ai_orders": 3,
-            "paper_trading_required_days": 20,
         },
     }
 
@@ -73,7 +66,6 @@ def _parse_strategy_profile(strategy: dict) -> dict:
         raw_profile = {}
     profile = _default_strategy_profile(strategy)
     default_risk = dict(profile["risk"])
-    default_backtest = dict(profile["backtest"])
     profile.update(raw_profile)
     profile["risk"] = {
         **default_risk,
@@ -83,14 +75,8 @@ def _parse_strategy_profile(strategy: dict) -> dict:
             else {}
         ),
     }
-    profile["backtest"] = {
-        **default_backtest,
-        **(
-            raw_profile.get("backtest")
-            if isinstance(raw_profile.get("backtest"), dict)
-            else {}
-        ),
-    }
+    profile.pop("backtest", None)
+    profile["risk"].pop("paper_trading_required_days", None)
     profile["model"] = str(profile.get("model") or strategy.get("model") or "none")
     profile["ai_weight"] = max(0.0, min(1.0, float(profile.get("ai_weight", strategy.get("weight", 0.0)) or 0.0)))
     return profile
@@ -103,6 +89,12 @@ def strategy_profile_hash(profile: dict) -> str:
 
 def normalize_ai_strategy(strategy: dict) -> dict:
     item = dict(strategy)
+    item["id"] = str(item.get("id") or "").strip()
+    item["name"] = str(item.get("name") or item["id"]).strip()
+    if not item["id"]:
+        raise ValueError("strategy id is required")
+    if not item["name"]:
+        raise ValueError("strategy name is required")
     item["provider"] = str(item.get("provider") or ("openai" if item.get("model") != "none" else "none"))
     item["model"] = str(item.get("model") or "none")
     item["weight"] = max(0.0, min(1.0, float(item.get("weight", 0.0) or 0.0)))
@@ -110,7 +102,10 @@ def normalize_ai_strategy(strategy: dict) -> dict:
     item["strategy_version"] = int(item.get("strategy_version") or 1)
     # Selection is not lifecycle approval.  Migrated/legacy records without an
     # explicit status must pass the normal verification lifecycle.
-    item["status"] = str(item.get("status") or "draft")
+    status = str(item.get("status") or "approved")
+    if status in {"draft", "verified", "backtested", "paper_running", "paper_passed"}:
+        status = "approved"
+    item["status"] = status
     profile = _parse_strategy_profile(item)
     item["profile"] = profile
     item["profile_json"] = json.dumps(profile, ensure_ascii=False, sort_keys=True)
@@ -126,6 +121,232 @@ def normalize_ai_strategy(strategy: dict) -> dict:
     ):
         item[key] = item.get(key)
     return item
+
+
+def _write_ai_strategy_backup(strategies: list[dict]) -> None:
+    try:
+        AI_STRATEGIES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        AI_STRATEGIES_FILE.write_text(
+            json.dumps(
+                [normalize_ai_strategy(item) for item in strategies],
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        logger.warning(f"Failed to save AI strategies to JSON: {exc}")
+
+
+def _insert_ai_strategy(conn, strategy: dict) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO ai_strategies (
+            id, name, provider, model, weight, description, selected,
+            status, profile_json, strategy_version, profile_hash,
+            last_verified_at, last_backtested_at, last_paper_started_at,
+            last_paper_completed_at, last_used_at, last_validation_result
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            strategy["id"],
+            strategy["name"],
+            strategy["provider"],
+            strategy["model"],
+            float(strategy["weight"]),
+            strategy.get("description", ""),
+            1 if strategy.get("selected", False) else 0,
+            strategy.get("status", "approved"),
+            strategy.get("profile_json"),
+            int(strategy.get("strategy_version") or 1),
+            strategy.get("profile_hash"),
+            strategy.get("last_verified_at"),
+            strategy.get("last_backtested_at"),
+            strategy.get("last_paper_started_at"),
+            strategy.get("last_paper_completed_at"),
+            strategy.get("last_used_at"),
+            strategy.get("last_validation_result"),
+        ),
+    )
+
+
+def create_ai_strategy_record(strategy: dict) -> dict:
+    item = normalize_ai_strategy({**strategy, "status": "approved"})
+    init_db()
+    with connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute(
+            "SELECT 1 FROM ai_strategies WHERE id=?",
+            (item["id"],),
+        ).fetchone():
+            conn.rollback()
+            raise ValueError("strategy id already exists")
+        if conn.execute(
+            "SELECT 1 FROM ai_strategies WHERE lower(name)=lower(?)",
+            (item["name"],),
+        ).fetchone():
+            conn.rollback()
+            raise ValueError("strategy name already exists")
+        if item.get("selected"):
+            conn.execute("UPDATE ai_strategies SET selected=0")
+        _insert_ai_strategy(conn, item)
+        conn.execute(
+            """
+            INSERT INTO ai_strategy_events
+            (ts, strategy_id, strategy_version, event_type, payload)
+            VALUES (?, ?, ?, 'created', ?)
+            """,
+            (
+                datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
+                item["id"],
+                item["strategy_version"],
+                json.dumps(
+                    {"name": item["name"], "model": item["model"]},
+                    ensure_ascii=False,
+                ),
+            ),
+        )
+        conn.commit()
+    _write_ai_strategy_backup(load_ai_strategies())
+    return item
+
+
+def update_ai_strategy_record(strategy_id: str, changes: dict) -> dict:
+    init_db()
+    with connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT * FROM ai_strategies WHERE id=?",
+            (str(strategy_id),),
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            raise ValueError("strategy not found")
+        current = normalize_ai_strategy(dict(row))
+        updated = dict(current)
+        updated.update({key: value for key, value in changes.items() if value is not None})
+        if "model" in changes:
+            updated["provider"] = "openai" if changes["model"] != "none" else "none"
+        updated["strategy_version"] = int(current.get("strategy_version") or 1) + 1
+        updated["status"] = "approved"
+        updated["last_validation_result"] = None
+        updated = normalize_ai_strategy(updated)
+        duplicate = conn.execute(
+            "SELECT 1 FROM ai_strategies WHERE lower(name)=lower(?) AND id<>?",
+            (updated["name"], str(strategy_id)),
+        ).fetchone()
+        if duplicate:
+            conn.rollback()
+            raise ValueError("strategy name already exists")
+        _insert_ai_strategy(conn, updated)
+        conn.execute(
+            """
+            INSERT INTO ai_strategy_events
+            (ts, strategy_id, strategy_version, event_type, payload)
+            VALUES (?, ?, ?, 'updated', ?)
+            """,
+            (
+                datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
+                str(strategy_id),
+                updated["strategy_version"],
+                json.dumps(changes, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+    _write_ai_strategy_backup(load_ai_strategies())
+    return updated
+
+
+def set_ai_strategy_selected(strategy_id: str, selected: bool) -> dict:
+    init_db()
+    with connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT * FROM ai_strategies WHERE id=?",
+            (str(strategy_id),),
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            raise ValueError("strategy not found")
+        if selected:
+            conn.execute("UPDATE ai_strategies SET selected=0")
+        conn.execute(
+            "UPDATE ai_strategies SET selected=? WHERE id=?",
+            (1 if selected else 0, str(strategy_id)),
+        )
+        conn.execute(
+            """
+            INSERT INTO ai_strategy_events
+            (ts, strategy_id, strategy_version, event_type, payload)
+            VALUES (?, ?, ?, 'selected', ?)
+            """,
+            (
+                datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
+                str(strategy_id),
+                int(row["strategy_version"] or 1),
+                json.dumps({"selected": bool(selected)}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+    strategies = load_ai_strategies()
+    _write_ai_strategy_backup(strategies)
+    return next(item for item in strategies if item["id"] == str(strategy_id))
+
+
+def delete_ai_strategy_record(strategy_id: str) -> dict:
+    init_db()
+    with connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            "SELECT * FROM ai_strategies WHERE id=?",
+            (str(strategy_id),),
+        ).fetchone()
+        if not row:
+            conn.rollback()
+            raise ValueError("strategy not found")
+        open_positions = conn.execute(
+            """
+            SELECT COUNT(*) FROM ai_strategy_positions
+            WHERE strategy_id=?
+              AND status IN ('pending_entry', 'open', 'exit_pending', 'active', 'closing')
+            """,
+            (str(strategy_id),),
+        ).fetchone()[0]
+        open_orders = conn.execute(
+            """
+            SELECT COUNT(*) FROM ai_managed_orders
+            WHERE strategy_id=? AND status NOT IN
+            ('filled', 'canceled', 'rejected', 'failed', 'expired')
+            """,
+            (str(strategy_id),),
+        ).fetchone()[0]
+        if open_positions or open_orders:
+            conn.rollback()
+            raise ValueError(
+                f"strategy has active trading state: positions={open_positions}, orders={open_orders}"
+            )
+        conn.execute(
+            """
+            INSERT INTO ai_strategy_events
+            (ts, strategy_id, strategy_version, event_type, payload)
+            VALUES (?, ?, ?, 'deleted', ?)
+            """,
+            (
+                datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
+                str(strategy_id),
+                int(row["strategy_version"] or 1),
+                json.dumps({"name": row["name"]}, ensure_ascii=False),
+            ),
+        )
+        conn.execute("DELETE FROM ai_strategies WHERE id=?", (str(strategy_id),))
+        conn.commit()
+    _write_ai_strategy_backup(load_ai_strategies())
+    return normalize_ai_strategy(dict(row))
 
 
 def load_ai_strategies() -> list[dict]:
@@ -602,4 +823,13 @@ def review_ai_strategy_performance(strategy_id: str, days: int = 30) -> dict:
     }
     record_ai_strategy_event(strategy_id, "performance_review", result, target.get("strategy_version"))
     return result
-__all__ = ['KST', 'AI_STRATEGIES_FILE', '_default_strategy_profile', '_parse_strategy_profile', 'strategy_profile_hash', 'normalize_ai_strategy', 'load_ai_strategies', 'save_ai_strategies', 'record_ai_strategy_event', 'halt_ai_strategy', 'get_ai_strategy_events', 'get_ai_strategy_performance', 'review_ai_strategy_performance']
+__all__ = [
+    'KST', 'AI_STRATEGIES_FILE', '_default_strategy_profile',
+    '_parse_strategy_profile', 'strategy_profile_hash',
+    'normalize_ai_strategy', 'load_ai_strategies', 'save_ai_strategies',
+    'create_ai_strategy_record', 'update_ai_strategy_record',
+    'set_ai_strategy_selected', 'delete_ai_strategy_record',
+    'record_ai_strategy_event', 'halt_ai_strategy',
+    'get_ai_strategy_events', 'get_ai_strategy_performance',
+    'review_ai_strategy_performance',
+]

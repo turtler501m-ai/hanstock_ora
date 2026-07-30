@@ -186,6 +186,27 @@ def init_db() -> None:
         _ensure_column(conn, "ai_strategies", "last_paper_completed_at", "TEXT")
         _ensure_column(conn, "ai_strategies", "last_used_at", "TEXT")
         _ensure_column(conn, "ai_strategies", "last_validation_result", "TEXT")
+        conn.execute(
+            """
+            UPDATE ai_strategies
+            SET status='approved'
+            WHERE status IS NULL
+               OR status IN (
+                   'draft', 'verified', 'backtested',
+                   'paper_running', 'paper_passed'
+               )
+            """
+        )
+        conn.execute(
+            """
+            UPDATE ai_strategies
+            SET last_verified_at=NULL,
+                last_backtested_at=NULL,
+                last_paper_started_at=NULL,
+                last_paper_completed_at=NULL,
+                last_validation_result=NULL
+            """
+        )
         _ensure_column(conn, "scanned_candidates", "strategy_id", "TEXT")
         _ensure_column(conn, "scanned_candidates", "strategy_version", "INTEGER")
         _ensure_column(conn, "scanned_candidates", "profile_hash", "TEXT")

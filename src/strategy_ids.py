@@ -40,7 +40,9 @@ def resolve_ai_schedule_strategy_ids(
         str(item.get("id") or "").strip()
         for item in strategies or []
         if item.get("selected")
-        and str(item.get("status") or "") == "approved"
+        and str(item.get("status") or "") not in {
+            "retired", "suspended", "review_required"
+        }
         and str(item.get("id") or "").strip() not in INDEPENDENT_STOCK_SCHEDULE_IDS
         and str(item.get("id") or "").strip()
     ]

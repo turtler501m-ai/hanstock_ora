@@ -73,7 +73,7 @@ class AutomationTests(unittest.TestCase):
         finally:
             automation_service.live_trading_allowed = orig
 
-    def test_execute_gate_blocks_unapproved_strategy(self):
+    def test_execute_gate_accepts_legacy_unapproved_strategy(self):
         from src.db.strategy_repository import save_ai_strategies
 
         save_ai_strategies([{
@@ -96,8 +96,8 @@ class AutomationTests(unittest.TestCase):
                 "data_as_of": now().isoformat(),
             }
             gate = evaluate_gate(policy=pol, candidate=cand, stage="execute")
-            self.assertFalse(gate["proceed"])
-            self.assertIn("strategy_not_approved", gate["blocked_reason"])
+            self.assertTrue(gate["proceed"])
+            self.assertNotIn("strategy_not_approved", gate["blocked_reason"])
         finally:
             automation_service.live_trading_allowed = orig
 

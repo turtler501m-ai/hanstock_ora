@@ -1,158 +1,126 @@
-import json
-import math
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import HTTPException
 
 import src.dashboard as dashboard
-from src.db.repository import connect_db, init_db, load_ai_strategies, save_ai_strategies
+from src.db import repository
 
 
 class AiStrategyLifecycleTests(unittest.TestCase):
     def setUp(self):
-        init_db()
-        with connect_db() as conn:
-            conn.execute("DELETE FROM ai_strategies")
-            conn.execute("DELETE FROM ai_strategy_events")
-            conn.commit()
-        self.original_backtest_pass = getattr(dashboard.trader.config, "ai_require_backtest_pass", True)
-        dashboard.trader.config.ai_require_backtest_pass = True
-        save_ai_strategies([
+        self.original_db_path = dashboard.trader.config.trade_db_path
+        self.temp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        dashboard.trader.config.trade_db_path = str(
+            Path(self.temp_dir.name) / "trades.sqlite"
+        )
+        self.backup_patch = patch.object(
+            repository,
+            "AI_STRATEGIES_FILE",
+            Path(self.temp_dir.name) / "ai_strategies.json",
+        )
+        self.backup_patch.start()
+        repository.init_db()
+
+    def tearDown(self):
+        self.backup_patch.stop()
+        dashboard.trader.config.trade_db_path = self.original_db_path
+        self.temp_dir.cleanup()
+
+    def _create(self, name: str, *, selected: bool = False) -> dict:
+        return repository.create_ai_strategy_record(
             {
-                "id": "lifecycle_rule",
-                "name": "Lifecycle Rule",
+                "id": name.lower().replace(" ", "_"),
+                "name": name,
                 "provider": "none",
                 "model": "none",
                 "weight": 0.0,
-                "description": "Local rule strategy for lifecycle tests",
-                "selected": True,
-                "status": "draft",
-                "profile": {
-                    "model": "none",
-                    "ai_weight": 0.0,
-                    "risk": {
-                        "max_risk_per_trade_pct": 1.0,
-                        "paper_trading_required_days": 20,
-                    },
-                    "backtest": {
-                        "commission_bps": 15,
-                        "slippage_bps": 5,
-                        "market_impact_bps": 5,
-                    },
-                },
-            }
-        ])
-
-    def tearDown(self):
-        dashboard.trader.config.ai_require_backtest_pass = self.original_backtest_pass
-
-
-    def test_strategy_context_route_exposes_active_gate(self):
-        body = dashboard.get_strategy_context()
-
-        self.assertEqual(body["active_strategy"]["id"], "lifecycle_rule")
-        self.assertFalse(body["active_strategy"]["approval_gate"]["ok"])
-        self.assertIn("static verification", body["active_strategy"]["approval_gate"]["missing"])
-        self.assertFalse(body["active_strategy"]["operation_status"]["ready"])
-        self.assertEqual(body["active_strategy"]["operation_status"]["mode"], "blocked")
-        self.assertTrue(body["safety"]["require_backtest_pass"])
-
-        list_body = dashboard.get_ai_strategies()
-        listed = next(strategy for strategy in list_body["strategies"] if strategy["id"] == "lifecycle_rule")
-        self.assertFalse(listed["approval_gate"]["ok"])
-        self.assertFalse(listed["operation_status"]["ready"])
-        self.assertEqual(listed["display_name"], "Lifecycle Rule")
-        self.assertEqual(listed["status_label"], "초안")
-        self.assertEqual(listed["selected_label"], "현재 사용")
-        self.assertEqual(listed["approval_gate"]["label"], "필수 검증 미완료: 정적검증, 백테스트, 모의운영")
-        self.assertEqual(listed["operation_status"]["label"], "승인/검증 필요")
-
-    def test_selecting_strategy_keeps_other_selected_strategies(self):
-        strategies = load_ai_strategies()
-        primary = next(item for item in strategies if item["id"] == "lifecycle_rule")
-        second = dict(primary)
-        second.update({"id": "lifecycle_rule_two", "name": "Lifecycle Rule Two", "selected": False})
-        save_ai_strategies([primary, second])
-
-        dashboard.select_ai_strategy("lifecycle_rule_two", dashboard.SelectStrategyPayload(selected=True))
-
-        selected_ids = {
-            item["id"] for item in load_ai_strategies() if item.get("selected")
-        }
-        self.assertEqual(selected_ids, {"lifecycle_rule", "lifecycle_rule_two"})
-
-    def test_strategy_apis_normalize_non_finite_validation_values(self):
-        strategy = load_ai_strategies()[0]
-        strategy["last_validation_result"] = json.dumps(
-            {
-                "checks": {
-                    "backtest": {
-                        "success": True,
-                        "metrics": {"total_return_pct": math.nan},
-                        "equity_curve": [100.0, math.nan],
-                    }
-                }
+                "selected": selected,
+                "profile": {"model": "none", "ai_weight": 0.0},
             }
         )
 
-        with patch("src.db.repository.load_ai_strategies", return_value=[strategy]):
-            context = dashboard.get_strategy_context()
-            body = dashboard.get_ai_strategies()
+    def test_created_strategy_is_immediately_usable_for_demo_trading(self):
+        strategy = self._create("Demo Strategy", selected=True)
 
-        validation = context["active_strategy"]["validation"]
-        self.assertIsNone(validation["checks"]["backtest"]["metrics"]["total_return_pct"])
-        json.dumps(context, allow_nan=False)
-        raw_validation = body["strategies"][0]["last_validation_result"]
-        self.assertNotIn("NaN", raw_validation)
-        parsed = json.loads(raw_validation)
-        self.assertIsNone(parsed["checks"]["backtest"]["equity_curve"][1])
-
-    def test_approval_requires_static_backtest_and_paper_checks(self):
-        with self.assertRaises(HTTPException) as blocked:
-            dashboard.approve_ai_strategy("lifecycle_rule")
-        self.assertEqual(blocked.exception.status_code, 409)
-
-        static_result = dashboard.static_verify_ai_strategy("lifecycle_rule")
-        self.assertTrue(static_result["result"]["success"])
-
-        backtest_fixture = {
-            "ok": True,
-            "success": True,
-            "status": "passed",
-            "return_pct": 3.2,
-            "max_drawdown_pct": 2.1,
-        }
-        with patch("src.dashboard.routes.stock._build_strategy_backtest", return_value=backtest_fixture):
-            backtest_result = dashboard.backtest_ai_strategy("lifecycle_rule")
-        self.assertTrue(backtest_result["result"]["success"])
-        self.assertEqual(backtest_result["strategy"]["status"], "backtested")
-
-        start_result = dashboard.start_ai_strategy_paper("lifecycle_rule")
-        self.assertEqual(start_result["strategy"]["status"], "paper_running")
-
-        complete_result = dashboard.complete_ai_strategy_paper(
-            "lifecycle_rule",
-            dashboard.PaperCompletePayload(days=20, observations=20, return_pct=1.2, max_drawdown_pct=2.5),
-        )
-        self.assertTrue(complete_result["result"]["success"])
-        self.assertEqual(complete_result["strategy"]["status"], "paper_passed")
-
-        approved = dashboard.approve_ai_strategy("lifecycle_rule")
-        self.assertEqual(approved["strategy"]["status"], "approved")
-
+        self.assertEqual(strategy["status"], "approved")
         context = dashboard.get_strategy_context()
         self.assertTrue(context["active_strategy"]["approval_gate"]["ok"])
         self.assertTrue(context["active_strategy"]["operation_status"]["ready"])
 
-        loaded = load_ai_strategies()
-        found = next(strategy for strategy in loaded if strategy["id"] == "lifecycle_rule")
-        self.assertEqual(found["status"], "approved")
-        self.assertTrue(found["last_backtested_at"])
-        self.assertTrue(found["last_paper_started_at"])
-        self.assertTrue(found["last_paper_completed_at"])
-        self.assertIn("backtest", found["last_validation_result"])
-        self.assertIn("paper", found["last_validation_result"])
+    def test_selecting_strategy_is_exclusive(self):
+        self._create("First", selected=True)
+        second = self._create("Second")
+
+        dashboard.select_ai_strategy(
+            second["id"],
+            dashboard.SelectStrategyPayload(selected=True),
+        )
+
+        selected = [
+            item["id"]
+            for item in repository.load_ai_strategies()
+            if item.get("selected")
+        ]
+        self.assertEqual(selected, [second["id"]])
+
+    def test_duplicate_strategy_name_is_rejected(self):
+        self._create("Unique Name")
+
+        with self.assertRaises(ValueError):
+            self._create("unique name")
+
+    def test_update_increments_version_without_validation_state(self):
+        strategy = self._create("Editable")
+
+        updated = repository.update_ai_strategy_record(
+            strategy["id"],
+            {"description": "changed", "weight": 0.4},
+        )
+
+        self.assertEqual(updated["strategy_version"], 2)
+        self.assertEqual(updated["status"], "approved")
+        self.assertIsNone(updated["last_validation_result"])
+
+    def test_delete_preserves_other_strategy_and_removes_target(self):
+        first = self._create("Delete Me")
+        second = self._create("Keep Me", selected=True)
+
+        dashboard.delete_ai_strategy(first["id"])
+
+        strategies = repository.load_ai_strategies()
+        ids = {item["id"] for item in strategies}
+        self.assertNotIn(first["id"], ids)
+        self.assertIn(second["id"], ids)
+        selected = [item["id"] for item in strategies if item.get("selected")]
+        self.assertEqual(selected, [second["id"]])
+
+    def test_delete_is_blocked_for_active_position(self):
+        strategy = self._create("Position Owner")
+        with repository.connect_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO ai_strategy_positions (
+                    market, account_id, symbol, strategy_id, strategy_version,
+                    profile_hash, side, entry_thesis, invalidation_conditions,
+                    entry_price, filled_qty, remaining_qty, status,
+                    opened_at, created_at, updated_at
+                ) VALUES (
+                    'KR', 'demo', '005930', ?, 1, 'hash', 'long', '{}', '[]',
+                    70000, 1, 1, 'open', '2026-07-30', '2026-07-30',
+                    '2026-07-30'
+                )
+                """,
+                (strategy["id"],),
+            )
+            conn.commit()
+
+        with self.assertRaises(HTTPException) as blocked:
+            dashboard.delete_ai_strategy(strategy["id"])
+
+        self.assertEqual(blocked.exception.status_code, 409)
 
 
 if __name__ == "__main__":

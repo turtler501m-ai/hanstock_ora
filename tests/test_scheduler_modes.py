@@ -190,7 +190,7 @@ class SchedulerModeTests(unittest.TestCase):
             ],
         )
 
-    def test_ai_schedule_slot_excludes_selected_but_unapproved_strategy(self):
+    def test_ai_schedule_slot_includes_selected_strategy_without_validation_gate(self):
         from src.strategy_ids import resolve_ai_schedule_strategy_ids
 
         resolved = resolve_ai_schedule_strategy_ids(
@@ -203,7 +203,7 @@ class SchedulerModeTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(resolved, ["ready"])
+        self.assertEqual(resolved, ["paper_only", "ready"])
 
     def test_strategy_dispatch_ignores_legacy_issue_sector_schedule(self):
         schedule = {

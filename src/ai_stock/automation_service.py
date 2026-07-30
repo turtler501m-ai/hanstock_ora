@@ -168,8 +168,8 @@ def _strategy_gate(candidate: dict[str, Any]) -> str | None:
     found = next((s for s in strategies if str(s.get("id")) == strategy_id), None)
     if not found:
         return "strategy_not_found"
-    if str(found.get("status") or "") != "approved":
-        return "strategy_not_approved"
+    if str(found.get("status") or "") in {"review_required", "suspended", "retired"}:
+        return "strategy_not_operational"
     expected_hash = candidate.get("profile_hash")
     actual_hash = found.get("profile_hash")
     if expected_hash and actual_hash and str(expected_hash) != str(actual_hash):

@@ -19,7 +19,7 @@ class AutonomyOperatingConfigTests(unittest.TestCase):
         self.assertFalse(fields["autonomy_enable_live_trading"].default)
         self.assertFalse(fields["autonomy_live_opt_in"].default)
 
-    def test_legacy_profile_receives_conservative_limits_without_approval(self):
+    def test_legacy_profile_receives_conservative_limits_and_is_operational(self):
         strategy = normalize_ai_strategy(
             {
                 "id": "legacy",
@@ -31,7 +31,7 @@ class AutonomyOperatingConfigTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(strategy["status"], "draft")
+        self.assertEqual(strategy["status"], "approved")
         risk = strategy["profile"]["risk"]
         self.assertEqual(risk["max_risk_per_trade_pct"], 0.7)
         self.assertEqual(risk["max_total_open_risk_pct"], 2.0)

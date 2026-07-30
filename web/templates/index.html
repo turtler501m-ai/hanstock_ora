@@ -917,17 +917,12 @@
                             <strong id="strategy-context-safety">-</strong>
                             <small id="strategy-context-approval">-</small>
                         </div>
-                        <div>
-                            <span>Validation</span>
-                            <strong id="strategy-context-verified">-</strong>
-                            <small id="strategy-context-used">-</small>
-                        </div>
                     </div>
                     <div class="panel-sub easy-strategy-builder" style="margin-top: 1rem;">
                         <div class="panel-header split-header">
                             <div>
                                 <h3>쉬운 전략 만들기</h3>
-                                <p class="section-help">원하는 성향을 고르면 전략을 만들고 바로 적용합니다. 세부 검증은 자동으로 기본 처리됩니다.</p>
+                                <p class="section-help">원하는 성향을 고르면 전략을 만들고 바로 적용합니다. 성과는 모의계좌 실제 거래 내역으로 확인합니다.</p>
                             </div>
                         </div>
                         <div class="ai-strategy-summary">
@@ -941,7 +936,7 @@
                                 <strong>공격형</strong><small>후보를 더 넓게 탐색</small>
                             </button>
                             <button type="button" class="button-ghost" id="btn-toggle-advanced-strategy">
-                                <strong>고급 설정</strong><small>검증/운영 버튼 보기</small>
+                                <strong>고급 설정</strong><small>직접 전략 추가</small>
                             </button>
                         </div>
                     </div>
@@ -954,7 +949,7 @@
                                     <th>상태</th>
                                     <th>모델명</th>
                                     <th>가중치</th>
-                                    <th style="width: 420px; text-align: center;">검증/운영</th>
+                                    <th style="width: 420px; text-align: center;">운영/관리</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -975,14 +970,6 @@
                             <div><span>평균 점수</span><strong id="strategy-audit-score">-</strong><small>final/rule/AI</small></div>
                             <div><span>모델 상태</span><strong id="strategy-audit-status">-</strong><small id="strategy-audit-optimizer">-</small></div>
                             <div><span>5일 성과</span><strong id="strategy-audit-review">-</strong><small id="strategy-audit-warning">-</small></div>
-                        </div>
-                        <div class="strategy-chart-container" style="margin: 1.5rem 0; background: rgba(30, 41, 59, 0.4); padding: 1.2rem; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.1);" id="strategy-backtest-chart-container">
-                            <h4 style="margin: 0 0 0.8rem 0; font-size: 0.95rem; color: #cbd5e1; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
-                                📊 백테스트 누적 자산 추이
-                            </h4>
-                            <div style="height: 180px; position: relative;">
-                                <canvas id="chart-strategy-backtest"></canvas>
-                            </div>
                         </div>
                         <div class="table-responsive">
                             <table id="table-strategy-events" style="width: 100%; border-collapse: collapse;">

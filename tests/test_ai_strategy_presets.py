@@ -9,17 +9,13 @@ from src.db import repository
 
 
 class AiStrategyPresetTests(unittest.TestCase):
-    def test_hanstock_easy_preset_requires_explicit_lifecycle_approval(self):
+    def test_hanstock_easy_preset_is_ready_for_demo_trading(self):
         original_db_path = dashboard.trader.config.trade_db_path
         try:
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
                 dashboard.trader.config.trade_db_path = str(Path(tmpdir) / "trades.sqlite")
                 backup_path = Path(tmpdir) / "ai_strategies.json"
-                with patch.object(repository, "AI_STRATEGIES_FILE", backup_path), patch.object(
-                    stock,
-                    "_build_strategy_backtest",
-                    return_value={"ok": True, "success": True, "status": "passed"},
-                ):
+                with patch.object(repository, "AI_STRATEGIES_FILE", backup_path):
                     result = stock.apply_ai_strategy_preset("balanced")
                     strategies = repository.load_ai_strategies()
         finally:
@@ -30,9 +26,10 @@ class AiStrategyPresetTests(unittest.TestCase):
         self.assertEqual(result["preset"], "balanced")
         self.assertEqual(len(selected), 1)
         self.assertEqual(selected[0]["id"], result["strategy"]["id"])
-        self.assertEqual(selected[0]["status"], "paper_passed")
+        self.assertEqual(selected[0]["status"], "approved")
         self.assertEqual(selected[0]["provider"], "none")
-        self.assertEqual(selected[0]["profile"]["risk"]["paper_trading_required_days"], 0)
+        self.assertNotIn("paper_trading_required_days", selected[0]["profile"]["risk"])
+        self.assertNotIn("backtest", selected[0]["profile"])
         self.assertEqual(selected[0]["profile"]["risk"]["max_total_open_risk_pct"], 2.0)
         self.assertEqual(selected[0]["profile"]["risk"]["max_strategy_exposure_pct"], 30.0)
         self.assertTrue(selected[0]["profile"]["market_regime_filter"])
@@ -45,21 +42,12 @@ class AiStrategyPresetTests(unittest.TestCase):
         strategy = {
             "id": "approved_ai",
             "selected": True,
-            "status": "paper_passed",
+            "status": "approved",
             "strategy_version": 1,
         }
         with patch(
             "src.db.repository.load_ai_strategies",
-            side_effect=[
-                [dict(strategy)],
-                [{**strategy, "status": "approved"}],
-            ],
-        ), patch.object(
-            stock,
-            "_auto_validate_selected_strategy",
-            return_value={"ok": True, "strategy_id": "approved_ai"},
-        ), patch(
-            "src.db.repository.save_ai_strategies",
+            return_value=[dict(strategy)],
         ), patch(
             "src.db.repository.record_ai_strategy_event",
         ), patch(
@@ -111,7 +99,7 @@ class AiStrategyPresetTests(unittest.TestCase):
             run_type="dashboard_manual",
         )
 
-    def test_one_click_demo_runs_qualification_before_autonomy(self):
+    def test_demo_autonomy_does_not_run_legacy_qualification(self):
         expected = {
             "scan": {"status": "completed"},
             "automation": {"planned": 0, "approved": 0},
@@ -124,21 +112,14 @@ class AiStrategyPresetTests(unittest.TestCase):
             "src.config.config.autonomy_enabled", True
         ), patch(
             "src.config.config.autonomy_require_approval", False
-        ), patch.object(
-            stock,
-            "_qualify_demo_strategy_one_click",
-            return_value={"mode": "one_click"},
-        ) as qualify, patch(
+        ), patch(
             "src.ai_stock.automation_service.run_strategy",
             return_value=expected,
         ):
             result = stock.run_ai_strategy_autonomy("s1", {"market": "KR"})
 
         self.assertTrue(result["ok"])
-        self.assertEqual(
-            result["qualification"]["mode"], "one_click"
-        )
-        qualify.assert_called_once_with("s1")
+        self.assertNotIn("qualification", result)
 
 
 if __name__ == "__main__":
