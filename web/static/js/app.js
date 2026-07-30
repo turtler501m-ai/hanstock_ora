@@ -2850,7 +2850,8 @@ function renderTradeSyncResult(result) {
                 : '선택한 동기화';
             detailTitle.textContent = `${label} 전체 항목`;
         }
-        if (count) count.textContent = `(${items.length.toLocaleString()}건)`;
+        const itemCount = Number(run.sync_item_count ?? items.length);
+        if (count) count.textContent = `(${itemCount.toLocaleString()}건)`;
         if (!tbody) return;
         const typeLabels = {
             history: '체결 내역',
@@ -2901,7 +2902,9 @@ function renderTradeSyncResult(result) {
             const completedLabel = completedAt && !Number.isNaN(completedAt.getTime())
                 ? completedAt.toLocaleString('ko-KR')
                 : '-';
-            const itemCount = Array.isArray(run.sync_items) ? run.sync_items.length : 0;
+            const itemCount = Number(
+                run.sync_item_count ?? (Array.isArray(run.sync_items) ? run.sync_items.length : 0)
+            );
             const changed = Number(run.history_imported_count || 0) + Number(run.history_updated_count || 0);
             return `
                 <tr>
@@ -2915,12 +2918,23 @@ function renderTradeSyncResult(result) {
             `;
         }).join('');
         runsTbody.querySelectorAll('.trade-sync-run-button').forEach((button) => {
-            button.addEventListener('click', () => {
+            button.addEventListener('click', async () => {
                 const run = runs[Number(button.dataset.runIndex || 0)];
                 if (!run) return;
-                renderSyncItems(run);
-                if (details) details.open = true;
-                details?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                button.disabled = true;
+                try {
+                    const detail = await fetchJson(
+                        `/api/trades/sync/runs/${encodeURIComponent(run.run_id)}`,
+                        30000
+                    );
+                    renderSyncItems(detail);
+                    if (details) details.open = true;
+                    details?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                } catch (error) {
+                    setStatus(`동기화 상세 조회 실패: ${error.message}`);
+                } finally {
+                    button.disabled = false;
+                }
             });
         });
     }

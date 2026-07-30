@@ -59,6 +59,7 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("result.runs", APP_JS)
         self.assertIn("trade-sync-run-button", APP_JS)
         self.assertIn("run.status === 'running'", APP_JS)
+        self.assertIn("/api/trades/sync/runs/", APP_JS)
         self.assertIn("동기화 전체 항목 보기", INDEX_HTML)
         self.assertIn("details.hidden = false", APP_JS)
 

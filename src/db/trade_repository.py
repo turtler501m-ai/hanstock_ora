@@ -94,6 +94,22 @@ def list_trade_sync_runs(limit: int = 50) -> list[dict]:
             continue
     return runs
 
+
+def get_trade_sync_run(run_id: str) -> dict | None:
+    init_trade_sync_runs()
+    with connect_db() as conn:
+        row = conn.execute(
+            "SELECT payload FROM trade_sync_runs WHERE run_id=?",
+            (str(run_id),),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        payload = json.loads(row[0])
+        return payload if isinstance(payload, dict) else None
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
 def _extract_broker_order_id(broker_result: dict | None) -> str:
     if not isinstance(broker_result, dict):
         return ""

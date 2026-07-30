@@ -1666,7 +1666,10 @@ class DashboardCoreTests(unittest.TestCase):
                 self.assertEqual(result["removed_mismatch_count"], 13)
                 self.assertIn("completed_at", result)
                 self.assertNotIn("history_sync", result)
-                self.assertEqual(result["sync_items"][0]["symbol"], "005930")
+                self.assertEqual(result["sync_item_count"], 1)
+                self.assertEqual(result["sync_items"], [])
+                detail = stock_routes.get_trade_sync_run_detail(result["run_id"])
+                self.assertEqual(detail["sync_items"][0]["symbol"], "005930")
                 self.assertEqual(len(result["runs"]), 1)
 
                 stock_routes._save_trade_sync_result({
@@ -1682,7 +1685,8 @@ class DashboardCoreTests(unittest.TestCase):
                 })
                 second = stock_routes.get_trade_sync_status()
                 self.assertEqual(len(second["runs"]), 2)
-                self.assertEqual(second["runs"][1]["sync_items"][0]["symbol"], "005930")
+                older_detail = stock_routes.get_trade_sync_run_detail(second["runs"][1]["run_id"])
+                self.assertEqual(older_detail["sync_items"][0]["symbol"], "005930")
 
                 stock_routes._save_trade_sync_result({
                     "run_id": "same-run",
@@ -1729,7 +1733,9 @@ class DashboardCoreTests(unittest.TestCase):
                 result = stock_routes.get_trade_sync_status()
 
                 self.assertEqual(len(result["runs"]), 1)
-                self.assertEqual(result["runs"][0]["sync_items"][0]["symbol"], "005930")
+                self.assertEqual(result["runs"][0]["sync_item_count"], 1)
+                detail = stock_routes.get_trade_sync_run_detail(result["runs"][0]["run_id"])
+                self.assertEqual(detail["sync_items"][0]["symbol"], "005930")
                 with sqlite3.connect(dashboard.trader.config.trade_db_path) as conn:
                     count = conn.execute("SELECT COUNT(*) FROM trade_sync_runs").fetchone()[0]
                 self.assertEqual(count, 1)

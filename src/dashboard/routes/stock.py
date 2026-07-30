@@ -2289,7 +2289,25 @@ def get_trade_sync_status():
     runs = list_trade_sync_runs(limit=50)
     if not runs:
         return {"ok": True, "available": False, "runs": []}
-    return {"available": True, **runs[0], "runs": runs}
+    summaries = [
+        {
+            **run,
+            "sync_item_count": len(run.get("sync_items") or []),
+            "sync_items": [],
+        }
+        for run in runs
+    ]
+    return {"available": True, **summaries[0], "runs": summaries}
+
+
+@router.get("/api/trades/sync/runs/{run_id}")
+def get_trade_sync_run_detail(run_id: str):
+    from src.db.trade_repository import get_trade_sync_run
+
+    run = get_trade_sync_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="동기화 실행 기록을 찾을 수 없습니다.")
+    return run
 
 
 
