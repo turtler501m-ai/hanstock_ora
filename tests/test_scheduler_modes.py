@@ -1,5 +1,7 @@
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from src import scheduler, strategy_scheduler
@@ -25,6 +27,24 @@ class SchedulerModeTests(unittest.TestCase):
     def tearDown(self):
         self.approval_lookup.stop()
         self.ai_strategy_lookup.stop()
+
+    def test_daily_auto_result_uses_dashboard_path_with_active_isolated_strategy(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result_path = Path(temp_dir) / "daily_auto_last_result.json"
+            with patch.dict(
+                "os.environ",
+                {"HANSTOCK_SCHEDULER_RESULT_PATH": str(result_path)},
+            ):
+                scheduler._write_cycle_result(
+                    {"plan": [{"symbol": "005930"}]},
+                    mode="daily_auto",
+                    strategy_id="heikin_ashi_scalping_strategy",
+                )
+
+            self.assertTrue(result_path.exists())
+            self.assertFalse(
+                (Path(temp_dir) / "heikin_ashi_scalping_last_result.json").exists()
+            )
 
     def test_strategy_dispatch_limits_isolated_strategy_to_candidate_orders(self):
         schedule = {
