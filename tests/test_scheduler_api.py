@@ -171,9 +171,12 @@ class SchedulerApiTests(unittest.TestCase):
 
         status = get_scheduler_status()
         rows = status["last_result"]["result"]["results"]
+        runs = status["last_result"]["result"]["execution_runs"]
 
         self.assertEqual([row["symbol"] for row in rows], ["005930", "000660"])
         self.assertEqual([row["round"] for row in rows], [1, 2])
+        self.assertEqual(len(runs), 2)
+        self.assertEqual([run["round"] for run in runs], [1, 2])
         self.assertEqual(status["last_result"]["range_days"], 30)
         self.assertIn("run_date", rows[0])
 

@@ -2581,7 +2581,7 @@ def _run_trade_sync_background(*, days: int, run_id: str, started_at: str) -> No
 
 
 @router.post("/api/trades/sync")
-def sync_trades(days: int = 90):
+def sync_trades(days: int = 30):
     global _trade_sync_thread
     started_at = trader.datetime.now(trader.KST).isoformat()
     run_id = started_at

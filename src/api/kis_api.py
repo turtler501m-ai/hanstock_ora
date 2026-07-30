@@ -502,22 +502,47 @@ class KIStockAPI:
                     rows = []
                     page_params = dict(params)
                     tr_cont = ""
+                    seen_page_tokens: set[tuple[str, str]] = set()
+                    page_count = 0
                     while True:
+                        page_count += 1
+                        if page_count > 100:
+                            logger.warning(
+                                "KIS trade history pagination stopped after 100 pages"
+                            )
+                            break
                         headers = self._headers(tr_id)
                         if tr_cont:
                             headers["tr_cont"] = tr_cont
-                        r = HTTP.get(url, headers=headers, params=page_params, timeout=15)
-                        data = self._response_json(r, "Trade history")
+                        try:
+                            r = HTTP.get(url, headers=headers, params=page_params, timeout=15)
+                            data = self._response_json(r, "Trade history")
+                        except Exception as page_exc:
+                            if rows:
+                                logger.warning(
+                                    "KIS trade history later page failed; "
+                                    f"returning {len(rows)} rows already received: {page_exc}"
+                                )
+                                break
+                            raise
                         if data.get("rt_cd") != "0":
                             raise self._kis_error(data, "unknown KIS trade history error")
-                        rows.extend(data.get("output1", []) or [])
 
                         next_fk = str(data.get("ctx_area_fk100") or data.get("CTX_AREA_FK100") or "").strip()
                         next_nk = str(data.get("ctx_area_nk100") or data.get("CTX_AREA_NK100") or "").strip()
                         response_headers = getattr(r, "headers", {}) or {}
                         tr_cont = str(response_headers.get("tr_cont") or response_headers.get("tr-cont") or "").strip()
+                        page_token = (next_fk, next_nk)
+                        if page_count > 1 and page_token in seen_page_tokens:
+                            logger.warning(
+                                "KIS trade history pagination returned a repeated token; "
+                                f"stopping with {len(rows)} rows"
+                            )
+                            break
+                        rows.extend(data.get("output1", []) or [])
                         if tr_cont not in {"M", "F"} or (not next_fk and not next_nk):
                             break
+                        seen_page_tokens.add(page_token)
                         page_params["CTX_AREA_FK100"] = next_fk
                         page_params["CTX_AREA_NK100"] = next_nk
                         _kis_throttle()

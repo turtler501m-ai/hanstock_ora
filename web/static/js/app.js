@@ -4112,6 +4112,7 @@ async function renderScheduleInfo() {
             const approved = lastResult.result.auto_approved || [];
             const approvalErrors = lastResult.result.auto_approval_errors || [];
             const runErrors = lastResult.result.errors || lastResult.result.retry_errors || [];
+            const schedulerRuns = lastResult.result.execution_runs || [];
             const summaryCounts = lastResult.result.summary_counts || {};
             
             // Update daily total summary metrics at the top
@@ -4148,6 +4149,19 @@ async function renderScheduleInfo() {
             
             // Build groups dynamically by round
             const uniqueRounds = new Map(); // round -> { time, results, approved, approvalErrors, mode }
+            schedulerRuns.forEach(run => {
+                if (!run.round) return;
+                uniqueRounds.set(run.round, {
+                    time: run.time || '',
+                    results: [],
+                    approved: [],
+                    approvalErrors: [],
+                    mode: run.mode || lastResult.mode,
+                    strategyId: run.strategy_id || '',
+                    status: run.status || 'completed',
+                    message: run.message || ''
+                });
+            });
             results.forEach(r => {
                 if (r.round) {
                     if (!uniqueRounds.has(r.round)) {
@@ -4231,7 +4245,7 @@ async function renderScheduleInfo() {
                                     <span style="font-weight: 500; font-size: 0.95rem; color: var(--text); display: flex; align-items: center; gap: 0.25rem;">
                                         <i class="far fa-clock" style="font-size: 0.85rem; color: var(--text-muted);"></i> ${timeVal}
                                     </span>
-                                    <span class="badge" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: var(--text-muted); font-size: 0.75rem; padding: 0.15rem 0.4rem; border-radius: 4px;">${modeKor}</span>
+                                    <span class="badge" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: var(--text-muted); font-size: 0.75rem; padding: 0.15rem 0.4rem; border-radius: 4px;">${modeKor}${roundData.strategyId ? ` · ${escapeHtml(roundData.strategyId)}` : ''}</span>
                                 </div>
                                 <div style="display: flex; align-items: center; gap: 1rem;">
                                     <span style="font-size: 0.85rem; color: var(--text-muted);" class="d-none d-sm-inline">

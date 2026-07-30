@@ -121,6 +121,34 @@ class KIStockAPITests(unittest.TestCase):
         finally:
             kis_api._KIS_MIN_INTERVAL = original_interval
 
+    def test_trade_history_stops_on_repeated_continuation_token(self):
+        api = KIStockAPI.__new__(KIStockAPI)
+        api.base_url = "https://example.test"
+        api.access_token = "token"
+
+        response = Mock()
+        response.status_code = 200
+        response.headers = {"tr_cont": "M"}
+        response.json.return_value = {
+            "rt_cd": "0",
+            "output1": [{"odno": "D12345"}],
+            "ctx_area_fk100": "same-fk",
+            "ctx_area_nk100": "same-nk",
+        }
+
+        original_interval = kis_api._KIS_MIN_INTERVAL
+        try:
+            kis_api._KIS_MIN_INTERVAL = 0
+            with patch.object(kis_api.config, "kistock_account", "1234567801"), \
+                    patch.object(kis_api.config, "trading_env", "demo"), \
+                    patch.object(kis_api.HTTP, "get", return_value=response) as get:
+                rows = api.get_trade_history("20260501", "20260524")
+
+            self.assertEqual(rows, [{"odno": "D12345"}])
+            self.assertEqual(get.call_count, 2)
+        finally:
+            kis_api._KIS_MIN_INTERVAL = original_interval
+
     def test_place_order_attaches_hashkey_when_available(self):
         api = KIStockAPI.__new__(KIStockAPI)
         api.base_url = "https://example.test"

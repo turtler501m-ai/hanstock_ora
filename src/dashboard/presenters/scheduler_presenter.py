@@ -165,6 +165,7 @@ def _compact_scheduler_status_result(last_result: dict | None, item_limit: int =
         "errors": [_trim_text(item) for item in _tail_items(run_errors, 50)],
         "status": result.get("status"),
         "ok": result.get("ok"),
+        "execution_runs": _json_safe(_tail_items(result.get("execution_runs") or [], 200)),
         "summary_counts": {
             "plan_count": len(plan_items),
             "queue_count": max(0, queued_created - len(approved_items) - len(approval_errors)),

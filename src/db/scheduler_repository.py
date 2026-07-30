@@ -108,6 +108,7 @@ def load_recent_scheduler_results(days: int = 30) -> dict | None:
             merged_approved = []
             merged_approval_errors = []
             merged_run_errors = []
+            merged_runs = []
             
             latest_recorded_at = rows[-1]["recorded_at"]
             latest_mode = rows[-1]["mode"]
@@ -125,6 +126,27 @@ def load_recent_scheduler_results(days: int = 30) -> dict | None:
                 date_part = normalized_recorded_at[:10]
                 time_part = normalized_recorded_at.split(" ")[1][:5]
                 display_time = f"{date_part[5:]} {time_part}"
+                run_errors = res_data.get("errors", []) or res_data.get("retry_errors", [])
+                if not isinstance(run_errors, list):
+                    run_errors = [run_errors] if run_errors else []
+                candidate_scan = res_data.get("candidate_scan") or {}
+                scan_error = (
+                    candidate_scan.get("scan_error")
+                    if isinstance(candidate_scan, dict)
+                    else None
+                )
+                merged_runs.append({
+                    "round": round_num,
+                    "recorded_at": recorded_at_str,
+                    "time": display_time,
+                    "mode": row["mode"],
+                    "strategy_id": run_strategy_id,
+                    "plan_count": len(res_data.get("results") or res_data.get("plan") or []),
+                    "approved_count": len(res_data.get("auto_approved") or []),
+                    "error_count": len(res_data.get("auto_approval_errors") or []) + len(run_errors),
+                    "status": "failed" if run_errors else "completed",
+                    "message": scan_error or (str(run_errors[0]) if run_errors else ""),
+                })
                 
                 # plans / results
                 for item in res_data.get("results", []):
@@ -186,6 +208,7 @@ def load_recent_scheduler_results(days: int = 30) -> dict | None:
                     "auto_approved": merged_approved,
                     "auto_approval_errors": merged_approval_errors,
                     "errors": merged_run_errors,
+                    "execution_runs": merged_runs,
                     "status": "success" if not merged_approval_errors and not merged_run_errors else "failed",
                     "ok": True
                 }
