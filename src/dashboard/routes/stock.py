@@ -2238,11 +2238,19 @@ def _save_trade_sync_result(result: dict) -> None:
             "history_error",
             "order_status_error",
             "sync_items",
+            "status",
+            "error",
+            "started_at",
         )
     }
-    completed_at = trader.datetime.now(trader.KST).isoformat()
+    now = trader.datetime.now(trader.KST).isoformat()
+    run_id = str(result.get("run_id") or now)
+    completed_at = result.get("completed_at")
+    if not completed_at and result.get("status") != "running":
+        completed_at = now
     payload.update({
-        "run_id": completed_at,
+        "run_id": run_id,
+        "started_at": result.get("started_at") or now,
         "completed_at": completed_at,
     })
     TRADE_SYNC_RESULT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -2256,7 +2264,14 @@ def _save_trade_sync_result(result: dict) -> None:
                 runs = [previous]
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             runs = []
-    runs.append(payload)
+    existing_index = next(
+        (index for index, item in enumerate(runs) if str(item.get("run_id") or "") == run_id),
+        None,
+    )
+    if existing_index is None:
+        runs.append(payload)
+    else:
+        runs[existing_index] = {**runs[existing_index], **payload}
     history_payload = {
         "version": 2,
         "runs": runs[-50:],
@@ -2288,8 +2303,26 @@ def get_trade_sync_status():
 
 @router.post("/api/trades/sync")
 def sync_trades(days: int = 90):
+    started_at = trader.datetime.now(trader.KST).isoformat()
+    run_id = started_at
     if trader.DRY_RUN:
-        raise HTTPException(status_code=400, detail="紐⑥쓽 ?ㅽ뻾(DRY_RUN) 紐⑤뱶?먯꽌??利앷텒??怨꾩쥖 ?숆린?붾? ?ъ슜?????놁뒿?덈떎.")
+        message = "모의 실행(DRY_RUN) 모드에서는 증권사 계좌 동기화를 사용할 수 없습니다."
+        _save_trade_sync_result({
+            "run_id": run_id,
+            "started_at": started_at,
+            "status": "failed",
+            "ok": False,
+            "error": message,
+            "sync_items": [],
+        })
+        raise HTTPException(status_code=400, detail=message)
+    _save_trade_sync_result({
+        "run_id": run_id,
+        "started_at": started_at,
+        "status": "running",
+        "ok": False,
+        "sync_items": [],
+    })
     try:
         api = _get_api()
         shared_history = None
@@ -2477,6 +2510,9 @@ def sync_trades(days: int = 90):
         ]
         sync_items = history_items + order_status_items + balance_sync_items + list(cleanup.get("items") or [])
         response = {
+            "run_id": run_id,
+            "started_at": started_at,
+            "status": "completed",
             "ok": True,
             "synced_count": synced_count + imported_count,
             "balance_synced_count": synced_count,
@@ -2493,6 +2529,14 @@ def sync_trades(days: int = 90):
         _save_trade_sync_result(response)
         return response
     except Exception as e:
+        _save_trade_sync_result({
+            "run_id": run_id,
+            "started_at": started_at,
+            "status": "failed",
+            "ok": False,
+            "error": str(e),
+            "sync_items": [],
+        })
         raise HTTPException(status_code=500, detail=str(e))
 
 

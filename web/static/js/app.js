@@ -2834,7 +2834,7 @@ function renderTradeSyncResult(result) {
             ? `완료 시각: ${completedAt.toLocaleString('ko-KR')}`
             : '';
     }
-    const errors = [result.history_error, result.order_status_error].filter(Boolean);
+    const errors = [result.error, result.history_error, result.order_status_error].filter(Boolean);
     if (error) {
         error.hidden = errors.length === 0;
         error.textContent = errors.length ? `오류: ${errors.join(' / ')}` : '';
@@ -2869,6 +2869,11 @@ function renderTradeSyncResult(result) {
         tbody.innerHTML = items.length ? items.map((item) => {
             const action = String(item.action || '').toLowerCase();
             const actionLabel = action === 'buy' ? '매수' : action === 'sell' ? '매도' : '-';
+            const runStatus = run.status === 'running'
+                ? '<span class="text-warning">진행 중</span>'
+                : (run.status === 'failed' || run.ok === false)
+                    ? '<span class="text-danger">실패</span>'
+                    : '<span class="text-success">완료</span>';
             return `
                 <tr>
                     <td>${escapeHtml(typeLabels[item.sync_type] || item.sync_type || '-')}</td>
@@ -2905,7 +2910,7 @@ function renderTradeSyncResult(result) {
                     <td>${changed.toLocaleString()}건</td>
                     <td>${Number(run.balance_synced_count || 0).toLocaleString()}건</td>
                     <td>${Number(run.removed_mismatch_count || 0).toLocaleString()}건</td>
-                    <td>${run.ok === false ? '<span class="text-danger">오류</span>' : '<span class="text-success">완료</span>'}</td>
+                    <td>${runStatus}${run.error ? `<div class="time-muted" title="${escapeHtml(run.error)}">${escapeHtml(run.error)}</div>` : ''}</td>
                 </tr>
             `;
         }).join('');

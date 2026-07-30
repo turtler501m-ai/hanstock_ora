@@ -1680,6 +1680,27 @@ class DashboardCoreTests(unittest.TestCase):
                 second = stock_routes.get_trade_sync_status()
                 self.assertEqual(len(second["runs"]), 2)
                 self.assertEqual(second["runs"][1]["sync_items"][0]["symbol"], "005930")
+
+                stock_routes._save_trade_sync_result({
+                    "run_id": "same-run",
+                    "started_at": "2026-07-30T10:00:00+09:00",
+                    "status": "running",
+                    "ok": False,
+                    "sync_items": [],
+                })
+                stock_routes._save_trade_sync_result({
+                    "run_id": "same-run",
+                    "started_at": "2026-07-30T10:00:00+09:00",
+                    "status": "failed",
+                    "ok": False,
+                    "error": "broker timeout",
+                    "sync_items": [],
+                })
+                updated = stock_routes.get_trade_sync_status()
+                same_runs = [run for run in updated["runs"] if run["run_id"] == "same-run"]
+                self.assertEqual(len(same_runs), 1)
+                self.assertEqual(same_runs[0]["status"], "failed")
+                self.assertEqual(same_runs[0]["error"], "broker timeout")
         finally:
             stock_routes.TRADE_SYNC_RESULT_PATH = original_path
 
