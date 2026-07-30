@@ -2362,19 +2362,11 @@ def _sync_watchlist_from_scan_result(
             "score": cand.get("score", score),
         })
 
+    # A weak score in one scan means "no entry signal now", not "remove this
+    # registered symbol". Keep explicit registrations stable across scheduled
+    # scans; pruning must be an explicit user action.
     removed_symbols = []
-    kept_symbols = []
-    for symbol in symbols:
-        if symbol in score_by_symbol and score_by_symbol[symbol] < keep_threshold:
-            removed_symbols.append({
-                "symbol": symbol,
-                "name": name_by_symbol.get(symbol, symbol),
-                "score": score_by_symbol[symbol],
-            })
-            continue
-        kept_symbols.append(symbol)
-
-    watchlist_data["symbols"] = kept_symbols
+    watchlist_data["symbols"] = symbols
     return {
         "changed": bool(added_symbols or removed_symbols),
         "eligible_count": eligible_count,

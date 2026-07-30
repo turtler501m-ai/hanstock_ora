@@ -2049,7 +2049,7 @@ class DashboardCoreTests(unittest.TestCase):
         self.assertEqual(result["added_symbols"][0]["symbol"], "035420")
         self.assertEqual(saved[0]["ai_auto_add_threshold"], 2.0)
 
-    def test_watchlist_scan_removes_scanned_symbols_below_threshold(self):
+    def test_watchlist_scan_keeps_registered_symbols_below_threshold(self):
         saved = []
         with patch.object(dashboard, "_required_env_missing", return_value=[]), \
                 patch.object(dashboard, "_get_api", return_value=object()), \
@@ -2077,13 +2077,13 @@ class DashboardCoreTests(unittest.TestCase):
             result = asyncio.run(dashboard.trigger_watchlist_ai_scan(None))
 
         self.assertEqual(result["threshold_used"], 2.0)
-        self.assertEqual(result["removed_count"], 1)
-        self.assertEqual(result["removed_symbols"][0]["symbol"], "005930")
+        self.assertEqual(result["removed_count"], 0)
+        self.assertEqual(result["removed_symbols"], [])
         self.assertEqual(result["added_count"], 1)
         self.assertEqual(result["added_symbols"][0]["symbol"], "035420")
-        self.assertEqual(saved[-1]["symbols"], ["000660", "035420"])
+        self.assertEqual(saved[-1]["symbols"], ["005930", "000660", "035420"])
 
-    def test_watchlist_scan_removes_two_point_symbols_when_auto_add_threshold_is_higher(self):
+    def test_watchlist_scan_keeps_registered_symbols_when_threshold_is_higher(self):
         saved = []
         with patch.object(dashboard, "_required_env_missing", return_value=[]), \
                 patch.object(dashboard, "_get_api", return_value=object()), \
@@ -2110,8 +2110,8 @@ class DashboardCoreTests(unittest.TestCase):
             result = asyncio.run(dashboard.trigger_watchlist_ai_scan(None))
 
         self.assertEqual(result["threshold_used"], 3.0)
-        self.assertEqual([item["symbol"] for item in result["removed_symbols"]], ["005930", "000660"])
-        self.assertEqual(saved[-1]["symbols"], ["035420"])
+        self.assertEqual(result["removed_symbols"], [])
+        self.assertEqual(saved[-1]["symbols"], ["005930", "000660", "035420"])
 
     def test_candidate_orders_use_scan_price_without_quote_lookup(self):
         original_max_positions = dashboard.trader.MAX_POSITIONS
