@@ -63,6 +63,12 @@ def main() -> int:
     restored_strategy_rows = [
         row for row in strategy_rows if str(row[1]) in eligible
     ]
+    restored_strategy_rows.extend(
+        [
+            ("ai_stock_default_v1", symbol, names[symbol], datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            for symbol in sorted(eligible)
+        ]
+    )
     now = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_path = target.parent / "backups" / f"trades-before-watchlist-restore-{now}.sqlite"
 
