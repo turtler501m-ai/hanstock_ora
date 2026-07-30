@@ -1223,16 +1223,12 @@ def build_runtime_plan(
                                     changed = True
                                     logger.info(f"[WATCHLIST AUTO-ADD] Added {sym} (score={score})")
                                     
-                        kept_symbols = []
-                        for sym in symbols:
-                            if sym in score_by_symbol and score_by_symbol[sym] < threshold:
-                                changed = True
-                                logger.info(f"[WATCHLIST AUTO-REMOVE] Removed {sym} (score={score_by_symbol[sym]})")
-                                continue
-                            kept_symbols.append(sym)
-                            
                         if changed:
-                            watchlist_data["symbols"] = kept_symbols
+                            # ai_auto_add is intentionally additive. A score below the
+                            # entry threshold only means that the symbol has no signal
+                            # in this scan; it is not evidence that an explicitly
+                            # registered watchlist item should be deleted.
+                            watchlist_data["symbols"] = symbols
                             save_watchlist_data(watchlist_data)
                             sync_watchlist_runtime()
                 except Exception as w_err:
