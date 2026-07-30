@@ -261,7 +261,10 @@ class TraderKISIntegrationTests(unittest.TestCase):
             api = trader.KIStockAPI(notify_errors=False)
             result = api.get_quote("005930")
 
-        self.assertEqual(result, {"current": 70000.0, "ask1": 70100.0, "bid1": 69900.0})
+        self.assertEqual(
+            result,
+            {"current": 70000.0, "ask1": 70100.0, "bid1": 69900.0, "market_cap": 0.0},
+        )
         headers.assert_called_once_with("FHKST01010100")
         self.assertEqual(http_get.call_args.kwargs["headers"], {"x-test-header": "delegated"})
 

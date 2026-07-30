@@ -1390,13 +1390,23 @@ def get_watchlist(strategy_id: str | None = None):
 @router.post("/api/watchlist")
 def add_to_watchlist(payload: WatchlistAddPayload):
     from src.db.repository import load_watchlist_data, save_watchlist_data
-    from src.strategy.seven_split import sync_watchlist_runtime, STOCK_NAMES
+    from src.strategy.seven_split import sync_watchlist_runtime, STOCK_NAMES, KOSPI_UNIVERSE
+    from src.strategy.watchlist_policy import eligibility_reason
     from src.market_metadata import resolve_stock_name
     
     code = payload.symbol.strip()
     if not code.isdigit() or len(code) != 6:
         raise HTTPException(status_code=400, detail="유효하지 않은 종목코드 형식입니다. (6자리 숫자)")
-        
+
+    quote = _get_api().get_quote(code)
+    rejection = eligibility_reason(
+        price=quote.get("current"),
+        market_cap=quote.get("market_cap"),
+        known_mid_large=code in KOSPI_UNIVERSE,
+    )
+    if rejection:
+        raise HTTPException(status_code=400, detail=rejection)
+
     if payload.strategy_id:
         from src.db.repository import add_strategy_universe_symbol, load_strategy_universe_symbols
 

@@ -13,7 +13,7 @@ from src.ai_stock.markets import require_storable_market
 
 # 시장별 기본 하한 (계획서 §4.6 제안값; 정책에서 override).
 DEFAULT_LIMITS = {
-    "KR": {"min_market_cap": 3.0e11, "min_avg_trading_value": 5.0e9, "min_price": 2000.0},
+    "KR": {"min_market_cap": 3.0e11, "min_avg_trading_value": 5.0e9, "min_price": 5000.0},
     "US": {"min_market_cap": 2.0e9, "min_avg_trading_value": 2.0e7, "min_price": 5.0},
 }
 
@@ -115,4 +115,9 @@ def describe(market: str) -> dict[str, Any]:
     from src.ai_stock.market_data import get_provider
 
     items = get_provider().universe_items(market)
+    if market == MARKET_KR:
+        from src.db.repository import load_watchlist_data
+        from src.strategy.watchlist_policy import filter_registered_items
+
+        items = filter_registered_items(items, load_watchlist_data().get("symbols", []))
     return build(market, items, _load_policy(market))

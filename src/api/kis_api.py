@@ -251,7 +251,13 @@ class KIStockAPI:
                 raise self._kis_error(data, "KIS get_quote error")
             self._success()
             output = data.get("output", {})
-            return {"current": float(output.get("stck_prpr", 0)), "ask1": float(output.get("askp1", 0)), "bid1": float(output.get("bidp1", 0))}
+            market_cap = float(output.get("hts_avls", 0) or 0) * 100_000_000
+            return {
+                "current": float(output.get("stck_prpr", 0)),
+                "ask1": float(output.get("askp1", 0)),
+                "bid1": float(output.get("bidp1", 0)),
+                "market_cap": market_cap,
+            }
         except Exception:
             self._fail()
             raise

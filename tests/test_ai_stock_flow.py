@@ -116,7 +116,11 @@ class DiscoveryTests(FlowTestBase):
             series={},  # 가격 시계열 없음
             index={"KR": {"KOSPI": _uptrend()}},
         ))
-        discovery_service.run_scan(market="KR", strategy_id="ai_stock_default_v1")
+        with patch(
+            "src.db.repository.load_watchlist_data",
+            return_value={"symbols": ["999999"]},
+        ):
+            discovery_service.run_scan(market="KR", strategy_id="ai_stock_default_v1")
         c = repo.list_candidates(market="KR")[0]
         self.assertEqual(c["decision"], DECISION_INSUFFICIENT)
 

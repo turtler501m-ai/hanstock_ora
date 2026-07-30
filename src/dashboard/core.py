@@ -2309,6 +2309,9 @@ def _sync_watchlist_from_scan_result(
     add_threshold: float,
     keep_threshold: float | None = None,
 ) -> dict:
+    from src.strategy.seven_split import KOSPI_UNIVERSE
+    from src.strategy.watchlist_policy import eligibility_reason
+
     if keep_threshold is None:
         keep_threshold = add_threshold
     symbols = list(watchlist_data.get("symbols", []))
@@ -2338,6 +2341,12 @@ def _sync_watchlist_from_scan_result(
         except (TypeError, ValueError):
             score = 0.0
         if score < add_threshold:
+            continue
+        if eligibility_reason(
+            price=cand.get("current_price") or cand.get("price"),
+            market_cap=cand.get("market_cap"),
+            known_mid_large=str(cand.get("ticker") or cand.get("symbol") or "") in KOSPI_UNIVERSE,
+        ):
             continue
         eligible_count += 1
         symbol = str(cand["ticker"])
@@ -2592,9 +2601,11 @@ async def get_candidates(
 
         strategy_universe = None
         if selected_strat:
-            from src.db.repository import load_strategy_universe_symbols
+            from src.db.repository import load_strategy_universe_symbols, load_watchlist_data
 
-            strategy_universe = load_strategy_universe_symbols(selected_strat["id"])
+            registered = list(load_watchlist_data().get("symbols", []))
+            dedicated = load_strategy_universe_symbols(selected_strat["id"])
+            strategy_universe = dedicated if dedicated else registered
 
         import asyncio
         loop = asyncio.get_event_loop()

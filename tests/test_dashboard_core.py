@@ -2026,9 +2026,9 @@ class DashboardCoreTests(unittest.TestCase):
                 patch("src.dashboard.core.build_dashboard_candidates", return_value={
                     "scanned": 3,
                     "candidates": [
-                        {"ticker": "005930", "name": "Samsung", "score": 1.0},
-                        {"ticker": "000660", "name": "SK Hynix", "score": 2.0},
-                        {"ticker": "035420", "name": "NAVER", "score": 3.0},
+                        {"ticker": "005930", "name": "Samsung", "score": 1.0, "current_price": 70000},
+                        {"ticker": "000660", "name": "SK Hynix", "score": 2.0, "current_price": 120000},
+                        {"ticker": "035420", "name": "NAVER", "score": 3.0, "current_price": 200000},
                     ],
                 }), \
                 patch("src.db.repository.load_watchlist_data", return_value={
@@ -2058,13 +2058,13 @@ class DashboardCoreTests(unittest.TestCase):
                 patch("src.dashboard.core.build_dashboard_candidates", return_value={
                     "scanned": 3,
                     "candidates": [
-                        {"ticker": "000660", "name": "SK Hynix", "score": 2.0},
-                        {"ticker": "035420", "name": "NAVER", "score": 3.0},
+                        {"ticker": "000660", "name": "SK Hynix", "score": 2.0, "current_price": 120000},
+                        {"ticker": "035420", "name": "NAVER", "score": 3.0, "current_price": 200000},
                     ],
                     "scan_summary": [
                         {"ticker": "005930", "name": "Samsung", "score": 1.0},
                         {"ticker": "000660", "name": "SK Hynix", "score": 2.0},
-                        {"ticker": "035420", "name": "NAVER", "score": 3.0},
+                        {"ticker": "035420", "name": "NAVER", "score": 3.0, "current_price": 200000},
                     ],
                 }), \
                 patch("src.db.repository.load_watchlist_data", return_value={
@@ -2092,7 +2092,7 @@ class DashboardCoreTests(unittest.TestCase):
                 patch("src.dashboard.core.build_dashboard_candidates", return_value={
                     "scanned": 3,
                     "candidates": [
-                        {"ticker": "035420", "name": "NAVER", "score": 3.0},
+                        {"ticker": "035420", "name": "NAVER", "score": 3.0, "current_price": 200000},
                     ],
                     "scan_summary": [
                         {"ticker": "005930", "name": "Samsung", "score": 1.0},

@@ -36,7 +36,7 @@ class TraderPresetsTests(unittest.TestCase):
 
         with (
             patch("src.db.repository.load_ai_strategies", return_value=[preset_strategy]),
-            patch("src.trader.build_scan_universe", return_value=["000660"]),
+            patch("src.db.repository.load_watchlist_data", return_value={"symbols": ["000660"]}),
             patch("src.trader.find_candidates", return_value={"candidates": []}) as mock_find_candidates,
             patch("src.trader.build_orders", return_value=[]),
         ):
@@ -88,7 +88,7 @@ class TraderPresetsTests(unittest.TestCase):
 
         with (
             patch("src.db.repository.load_ai_strategies", return_value=[ai_strategy]),
-            patch("src.trader.build_scan_universe", return_value=["000660"]),
+            patch("src.db.repository.load_watchlist_data", return_value={"symbols": ["000660"]}),
             patch("src.trader.find_candidates", return_value={"candidates": []}) as mock_find_candidates,
             patch("src.trader.build_orders", return_value=[]),
         ):

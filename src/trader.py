@@ -455,12 +455,13 @@ class KIStockAPI:
                 "current": float(output.get("stck_prpr", 0)),
                 "ask1": float(output.get("askp1", 0)),
                 "bid1": float(output.get("bidp1", 0)),
+                "market_cap": float(output.get("hts_avls", 0) or 0) * 100_000_000,
             }
         except Exception as e:
             logger.warning(f"get_quote failed for {symbol}: {e}")
             self._fail()
             self._sync_circuit_from_client()
-            return {"current": 0.0, "ask1": 0.0, "bid1": 0.0}
+            return {"current": 0.0, "ask1": 0.0, "bid1": 0.0, "market_cap": 0.0}
 
     def get_volume_rank(self, top_n: int = 50) -> list:
         self._sync_circuit_to_client()
@@ -1054,19 +1055,30 @@ def build_runtime_plan(
             universe = []
             if active_strategy_id:
                 try:
-                    from src.db.repository import load_strategy_universe_symbols
+                    from src.db.repository import load_strategy_universe_symbols, load_watchlist_data
                     dedicated = load_strategy_universe_symbols(active_strategy_id)
+                    registered = set(load_watchlist_data().get("symbols", []))
                     if dedicated:
-                        universe = [code for code in dedicated if code not in held_symbols]
+                        universe = [
+                            code
+                            for code in dedicated
+                            if code not in held_symbols
+                        ]
                     elif active_strategy_id in _ISOLATED_STRATEGY_IDS:
                         universe = []
                         strategy_universe_missing = True
+                    else:
+                        universe = [
+                            code
+                            for code in registered
+                            if code not in held_symbols
+                        ]
                 except Exception:
                     if active_strategy_id in _ISOLATED_STRATEGY_IDS:
                         universe = []
                         strategy_universe_missing = True
             if not universe and not strategy_universe_missing and active_strategy_id not in _ISOLATED_STRATEGY_IDS:
-                universe = build_scan_universe(api, held_symbols)
+                universe = []
             if strategy_universe_missing:
                 scan_result = {
                     "candidates": [],
@@ -1194,7 +1206,15 @@ def build_runtime_plan(
                         changed = False
                         for cand in candidates:
                             score = float(cand.get("score", 0.0) or 0.0)
-                            if score >= threshold:
+                            from src.strategy.seven_split import KOSPI_UNIVERSE
+                            from src.strategy.watchlist_policy import eligibility_reason
+
+                            rejection = eligibility_reason(
+                                price=cand.get("current_price") or cand.get("price"),
+                                market_cap=cand.get("market_cap"),
+                                known_mid_large=str(cand.get("ticker") or cand.get("symbol") or "") in KOSPI_UNIVERSE,
+                            )
+                            if score >= threshold and not rejection:
                                 sym = str(cand["ticker"])
                                 name_by_symbol.setdefault(sym, cand.get("name") or sym)
                                 if sym not in symbol_set:

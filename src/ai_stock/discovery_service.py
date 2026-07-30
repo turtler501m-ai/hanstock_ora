@@ -200,6 +200,14 @@ def run_scan(*, market: str, strategy_id: str = "ai_stock_default_v1",
         from src.ai_stock.market_data import get_provider
 
         items = get_provider().universe_items(market)
+        if market == "KR":
+            from src.db.repository import load_watchlist_data
+            from src.strategy.watchlist_policy import filter_registered_items
+
+            items = filter_registered_items(
+                items,
+                load_watchlist_data().get("symbols", []),
+            )
         uni = universe.build(market, items, policy)
         # 시황 국면 컨텍스트 (§4.7)
         regime_info = briefing_service.compute_regime(
