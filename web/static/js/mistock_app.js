@@ -27,6 +27,86 @@ const formatPercent = (value) => {
     return `${sign}${numeric.toFixed(2)}%`;
 };
 
+const formatMarketIndex = (value, changePct) => {
+    if (value === null || value === undefined) return '-';
+    const change = Number(changePct);
+    const changeText = Number.isFinite(change)
+        ? ` (${change > 0 ? '+' : ''}${change.toFixed(2)}%)`
+        : '';
+    return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}${changeText}`;
+};
+
+function setPerformanceDetailPanelOpen(open) {
+    const panel = document.getElementById('performance-detail-panel');
+    if (panel) panel.style.display = open ? 'block' : 'none';
+}
+
+function renderPerformanceDetailPanel(item) {
+    const title = document.getElementById('performanceDetailTitle');
+    const subtitle = document.getElementById('performanceDetailSubtitle');
+    const body = document.getElementById('performanceDetailBody');
+    if (!title || !subtitle || !body) return;
+    const details = Array.isArray(item.details) ? item.details : [];
+    title.textContent = `${item.period || '-'} 성과 상세 목록`;
+    subtitle.textContent = '선택한 성과 기간의 매수/매도 체결 기준 상세 내역입니다.';
+    const renderRows = (rows) => rows.map((detail) => {
+        const pnl = Number(detail.realized_pnl || 0);
+        const pnlClass = pnl > 0 ? 'text-success' : (pnl < 0 ? 'text-danger' : '');
+        return `<tr>
+            <td>${escapeHtml(detail.ts || '-')}</td><td>${escapeHtml(detail.symbol || '-')}</td>
+            <td>${escapeHtml(detail.name || '-')}</td><td>${escapeHtml(toKorAction(detail.action))}</td>
+            <td>${formatNumber(detail.qty, 4)}</td><td>${formatCurrency(detail.price)}</td>
+            <td>${formatCurrency(detail.amount)}</td>
+            <td class="${pnlClass}">${formatCurrency(pnl)}</td>
+            <td class="${pnlClass}">${formatPercent(detail.realized_pnl_rate)}</td>
+            <td><strong>${escapeHtml(detail.strategy_name || detail.strategy_id || '전략 미기록')}</strong></td>
+            <td>${escapeHtml(translateReason(detail.reason || '-'))}</td>
+        </tr>`;
+    }).join('');
+    const pnl = Number(item.realized_pnl || 0);
+    body.innerHTML = `
+        <div class="performance-detail-summary">
+            <div><span>거래 건수</span><strong>${formatNumber(item.order_count)}건</strong></div>
+            <div><span>매수/매도 금액</span><strong>${formatCurrency(item.buy_amount)} / ${formatCurrency(item.sell_amount)}</strong></div>
+            <div><span>실현손익</span><strong>${formatCurrency(pnl)}</strong></div>
+            <div><span>성과 등락</span><strong>${formatPercent(item.realized_pnl_rate)}</strong></div>
+        </div>
+        ${details.length ? `<div class="table-responsive performance-detail-table-wrap">
+            <table class="performance-detail-table"><thead><tr>
+                <th>시간</th><th>종목</th><th>종목명</th><th>구분</th><th>수량</th>
+                <th>단가</th><th>금액</th><th>실현손익</th><th>수익률</th><th>매매 전략</th><th>사유</th>
+            </tr></thead><tbody>${renderRows(details)}</tbody></table></div>`
+            : '<p class="ai-modal-footnote">해당 기간의 세부 거래가 없습니다.</p>'}`;
+    setPerformanceDetailPanelOpen(true);
+    document.getElementById('performance-detail-panel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function renderStrategyValidation(items) {
+    const tbody = document.querySelector('#table-strategy-validation tbody');
+    if (!tbody) return;
+    if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="9">전략이 기록된 성과 데이터가 없습니다.</td></tr>';
+        return;
+    }
+    const labels = { effective: '유효', monitor: '관찰', review: '재검토', insufficient: '표본 부족' };
+    tbody.innerHTML = items.map((item) => {
+        const pnl = Number(item.realized_pnl || 0);
+        const kind = item.validation_status === 'effective' ? 'buy'
+            : item.validation_status === 'review' ? 'sell' : 'hold';
+        return `<tr>
+            <td><strong>${escapeHtml(item.strategy_name || item.strategy_id)}</strong><div class="time-muted">${escapeHtml(item.strategy_id || '')}</div></td>
+            <td>${formatNumber(item.order_count)}건</td><td>${formatNumber(item.closed_count)}건</td>
+            <td>${item.win_rate == null ? '-' : formatPercent(item.win_rate)}</td>
+            <td>${item.profit_factor == null ? '-' : Number(item.profit_factor).toFixed(2)}</td>
+            <td>${item.expectancy == null ? '-' : formatCurrency(item.expectancy)}</td>
+            <td class="${pnl > 0 ? 'text-success' : pnl < 0 ? 'text-danger' : ''}">${formatCurrency(pnl)}</td>
+            <td>${formatCurrency(item.max_drawdown || 0)}</td>
+            <td>${pill(labels[item.validation_status] || item.validation_status, kind)}
+                <small class="strategy-validation-reason">${escapeHtml(item.validation_reason || '')}</small></td>
+        </tr>`;
+    }).join('');
+}
+
 const formatNumber = (value, digits = 0) => {
     const numeric = Number(value || 0);
     return numeric.toLocaleString(undefined, { maximumFractionDigits: digits });
@@ -2640,6 +2720,7 @@ async function renderPeriodicPerformance() {
         // Attach sub-tab event listeners once
         const dailyBtn = document.getElementById('btn-perf-daily');
         const monthlyBtn = document.getElementById('btn-perf-monthly');
+        const closeDetailBtn = document.getElementById('btn-close-performance-detail');
         
         if (dailyBtn && !dailyBtn.dataset.listenerAttached) {
             dailyBtn.dataset.listenerAttached = 'true';
@@ -2659,6 +2740,10 @@ async function renderPeriodicPerformance() {
                 updatePeriodicPerformanceUI();
             });
         }
+        if (closeDetailBtn && !closeDetailBtn.dataset.listenerAttached) {
+            closeDetailBtn.dataset.listenerAttached = 'true';
+            closeDetailBtn.addEventListener('click', () => setPerformanceDetailPanelOpen(false));
+        }
         
         updatePeriodicPerformanceUI();
     } catch (err) {
@@ -2668,6 +2753,7 @@ async function renderPeriodicPerformance() {
 
 function updatePeriodicPerformanceUI() {
     if (!periodicDataCache) return;
+    setPerformanceDetailPanelOpen(false);
     
     const dataList = periodicActiveTab === 'daily' ? (periodicDataCache.daily || []) : (periodicDataCache.monthly || []);
     
@@ -2676,7 +2762,7 @@ function updatePeriodicPerformanceUI() {
     if (tbody) {
         tbody.innerHTML = '';
         if (!dataList.length) {
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; padding: 2rem; color: #94a3b8;">성과 분석 데이터가 없습니다.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 2rem; color: #94a3b8;">성과 분석 데이터가 없습니다.</td></tr>`;
         } else {
             // Sort to display latest data first in the table
             const tableDataList = [...dataList].reverse();
@@ -2687,18 +2773,22 @@ function updatePeriodicPerformanceUI() {
                 const pnlClass = pnl > 0 ? 'text-success' : (pnl < 0 ? 'text-danger' : '');
                 
                 tr.innerHTML = `
-                    <td><strong>${escapeHtml(item.period)}</strong></td>
+                    <td><button type="button" class="period-detail-button"><strong>${escapeHtml(item.period)}</strong></button></td>
                     <td>${Number(item.order_count || 0).toLocaleString()}회</td>
                     <td>${formatCurrency(item.buy_amount)}</td>
                     <td>${formatCurrency(item.sell_amount)}</td>
                     <td class="${pnlClass}">${pnl > 0 ? '+' : ''}${formatCurrency(pnl)}</td>
                     <td class="${pnlClass}">${pnlRate > 0 ? '+' : ''}${pnlRate.toFixed(2)}%</td>
                     <td class="${pnl > 0 ? 'text-success' : (pnl < 0 ? 'text-danger' : '')}">${formatCurrency(item.net_cashflow)}</td>
+                    <td>${formatMarketIndex(item.sp500, item.sp500_change_pct)}</td>
+                    <td>${formatMarketIndex(item.nasdaq, item.nasdaq_change_pct)}</td>
                 `;
+                tr.querySelector('.period-detail-button')?.addEventListener('click', () => renderPerformanceDetailPanel(item));
                 tbody.appendChild(tr);
             });
         }
     }
+    renderStrategyValidation(periodicDataCache.strategy_validation || []);
     
     // 2. Render Chart.js with defense
     if (typeof Chart === 'undefined') {
@@ -2726,6 +2816,8 @@ function updatePeriodicPerformanceUI() {
     const labels = dataList.map(item => item.period);
     const pnlData = dataList.map(item => item.realized_pnl || 0);
     const pnlRateData = dataList.map(item => item.realized_pnl_rate || 0);
+    const sp500ChangeData = dataList.map(item => item.sp500_change_pct ?? null);
+    const nasdaqChangeData = dataList.map(item => item.nasdaq_change_pct ?? null);
     
     Chart.defaults.color = '#94a3b8';
     Chart.defaults.font.family = "'Noto Sans KR', 'Inter', sans-serif";
@@ -2750,7 +2842,7 @@ function updatePeriodicPerformanceUI() {
                         borderRadius: 4
                     },
                     {
-                        label: '실현수익률 (%)',
+                        label: '성과 등락 (%)',
                         data: pnlRateData,
                         type: 'line',
                         borderColor: '#3b82f6',
@@ -2761,6 +2853,30 @@ function updatePeriodicPerformanceUI() {
                         pointRadius: 4,
                         pointHoverRadius: 6,
                         tension: 0.3,
+                        yAxisID: 'y2'
+                    },
+                    {
+                        label: 'S&P 500 등락 (%)',
+                        data: sp500ChangeData,
+                        type: 'line',
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        tension: 0.3,
+                        spanGaps: true,
+                        yAxisID: 'y2'
+                    },
+                    {
+                        label: '나스닥 등락 (%)',
+                        data: nasdaqChangeData,
+                        type: 'line',
+                        borderColor: '#a855f7',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        tension: 0.3,
+                        spanGaps: true,
                         yAxisID: 'y2'
                     }
                 ]

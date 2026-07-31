@@ -13,6 +13,57 @@ from src.mistock import trader as mistock_trader
 
 
 class MistockDashboardTests(unittest.TestCase):
+    def test_mistock_performance_uses_pure_us_indices(self):
+        self.assertEqual(mistock._MISTOCK_INDEX_TICKERS["sp500"], "^GSPC")
+        self.assertEqual(mistock._MISTOCK_INDEX_TICKERS["nasdaq"], "^IXIC")
+
+    def test_mistock_market_context_adds_daily_and_monthly_changes(self):
+        indices = {
+            "sp500": [
+                {"date": "2026-05-01", "close": 5000},
+                {"date": "2026-05-02", "close": 5050},
+                {"date": "2026-06-01", "close": 5100},
+            ],
+            "nasdaq": [
+                {"date": "2026-05-01", "close": 18000},
+                {"date": "2026-05-02", "close": 17820},
+                {"date": "2026-06-01", "close": 18176.4},
+            ],
+        }
+
+        daily = mistock._mistock_market_context(indices)
+        monthly = mistock._mistock_market_context(indices, monthly=True)
+
+        self.assertEqual(daily["2026-05-02"]["sp500_change_pct"], 1.0)
+        self.assertEqual(daily["2026-05-02"]["nasdaq_change_pct"], -1.0)
+        self.assertEqual(monthly["2026-06"]["sp500_change_pct"], 0.99)
+        self.assertEqual(monthly["2026-06"]["nasdaq_change_pct"], 2.0)
+
+    def test_mistock_periodic_performance_adds_details_and_strategy_validation(self):
+        trades = [
+            {
+                "ts": "2026-05-01 10:00:00", "symbol": "AAPL", "name": "Apple",
+                "action": "buy", "qty": 2, "price": 100, "strategy_id": "alpha",
+            },
+            {
+                "ts": "2026-05-02 10:00:00", "symbol": "AAPL", "name": "Apple",
+                "action": "sell", "qty": 2, "price": 110, "strategy_id": "alpha",
+            },
+        ]
+        with (
+            patch.object(mistock, "_mistock_account_trades", return_value=trades),
+            patch.object(mistock, "_load_mistock_index_rows", return_value={}),
+        ):
+            performance = mistock._build_mistock_periodic_performance(trades)
+
+        sell_detail = performance["daily"][1]["details"][0]
+        self.assertEqual(sell_detail["realized_pnl"], 20.0)
+        self.assertEqual(sell_detail["strategy_id"], "alpha")
+        validation = performance["strategy_validation"][0]
+        self.assertEqual(validation["closed_count"], 1)
+        self.assertEqual(validation["realized_pnl"], 20.0)
+        self.assertEqual(validation["validation_status"], "insufficient")
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.original_db_path = mistock_config.trade_db_path

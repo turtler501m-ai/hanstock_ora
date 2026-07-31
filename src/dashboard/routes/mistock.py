@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import FileResponse
@@ -1125,10 +1126,92 @@ def _period_bucket() -> dict:
     }
 
 
+_MISTOCK_INDEX_TICKERS = {
+    "sp500": "^GSPC",
+    "nasdaq": "^IXIC",
+}
+_MISTOCK_INDEX_CACHE: tuple[float, dict[str, list[dict]]] = (0.0, {})
+
+
+def _load_mistock_index_rows() -> dict[str, list[dict]]:
+    global _MISTOCK_INDEX_CACHE
+    cached_at, cached_rows = _MISTOCK_INDEX_CACHE
+    if time.monotonic() - cached_at < 300:
+        return cached_rows
+
+    series: dict[str, list[dict]] = {}
+    try:
+        from src.online_access import require_online_access
+        import yfinance as yf
+
+        require_online_access("미스톡 성과 탭 시장지수 조회")
+        for name, ticker in _MISTOCK_INDEX_TICKERS.items():
+            data = yf.download(
+                ticker,
+                period="6mo",
+                interval="1d",
+                auto_adjust=False,
+                progress=False,
+                threads=False,
+                timeout=5,
+            )
+            if data is None or data.empty:
+                continue
+            close = data["Close"]
+            if getattr(close, "ndim", 1) > 1:
+                close = close.iloc[:, 0]
+            series[name] = [
+                {"date": str(index)[:10], "close": float(value)}
+                for index, value in close.dropna().items()
+            ]
+    except Exception as exc:
+        logger.info(f"Mistock performance benchmark data unavailable: {exc}")
+
+    _MISTOCK_INDEX_CACHE = (time.monotonic(), series)
+    return series
+
+
+def _mistock_market_context(
+    index_rows: dict[str, list[dict]],
+    *,
+    monthly: bool = False,
+) -> dict[str, dict]:
+    context: dict[str, dict] = {}
+    for name, rows in index_rows.items():
+        if monthly:
+            grouped: dict[str, list[float]] = {}
+            for row in rows:
+                date = str(row.get("date") or "")
+                close = float(row.get("close") or 0)
+                if len(date) >= 7 and close > 0:
+                    grouped.setdefault(date[:7], []).append(close)
+            points = [(period, closes[-1]) for period, closes in sorted(grouped.items())]
+        else:
+            points = [
+                (str(row.get("date") or "")[:10], float(row.get("close") or 0))
+                for row in rows
+                if float(row.get("close") or 0) > 0
+            ]
+
+        previous_close = None
+        for period, close in points:
+            change_pct = None
+            if previous_close and previous_close > 0:
+                change_pct = (close / previous_close - 1) * 100
+            bucket = context.setdefault(period, {})
+            bucket[name] = round(close, 2)
+            bucket[f"{name}_change_pct"] = (
+                round(change_pct, 2) if change_pct is not None else None
+            )
+            previous_close = close
+    return context
+
+
 def _build_mistock_periodic_performance(trades: list[dict]) -> dict:
     daily: dict[str, dict] = {}
     monthly: dict[str, dict] = {}
-    holdings: dict[str, dict] = {}
+    holdings: dict[tuple[str, str], dict] = {}
+    strategy_stats: dict[str, dict] = {}
 
     for trade in _mistock_account_trades(trades):
         ts = str(trade.get("ts") or "")
@@ -1139,6 +1222,8 @@ def _build_mistock_periodic_performance(trades: list[dict]) -> dict:
         month_key = ts[:7]
         action = str(trade.get("action") or "").lower()
         symbol = str(trade.get("symbol") or "")
+        strategy_id = str(trade.get("strategy_id") or "unattributed")
+        strategy_name = str(trade.get("strategy_name") or strategy_id)
         
         try:
             qty = float(trade.get("qty") or 0.0)
@@ -1162,15 +1247,21 @@ def _build_mistock_periodic_performance(trades: list[dict]) -> dict:
                 bucket["sell_count"] += 1
                 bucket["sell_amount"] += amount
 
-        if symbol not in holdings:
-            holdings[symbol] = {"qty": 0.0, "avg_cost": 0.0}
-        holding = holdings[symbol]
+        holding = holdings.setdefault((strategy_id, symbol), {"qty": 0.0, "avg_cost": 0.0})
+        stats = strategy_stats.setdefault(strategy_id, {
+            "order_count": 0, "buy_count": 0, "sell_count": 0,
+            "realized_pnl": 0.0, "_pnls": [],
+        })
+        stats["order_count"] += 1
+        stats[f"{action}_count"] += 1
 
         if action == "buy":
             total_qty = holding["qty"] + qty
             total_cost = holding["qty"] * holding["avg_cost"] + amount
             holding["qty"] = total_qty
             holding["avg_cost"] = total_cost / total_qty if total_qty > 0 else 0.0
+            realized = 0.0
+            cost_of_shares_sold = 0.0
         else:
             sell_qty = min(qty, holding["qty"])
             cost_of_shares_sold = holding["avg_cost"] * sell_qty
@@ -1180,10 +1271,33 @@ def _build_mistock_periodic_performance(trades: list[dict]) -> dict:
             month["realized_pnl"] += realized
             day["cost_of_sold"] += cost_of_shares_sold
             month["cost_of_sold"] += cost_of_shares_sold
+            stats["realized_pnl"] += realized
+            if sell_qty > 0:
+                stats["_pnls"].append(realized)
             
             holding["qty"] = max(0.0, holding["qty"] - sell_qty)
             if holding["qty"] <= 0:
                 holding["avg_cost"] = 0.0
+
+        detail = {
+            "ts": ts,
+            "symbol": symbol,
+            "name": trade.get("name") or symbol,
+            "action": action,
+            "qty": qty,
+            "price": price,
+            "amount": round(amount, 2),
+            "realized_pnl": round(realized, 2),
+            "cost_of_sold": round(cost_of_shares_sold, 2),
+            "realized_pnl_rate": round(realized / cost_of_shares_sold * 100, 2)
+            if cost_of_shares_sold > 0 else 0.0,
+            "reason": trade.get("reason", ""),
+            "order_status": trade.get("order_status", ""),
+            "strategy_id": strategy_id,
+            "strategy_name": strategy_name,
+        }
+        day["details"].append(detail)
+        month["details"].append(detail)
 
     for rows in (daily, monthly):
         for bucket in rows.values():
@@ -1194,9 +1308,20 @@ def _build_mistock_periodic_performance(trades: list[dict]) -> dict:
             bucket["realized_pnl"] = round(bucket["realized_pnl"], 2)
             bucket["cost_of_sold"] = round(bucket["cost_of_sold"], 2)
 
+    index_rows = _load_mistock_index_rows()
+    daily_market = _mistock_market_context(index_rows)
+    monthly_market = _mistock_market_context(index_rows, monthly=True)
     return {
-        "daily": [{"period": key, **value} for key, value in sorted(daily.items())],
-        "monthly": [{"period": key, **value} for key, value in sorted(monthly.items())],
+        "daily": [
+            {"period": key, **value, **daily_market.get(key, {})}
+            for key, value in sorted(daily.items())
+        ],
+        "monthly": [
+            {"period": key, **value, **monthly_market.get(key, {})}
+            for key, value in sorted(monthly.items())
+        ],
+        "strategy_validation": _core._strategy_validation(strategy_stats),
+        "market_data_available": bool(daily_market),
     }
 
 
