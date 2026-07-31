@@ -47,6 +47,10 @@ class SelectStrategyPayload(BaseModel):
     selected: bool = True
 
 
+class StrategySelectionPayload(BaseModel):
+    strategy_ids: list[str] = Field(default_factory=list)
+
+
 class PaperCompletePayload(BaseModel):
     days: int = 20
     observations: int = 20
@@ -313,6 +317,12 @@ def _strategy_api_payload(strategy: dict) -> dict:
     payload["display_name"] = _strategy_display_name(strategy.get("id"), strategy.get("name"))
     payload["status_label"] = _strategy_status_label(strategy.get("status"))
     payload["selected_label"] = "현재 사용" if strategy.get("selected") else "대기"
+    payload["schedule_category"] = _strategy_schedule_category(strategy)
+    payload["schedule_category_label"] = {
+        "safe": "안정형",
+        "balanced": "균형형",
+        "aggressive": "공격형",
+    }[payload["schedule_category"]]
     payload["approval_gate"]["label"] = _approval_gate_label(payload["approval_gate"])
     payload["operation_status"]["label"] = _operation_status_label(payload["operation_status"])
     payload["operation_status"]["reason_label"] = _operation_reason_label(payload["operation_status"])
@@ -331,6 +341,38 @@ def _strategy_api_payload(strategy: dict) -> dict:
         },
     }
     return payload
+
+
+def _strategy_schedule_category(strategy: dict) -> str:
+    """Normalize varied strategy profiles into the three schedule UI groups."""
+    profile = strategy.get("profile") or {}
+    preset = str(profile.get("preset") or "").strip().lower()
+    if preset in {"safe", "balanced", "aggressive"}:
+        return preset
+
+    strategy_type = str(profile.get("strategy_type") or "").strip().lower()
+    risk_level = str(profile.get("risk_level") or "").strip().lower()
+    if strategy_type in {"safe", "conservative"} or risk_level in {
+        "safe",
+        "conservative",
+        "low",
+    }:
+        return "safe"
+    if strategy_type in {"aggressive", "momentum"} or risk_level in {
+        "aggressive",
+        "high",
+    }:
+        return "aggressive"
+    if strategy_type == "balanced" or risk_level in {"balanced", "medium"}:
+        return "balanced"
+
+    risk = profile.get("risk") if isinstance(profile.get("risk"), dict) else {}
+    risk_pct = float(risk.get("max_risk_per_trade_pct") or 1.0)
+    if risk_pct <= 0.75:
+        return "safe"
+    if risk_pct >= 1.25:
+        return "aggressive"
+    return "balanced"
 
 
 def _store_validation_check(strategy: dict, check_name: str, result: dict) -> None:
@@ -616,9 +658,7 @@ def get_strategy_context(strategy_id: str | None = None):
         }
         for strategy in strategies
         if strategy.get("selected")
-        and str(strategy.get("status") or "") not in {
-            "retired", "suspended", "review_required"
-        }
+        and str(strategy.get("status") or "") == "approved"
         and str(strategy.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
     ]
     return {
@@ -747,6 +787,60 @@ def select_ai_strategy(id: str, payload: SelectStrategyPayload):
     return {"ok": True, "strategy": found}
 
 
+@router.post("/api/ai-strategies/selection")
+def replace_ai_strategy_selection(payload: StrategySelectionPayload):
+    """Replace the shared-schedule strategy selection in one transaction."""
+    from src.db.repository import (
+        load_ai_strategies,
+        replace_ai_strategy_selection as replace_selection,
+    )
+    from src.strategy_ids import INDEPENDENT_STOCK_SCHEDULE_IDS
+
+    strategies = load_ai_strategies()
+    mutable_ids = [
+        str(item.get("id") or "")
+        for item in strategies
+        if str(item.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
+    ]
+    selectable_ids = {
+        str(item.get("id") or "")
+        for item in strategies
+        if str(item.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
+        and str(item.get("status") or "") == "approved"
+    }
+    requested_ids = list(dict.fromkeys(
+        str(strategy_id).strip()
+        for strategy_id in payload.strategy_ids
+        if str(strategy_id).strip()
+    ))
+    invalid_ids = sorted(set(requested_ids) - selectable_ids)
+    if invalid_ids:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "공용 스케줄에 적용할 수 없는 전략입니다: "
+                + ", ".join(invalid_ids)
+            ),
+        )
+    try:
+        updated = replace_selection(
+            requested_ids,
+            mutable_strategy_ids=mutable_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "selected_strategy_ids": [
+            str(item.get("id"))
+            for item in updated
+            if item.get("selected")
+            and str(item.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
+        ],
+        "strategies": [_strategy_api_payload(item) for item in updated],
+    }
+
+
 def _auto_validate_selected_strategy(strategy_id: str) -> dict:
     """Run the standard gates and approve one explicitly selected strategy."""
     from src.db.repository import load_ai_strategies
@@ -818,13 +912,13 @@ def apply_selected_ai_strategies():
         load_ai_strategies,
         record_ai_strategy_event,
     )
+    from src.strategy_ids import INDEPENDENT_STOCK_SCHEDULE_IDS
 
     selected = [
         item for item in load_ai_strategies()
             if item.get("selected")
-            and str(item.get("status") or "") not in {
-                "retired", "suspended", "review_required"
-            }
+            and str(item.get("status") or "") == "approved"
+            and str(item.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
     ]
     if not selected:
         raise HTTPException(status_code=409, detail="Select at least one AI strategy")
@@ -935,6 +1029,16 @@ def _easy_strategy_preset(preset: str) -> dict:
         "market_regime_filter": ["neutral", "bull", "low_volatility"],
         "allow_candidate_promotion": item["allow_candidate_promotion"],
         "preset": preset,
+        "strategy_type": {
+            "safe": "conservative",
+            "balanced": "balanced",
+            "aggressive": "aggressive",
+        }[preset],
+        "risk_level": {
+            "safe": "conservative",
+            "balanced": "balanced",
+            "aggressive": "aggressive",
+        }[preset],
     }
     return item
 

@@ -293,6 +293,73 @@ def set_ai_strategy_selected(strategy_id: str, selected: bool) -> dict:
     return next(item for item in strategies if item["id"] == str(strategy_id))
 
 
+def replace_ai_strategy_selection(
+    selected_strategy_ids: list[str],
+    *,
+    mutable_strategy_ids: list[str] | None = None,
+) -> list[dict]:
+    """Atomically replace the selected flag for the requested strategy scope."""
+    init_db()
+    selected_ids = {
+        str(strategy_id).strip()
+        for strategy_id in selected_strategy_ids
+        if str(strategy_id).strip()
+    }
+    mutable_ids = (
+        {
+            str(strategy_id).strip()
+            for strategy_id in mutable_strategy_ids
+            if str(strategy_id).strip()
+        }
+        if mutable_strategy_ids is not None
+        else None
+    )
+    with connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            "SELECT id, selected, strategy_version FROM ai_strategies ORDER BY id"
+        ).fetchall()
+        known_ids = {str(row["id"]) for row in rows}
+        unknown_ids = selected_ids - known_ids
+        if unknown_ids:
+            conn.rollback()
+            raise ValueError(
+                f"strategy not found: {', '.join(sorted(unknown_ids))}"
+            )
+        for row in rows:
+            strategy_id = str(row["id"])
+            if mutable_ids is not None and strategy_id not in mutable_ids:
+                continue
+            selected = strategy_id in selected_ids
+            if bool(row["selected"]) == selected:
+                continue
+            conn.execute(
+                "UPDATE ai_strategies SET selected=? WHERE id=?",
+                (1 if selected else 0, strategy_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO ai_strategy_events
+                (ts, strategy_id, strategy_version, event_type, payload)
+                VALUES (?, ?, ?, 'selected', ?)
+                """,
+                (
+                    datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
+                    strategy_id,
+                    int(row["strategy_version"] or 1),
+                    json.dumps(
+                        {"selected": selected, "source": "batch_schedule_apply"},
+                        ensure_ascii=False,
+                    ),
+                ),
+            )
+        conn.commit()
+    strategies = load_ai_strategies()
+    _write_ai_strategy_backup(strategies)
+    return strategies
+
+
 def delete_ai_strategy_record(strategy_id: str) -> dict:
     init_db()
     with connect_db() as conn:
@@ -824,7 +891,8 @@ __all__ = [
     '_parse_strategy_profile', 'strategy_profile_hash',
     'normalize_ai_strategy', 'load_ai_strategies', 'save_ai_strategies',
     'create_ai_strategy_record', 'update_ai_strategy_record',
-    'set_ai_strategy_selected', 'delete_ai_strategy_record',
+    'set_ai_strategy_selected', 'replace_ai_strategy_selection',
+    'delete_ai_strategy_record',
     'record_ai_strategy_event', 'halt_ai_strategy',
     'get_ai_strategy_events', 'get_ai_strategy_performance',
     'review_ai_strategy_performance',

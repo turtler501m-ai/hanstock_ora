@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=35">
+    <link rel="stylesheet" href="/static/css/style.css?v=36">
 </head>
 
 <body>
@@ -44,7 +44,7 @@
                 <button type="button" class="dashboard-tab" data-dashboard-tab="portfolio">보유종목</button>
                 <button type="button" class="dashboard-tab" data-dashboard-tab="watchlist">관심종목</button>
                 <button type="button" class="dashboard-tab" data-dashboard-tab="ai-strategies">AI 전략</button>
-                <button type="button" class="dashboard-tab" data-dashboard-tab="strategy">신호/계획</button>
+                <button type="button" class="dashboard-tab" data-dashboard-tab="strategy">전략조회</button>
                 <button type="button" class="dashboard-tab" data-dashboard-tab="schedule">스케쥴</button>
                 <button type="button" class="dashboard-tab" data-dashboard-tab="orders">주문승인</button>
                 <button type="button" class="dashboard-tab" data-dashboard-tab="ai">AI/최적화</button>
@@ -1047,12 +1047,12 @@
                 <section class="card glass panel-ai-strategies-list">
                     <div class="panel-header split-header">
                         <div>
-                            <h2>현재 가용 및 추가된 AI 전략</h2>
-                            <p class="section-help">체크된 전략들은 신호/계획 탭의 후보 스캔에 동적으로 노출되어 적용됩니다.</p>
+                            <h2>전략 선택 및 스케줄 적용</h2>
+                            <p class="section-help">유형으로 일괄 선택하거나 목록에서 직접 체크한 뒤 적용 버튼을 눌러 공용 스케줄에 반영합니다.</p>
                         </div>
                         <div style="display: flex; gap: 8px;">
                             <button type="button" id="btn-refresh-ai-strategies" style="background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.8); border: 1px solid rgba(255,255,255,0.1); padding: 8px 16px; border-radius: 6px; font-size: 0.85rem; cursor: pointer;">목록 새로고침</button>
-                            <button type="button" id="btn-apply-selected-strategies" style="background: #10b981; color: white; border: none; padding: 8px 20px; border-radius: 6px; font-size: 0.85rem; font-weight: 500; cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#059669'" onmouseout="this.style.background='#10b981'">선택 전략 적용 및 찾기</button>
+                            <button type="button" id="btn-apply-selected-strategies" class="button-primary">선택 전략 스케줄 적용</button>
                         </div>
                     </div>
                     <div class="ai-strategy-summary" id="strategy-context-summary">
@@ -1072,21 +1072,22 @@
                             <small id="strategy-context-approval">-</small>
                         </div>
                     </div>
-                    <div class="panel-sub easy-strategy-builder" style="margin-top: 1rem;">
+                    <div class="panel-sub easy-strategy-builder strategy-category-selector" style="margin-top: 1rem;">
                         <div class="panel-header split-header">
                             <div>
-                                <h3>쉬운 전략 만들기</h3>
-                                <p class="section-help">원하는 성향을 고르면 전략을 만들고 바로 적용합니다. 성과는 모의계좌 실제 거래 내역으로 확인합니다.</p>
+                                <h3>전략 유형 빠른 선택</h3>
+                                <p class="section-help">유형을 누르면 해당 분류 전략만 체크됩니다. 이후 개별 전략을 추가하거나 해제할 수 있습니다.</p>
                             </div>
+                            <span id="strategy-selection-summary" class="time-muted">선택 변경 없음</span>
                         </div>
                         <div class="ai-strategy-summary">
-                            <button type="button" class="button-ghost easy-strategy-preset" data-preset="safe">
+                            <button type="button" class="button-ghost easy-strategy-preset" data-preset="safe" aria-pressed="false">
                                 <strong>안정형</strong><small>리스크 낮게, 룰 중심</small>
                             </button>
-                            <button type="button" class="button-ghost easy-strategy-preset" data-preset="balanced">
+                            <button type="button" class="button-ghost easy-strategy-preset" data-preset="balanced" aria-pressed="false">
                                 <strong>균형형</strong><small>룰 + AI 보조 균형</small>
                             </button>
-                            <button type="button" class="button-ghost easy-strategy-preset" data-preset="aggressive">
+                            <button type="button" class="button-ghost easy-strategy-preset" data-preset="aggressive" aria-pressed="false">
                                 <strong>공격형</strong><small>후보를 더 넓게 탐색</small>
                             </button>
                             <button type="button" class="button-ghost" id="btn-toggle-advanced-strategy">
@@ -1100,11 +1101,11 @@
                             <thead>
                                 <tr>
                                     <th style="width: 60px; text-align: center;">선택</th>
-                                    <th>전략명</th>
-                                    <th>상태</th>
-                                    <th>모델명</th>
-                                    <th>가중치</th>
-                                    <th style="width: 420px; text-align: center;">운영/관리</th>
+                                    <th>전략</th>
+                                    <th>전략 유형</th>
+                                    <th>스케줄 적용</th>
+                                    <th>핵심 기준</th>
+                                    <th style="width: 150px; text-align: center;">관리</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1144,7 +1145,7 @@
                                 <textarea name="profile_json" rows="14" spellcheck="false"></textarea>
                             </details>
                             <div class="ai-strategy-detail-actions">
-                                <label class="check-field"><input name="selected" type="checkbox"><span>현재 매매에 사용</span></label>
+                                <span class="section-help">스케줄 적용 여부는 왼쪽 목록의 선택 항목에서 변경합니다.</span>
                                 <button type="submit" class="button-primary">변경사항 저장</button>
                             </div>
                         </form>
@@ -2085,7 +2086,7 @@
     </script>
     <script src="/static/js/environment_badge.js?v=1"></script>
     <script src="/static/js/common-analysis.js?v=1"></script>
-    <script src="/static/js/app.js?v=54"></script>
+    <script src="/static/js/app.js?v=55"></script>
 
     <!-- Plunge Bounce Strategy Scripts -->
     <script>

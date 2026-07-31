@@ -41,6 +41,24 @@ class AiStrategyPresetTests(unittest.TestCase):
         with self.assertRaises(Exception):
             stock.apply_ai_strategy_preset("unknown")
 
+    def test_strategy_profiles_are_normalized_to_three_schedule_categories(self):
+        self.assertEqual(
+            stock._strategy_schedule_category({"profile": {"preset": "safe"}}),
+            "safe",
+        )
+        self.assertEqual(
+            stock._strategy_schedule_category({
+                "profile": {"strategy_type": "balanced"},
+            }),
+            "balanced",
+        )
+        self.assertEqual(
+            stock._strategy_schedule_category({
+                "profile": {"risk_level": "aggressive"},
+            }),
+            "aggressive",
+        )
+
     def test_applying_strategy_prepares_disabled_ai_schedule_slot(self):
         strategies = [
             {
@@ -81,6 +99,29 @@ class AiStrategyPresetTests(unittest.TestCase):
             mode="analysis_only",
             auto_approve=False,
         )
+
+    def test_schedule_apply_excludes_unapproved_and_independent_strategies(self):
+        strategies = [
+            {"id": "approved", "selected": True, "status": "approved"},
+            {"id": "draft", "selected": True, "status": "draft"},
+            {
+                "id": "plunge_bounce_strategy",
+                "selected": True,
+                "status": "approved",
+            },
+        ]
+        with patch(
+            "src.db.repository.load_ai_strategies",
+            return_value=strategies,
+        ), patch(
+            "src.db.repository.record_ai_strategy_event",
+        ), patch(
+            "src.db.repository.list_strategy_schedules",
+            return_value=[{"strategy_id": "ai_stock_default_v1"}],
+        ):
+            result = stock.apply_selected_ai_strategies()
+
+        self.assertEqual(result["applied_strategy_ids"], ["approved"])
 
     def test_main_hanstock_ai_strategy_can_run_autonomy(self):
         expected = {

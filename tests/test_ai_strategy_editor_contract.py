@@ -22,6 +22,20 @@ class AiStrategyEditorContractTests(unittest.TestCase):
         self.assertIn("profile.risk[key]", script)
         self.assertIn("method: 'PATCH'", script)
 
+    def test_strategy_selection_supports_category_manual_schedule_apply_and_delete(self):
+        html = (ROOT / "web/templates/index.html").read_text(encoding="utf-8")
+        script = (ROOT / "web/static/js/app.js").read_text(encoding="utf-8")
+
+        self.assertIn("<th>전략 유형</th>", html)
+        self.assertIn("<th>스케줄 적용</th>", html)
+        self.assertIn('id="strategy-selection-summary"', html)
+        self.assertIn("function chooseAiStrategyCategory(category)", script)
+        self.assertIn("class=\"strategy-select-checkbox\"", script)
+        self.assertIn("'/api/ai-strategies/selection'", script)
+        self.assertIn("btn-delete-strategy", script)
+        self.assertIn("await deleteJson(`/api/ai-strategies/", script)
+        self.assertNotIn('name="selected" type="checkbox"', html)
+
 
 if __name__ == "__main__":
     unittest.main()

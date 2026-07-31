@@ -11,6 +11,10 @@ let holdingStrategyFilter = 'all';
 let holdingPnlFilter = 'all';
 let activeStrategyAuditId = '';
 let schedulerPollInterval = null;
+let aiStrategyCatalog = [];
+let aiStrategyDraftSelection = null;
+let aiStrategySelectionDirty = false;
+let aiStrategyCategoryFilter = '';
 
 const formatCurrency = (value) => {
     return new Intl.NumberFormat('ko-KR', {
@@ -2017,7 +2021,6 @@ function fillStrategyDetail(strategy) {
     setValue('profile_json', JSON.stringify(profile, null, 2));
     form.elements.namedItem('allow_candidate_promotion').checked =
         Boolean(strategyProfileValue(strategy, 'allow_candidate_promotion', false));
-    form.elements.namedItem('selected').checked = Boolean(strategy.selected);
     setElementText('ai-strategy-detail-title', strategyDisplayName(strategy));
     setElementText('ai-strategy-detail-help', strategy.description || '전략의 진입 기준과 위험 한도를 수정합니다.');
     setElementText('ai-strategy-detail-version', `v${strategy.strategy_version || 1}`);
@@ -2059,9 +2062,6 @@ function bindStrategyDetailForm() {
                 weight: profile.ai_weight,
                 profile,
             });
-            await postJson(`/api/ai-strategies/${encodeURIComponent(id)}/select`, {
-                selected: form.elements.namedItem('selected').checked,
-            });
             window.aiStrategyEditorSelectedId = id;
             await Promise.all([renderAiStrategies(), syncStrategiesToDropdown(), renderStrategyContext()]);
             setStatus('전략 상세 기준을 저장했습니다.', true);
@@ -2073,13 +2073,93 @@ function bindStrategyDetailForm() {
     });
 }
 
+function strategyScheduleCategory(strategy) {
+    if (strategy.schedule_category) return strategy.schedule_category;
+    const profile = strategy.profile || {};
+    const value = String(profile.preset || profile.strategy_type || profile.risk_level || '').toLowerCase();
+    if (['safe', 'conservative', 'low'].includes(value)) return 'safe';
+    if (['aggressive', 'momentum', 'high'].includes(value)) return 'aggressive';
+    return 'balanced';
+}
+
+function strategyScheduleCategoryLabel(strategy) {
+    return strategy.schedule_category_label || {
+        safe: '안정형',
+        balanced: '균형형',
+        aggressive: '공격형',
+    }[strategyScheduleCategory(strategy)] || '균형형';
+}
+
+function isSharedScheduleSelectable(strategy) {
+    return !strategy.independent_schedule && String(strategy.status || '') === 'approved';
+}
+
+function updateAiStrategySelectionUi() {
+    const draft = aiStrategyDraftSelection || new Set();
+    const selectedCount = Array.from(draft).filter((id) =>
+        aiStrategyCatalog.some((strategy) => strategy.id === id && isSharedScheduleSelectable(strategy))
+    ).length;
+    const appliedCount = aiStrategyCatalog.filter((strategy) =>
+        strategy.selected && isSharedScheduleSelectable(strategy)
+    ).length;
+    const summary = document.getElementById('strategy-selection-summary');
+    if (summary) {
+        summary.textContent = aiStrategySelectionDirty
+            ? `${selectedCount}개 선택 · 스케줄 적용 전`
+            : `${appliedCount}개 스케줄 적용 중`;
+        summary.classList.toggle('is-pending', aiStrategySelectionDirty);
+    }
+    const applyButton = document.getElementById('btn-apply-selected-strategies');
+    if (applyButton) {
+        applyButton.textContent = selectedCount
+            ? `선택 ${selectedCount}개 스케줄 적용`
+            : '선택 전략 모두 해제';
+    }
+    document.querySelectorAll('.easy-strategy-preset').forEach((button) => {
+        const active = button.dataset.preset === aiStrategyCategoryFilter;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+}
+
+function chooseAiStrategyCategory(category) {
+    const matching = aiStrategyCatalog.filter((strategy) =>
+        isSharedScheduleSelectable(strategy)
+        && strategyScheduleCategory(strategy) === category
+    );
+    if (!matching.length) {
+        setStatus(`${{ safe: '안정형', balanced: '균형형', aggressive: '공격형' }[category] || category}으로 분류된 승인 전략이 없습니다.`);
+        return false;
+    }
+    aiStrategyDraftSelection = new Set(matching.map((strategy) => strategy.id));
+    aiStrategySelectionDirty = true;
+    aiStrategyCategoryFilter = category;
+    document.querySelectorAll('.strategy-select-checkbox').forEach((input) => {
+        input.checked = aiStrategyDraftSelection.has(input.dataset.id);
+    });
+    updateAiStrategySelectionUi();
+    return true;
+}
+
 async function renderAiStrategies() {
     const tbody = document.querySelector('#table-ai-strategies tbody');
     if (!tbody) return;
     try {
         const data = await fetchJson('/api/ai-strategies');
         const strategies = data.strategies || [];
+        aiStrategyCatalog = strategies;
         window.aiStrategyEditorStrategies = strategies;
+        if (!aiStrategySelectionDirty || !(aiStrategyDraftSelection instanceof Set)) {
+            aiStrategyDraftSelection = new Set(
+                strategies.filter((strategy) => strategy.selected).map((strategy) => strategy.id)
+            );
+            aiStrategySelectionDirty = false;
+        } else {
+            const existingIds = new Set(strategies.map((strategy) => strategy.id));
+            aiStrategyDraftSelection = new Set(
+                Array.from(aiStrategyDraftSelection).filter((id) => existingIds.has(id))
+            );
+        }
         const selectedId = window.aiStrategyEditorSelectedId ||
             activeStrategyAuditId ||
             strategies.find((strategy) => strategy.selected)?.id ||
@@ -2087,25 +2167,76 @@ async function renderAiStrategies() {
         window.aiStrategyEditorSelectedId = selectedId;
 
         const head = document.querySelector('#table-ai-strategies thead tr');
-        if (head) head.innerHTML = '<th>전략</th><th>상태</th><th>유형</th><th>위험도</th><th>사용</th>';
+        if (head) {
+            head.innerHTML = '<th class="strategy-check-column">선택</th><th>전략</th><th>전략 유형</th><th>스케줄 적용</th><th>핵심 기준</th><th class="strategy-manage-column">관리</th>';
+        }
         tbody.innerHTML = '';
         if (!strategies.length) {
-            setTableMessage('#table-ai-strategies tbody', 5, '등록된 전략이 없습니다.');
+            setTableMessage('#table-ai-strategies tbody', 6, '등록된 전략이 없습니다.');
+            updateAiStrategySelectionUi();
             return;
         }
         strategies.forEach((strategy) => {
             const profile = strategy.profile || {};
+            const risk = profile.risk || {};
+            const selectable = isSharedScheduleSelectable(strategy);
+            const checked = aiStrategyDraftSelection.has(strategy.id);
+            const pendingChange = checked !== Boolean(strategy.selected);
+            const builtIn = ['gpt_5_mini_default', 'rule_only_default'].includes(strategy.id);
+            let scheduleLabel = strategy.independent_schedule
+                ? '전용 스케줄'
+                : (strategy.selected ? '적용 중' : '미적용');
+            let scheduleKind = strategy.independent_schedule
+                ? 'hold'
+                : (strategy.selected ? 'buy' : 'hold');
+            if (pendingChange && !strategy.independent_schedule) {
+                scheduleLabel = checked ? '적용 대기' : '해제 대기';
+                scheduleKind = 'hold';
+            }
             const tr = document.createElement('tr');
             tr.dataset.id = strategy.id;
             tr.classList.toggle('is-selected', strategy.id === selectedId);
+            tr.classList.toggle('has-pending-selection', pendingChange);
             tr.innerHTML = `
-                <td><div class="symbol-name">${escapeHtml(strategyDisplayName(strategy))}</div>
-                    <div class="symbol-code">${escapeHtml(strategy.id)} · v${escapeHtml(strategy.strategy_version || 1)}</div></td>
-                <td>${pill(strategy.status_label || strategyStatusLabel(strategy.status), strategyStatusKind(strategy.status))}</td>
-                <td>${escapeHtml(profile.strategy_type || 'custom')}</td>
-                <td>${escapeHtml(profile.risk_level || 'balanced')}</td>
-                <td>${pill(strategy.selected ? '사용 중' : '대기', strategy.selected ? 'buy' : 'hold')}</td>`;
-            tr.addEventListener('click', () => {
+                <td class="strategy-check-column">
+                    <input type="checkbox" class="strategy-select-checkbox"
+                        data-id="${escapeHtml(strategy.id)}"
+                        ${checked ? 'checked' : ''}
+                        ${selectable ? '' : 'disabled'}
+                        title="${strategy.independent_schedule
+                            ? '전용 스케줄 탭에서 관리하는 전략입니다.'
+                            : (selectable ? '공용 스케줄 적용 대상 선택' : '승인 완료 전략만 적용할 수 있습니다.')}">
+                </td>
+                <td>
+                    <div class="symbol-name">${escapeHtml(strategyDisplayName(strategy))}</div>
+                    <div class="symbol-code">${escapeHtml(strategy.id)} · v${escapeHtml(strategy.strategy_version || 1)}</div>
+                </td>
+                <td>
+                    <span class="strategy-category-badge is-${escapeHtml(strategyScheduleCategory(strategy))}">
+                        ${escapeHtml(strategyScheduleCategoryLabel(strategy))}
+                    </span>
+                </td>
+                <td>
+                    ${pill(scheduleLabel, scheduleKind)}
+                    ${pendingChange ? '<small class="strategy-pending-note">적용 버튼 필요</small>' : ''}
+                </td>
+                <td>
+                    <div class="strategy-core-criteria">
+                        <span>AI ${formatNumber(Number(profile.ai_weight ?? strategy.weight ?? 0) * 100, 0)}%</span>
+                        <span>종목 위험 ${formatNumber(risk.max_risk_per_trade_pct ?? 0.5, 1)}%</span>
+                    </div>
+                    <small class="time-muted">${escapeHtml(strategy.status_label || strategyStatusLabel(strategy.status))}</small>
+                </td>
+                <td class="strategy-manage-column">
+                    <div class="button-row strategy-row-actions">
+                        <button type="button" class="button-ghost compact-button btn-open-strategy-detail" data-id="${escapeHtml(strategy.id)}">상세</button>
+                        ${builtIn
+                            ? '<span class="strategy-built-in-label">기본 전략</span>'
+                            : `<button type="button" class="button-danger compact-button btn-delete-strategy" data-id="${escapeHtml(strategy.id)}">삭제</button>`}
+                    </div>
+                </td>`;
+            tr.addEventListener('click', (event) => {
+                if (event.target.closest('input, button')) return;
                 window.aiStrategyEditorSelectedId = strategy.id;
                 tbody.querySelectorAll('tr').forEach((row) => row.classList.toggle('is-selected', row === tr));
                 fillStrategyDetail(strategy);
@@ -2113,26 +2244,70 @@ async function renderAiStrategies() {
             tbody.appendChild(tr);
         });
 
-        const active = strategies.filter((strategy) => strategy.selected);
-        const usable = strategies.filter((strategy) =>
-            !['retired', 'suspended', 'review_required'].includes(String(strategy.status || '')));
+        tbody.querySelectorAll('.strategy-select-checkbox').forEach((input) => {
+            input.addEventListener('change', () => {
+                if (input.checked) {
+                    aiStrategyDraftSelection.add(input.dataset.id);
+                } else {
+                    aiStrategyDraftSelection.delete(input.dataset.id);
+                }
+                aiStrategySelectionDirty = true;
+                aiStrategyCategoryFilter = '';
+                renderAiStrategies();
+            });
+        });
+        tbody.querySelectorAll('.btn-open-strategy-detail').forEach((button) => {
+            button.addEventListener('click', () => {
+                const strategy = strategies.find((item) => item.id === button.dataset.id);
+                if (!strategy) return;
+                window.aiStrategyEditorSelectedId = strategy.id;
+                tbody.querySelectorAll('tr').forEach((row) =>
+                    row.classList.toggle('is-selected', row.dataset.id === strategy.id)
+                );
+                fillStrategyDetail(strategy);
+            });
+        });
+        tbody.querySelectorAll('.btn-delete-strategy').forEach((button) => {
+            button.addEventListener('click', async () => {
+                const strategy = strategies.find((item) => item.id === button.dataset.id);
+                if (!strategy || !window.confirm(`'${strategyDisplayName(strategy)}' 전략을 삭제하시겠습니까?\n활성 포지션이나 진행 중 주문이 있으면 삭제되지 않습니다.`)) return;
+                setButtonBusy(button, true);
+                try {
+                    await deleteJson(`/api/ai-strategies/${encodeURIComponent(strategy.id)}`);
+                    aiStrategyDraftSelection.delete(strategy.id);
+                    if (window.aiStrategyEditorSelectedId === strategy.id) {
+                        window.aiStrategyEditorSelectedId = '';
+                    }
+                    await Promise.all([renderAiStrategies(), syncStrategiesToDropdown(), renderStrategyContext(), renderScheduleInfo()]);
+                    setStatus('전략을 삭제했습니다.', true);
+                } catch (error) {
+                    setStatus(`전략 삭제 실패: ${error.message}`);
+                    setButtonBusy(button, false);
+                }
+            });
+        });
+
+        const active = strategies.filter((strategy) => strategy.selected && isSharedScheduleSelectable(strategy));
+        const usable = strategies.filter(isSharedScheduleSelectable);
         const contextLabels = document.querySelectorAll('#strategy-context-summary > div > span');
         if (contextLabels.length >= 3) {
-            contextLabels[0].textContent = '현재 사용';
-            contextLabels[1].textContent = '실행 가능';
-            contextLabels[2].textContent = '검증 상태';
+            contextLabels[0].textContent = '스케줄 적용';
+            contextLabels[1].textContent = '적용 가능';
+            contextLabels[2].textContent = '선택 안내';
         }
-        setElementText('strategy-context-name', `${active.length}개 사용 중`);
-        setElementText('strategy-context-detail', active.map(strategyDisplayName).join(', ') || '선택된 전략 없음');
-        setElementText('strategy-context-status', `${usable.length}개 실행 가능`);
+        setElementText('strategy-context-name', `${active.length}개 적용 중`);
+        setElementText('strategy-context-detail', active.map(strategyDisplayName).join(', ') || '적용된 전략 없음');
+        setElementText('strategy-context-status', `${usable.length}개 승인 전략`);
         setElementText('strategy-context-version', `전체 ${strategies.length}개 전략`);
-        setElementText('strategy-context-safety', active.some((strategy) => strategy.approval_gate?.ok) ? '검증 완료' : '검증 확인 필요');
-        setElementText('strategy-context-approval', '전략을 클릭해 기준과 위험 한도를 확인하세요');
+        setElementText('strategy-context-safety', aiStrategySelectionDirty ? '변경 대기' : '동기화 완료');
+        setElementText('strategy-context-approval', '유형 선택 또는 개별 체크 후 적용 버튼을 누르세요');
 
-        fillStrategyDetail(strategies.find((strategy) => strategy.id === selectedId) || strategies[0]);
+        const detailStrategy = strategies.find((strategy) => strategy.id === selectedId) || strategies[0];
+        if (detailStrategy) fillStrategyDetail(detailStrategy);
         bindStrategyDetailForm();
+        updateAiStrategySelectionUi();
     } catch (error) {
-        setTableMessage('#table-ai-strategies tbody', 5, error.message);
+        setTableMessage('#table-ai-strategies tbody', 6, error.message);
     }
 }
 
@@ -2531,13 +2706,43 @@ async function renderCandidates(options = {}) {
     setTableMessage('#table-candidates tbody', 9, '관심종목에서 매수 후보를 찾고 있습니다...');
     try {
         const optimizer = document.getElementById('select-portfolio-optimizer')?.value || 'score_tilted_inverse_vol';
-        const query = await commonAnalysisPath('/api/candidates', {
-            min_score: 2,
-            ranker: getActiveStrategyId() ? '' : 'rule_only',
-            optimizer,
-            refresh: Boolean(options.refresh),
-        });
-        const data = await fetchJson(query, 90000);
+        let data;
+        const previewStrategyIds = Array.isArray(options.strategyIds)
+            ? options.strategyIds.filter(Boolean)
+            : [];
+        if (previewStrategyIds.length) {
+            const responses = await Promise.all(previewStrategyIds.map(async (strategyId) => {
+                const params = new URLSearchParams({
+                    strategy_id: strategyId,
+                    min_score: '2',
+                    optimizer,
+                    refresh: 'false',
+                });
+                const response = await fetchJson(`/api/candidates?${params.toString()}`, 90000);
+                return {
+                    ...response,
+                    candidates: (response.candidates || []).map((candidate) => ({
+                        ...candidate,
+                        strategy_id: candidate.strategy_id || strategyId,
+                    })),
+                };
+            }));
+            data = {
+                candidates: responses.flatMap((response) => response.candidates || []),
+                scanned: responses.reduce((sum, response) => sum + Number(response.scanned || 0), 0),
+                min_score: 2,
+                scan_error: responses.map((response) => response.scan_error).filter(Boolean).join(' · ') || null,
+                preview_strategy_ids: previewStrategyIds,
+            };
+        } else {
+            const query = await commonAnalysisPath('/api/candidates', {
+                min_score: 2,
+                ranker: getActiveStrategyId() ? '' : 'rule_only',
+                optimizer,
+                refresh: Boolean(options.refresh),
+            });
+            data = await fetchJson(query, 90000);
+        }
         if (!isCurrentStrategyRequest(request)) return;
         captureAnalysisCycle(data);
         const tbody = document.querySelector('#table-candidates tbody');
@@ -2646,6 +2851,104 @@ async function renderCandidates(options = {}) {
         setTableMessage('#table-candidates tbody', 9, err.message);
     } finally {
         setButtonBusy('btn-candidates', false);
+    }
+}
+
+function waitForStrategyPreviewCompletion(timeoutMs = 600000) {
+    const startedAt = Date.now();
+    return new Promise((resolve, reject) => {
+        const timer = setInterval(async () => {
+            try {
+                const status = await fetchJson('/api/scheduler/status', 30000);
+                const runState = status.run_state || {};
+                if (!runState.is_running) {
+                    clearInterval(timer);
+                    if (runState.error) reject(new Error(runState.error));
+                    else resolve(runState);
+                    return;
+                }
+                if (Date.now() - startedAt > timeoutMs) {
+                    clearInterval(timer);
+                    reject(new Error('전략 조회 시간이 초과되었습니다.'));
+                }
+            } catch (error) {
+                clearInterval(timer);
+                reject(error);
+            }
+        }, 3000);
+    });
+}
+
+async function previewSelectedStrategies() {
+    const button = document.getElementById('btn-candidates');
+    setButtonBusy(button, true);
+    setTableMessage('#table-candidates tbody', 9, '선택된 전략을 주문 없이 분석하고 있습니다...');
+    try {
+        const envelope = await fetchJson('/api/ai-strategies', 30000);
+        const selected = (envelope.strategies || []).filter((strategy) =>
+            strategy.selected && strategy.status === 'approved');
+        const strategyIds = selected.map((strategy) => String(strategy.id));
+        if (!strategyIds.length) throw new Error('AI 전략 탭에서 조회할 전략을 먼저 선택해 주세요.');
+        const selection = document.getElementById('strategy-preview-selection');
+        if (selection) {
+            selection.innerHTML = `<strong>조회 전략 ${strategyIds.length}개</strong><span>${
+                selected.map((strategy) => escapeHtml(strategyDisplayName(strategy))).join(' · ')
+            }</span><small>분석 전용 · 주문/승인 생성 없음</small>`;
+        }
+        await postJson('/api/scheduler/run', {
+            mode: 'analysis_only',
+            include_ai_rebalance: false,
+            auto_approve: false,
+            strategy_ids: strategyIds,
+            allowed_categories: ['candidate'],
+        });
+        setStatus(`선택 전략 ${strategyIds.length}개를 분석 전용으로 실행 중입니다. 주문은 생성되지 않습니다.`, true);
+        await waitForStrategyPreviewCompletion();
+        await renderCandidates({ strategyIds });
+        setStatus(`전략 조회 완료 · ${strategyIds.length}개 전략 · 주문 없음`, true);
+    } catch (error) {
+        setTableMessage('#table-candidates tbody', 9, error.message);
+        setStatus(`전략 조회 실패: ${error.message}`);
+    } finally {
+        setButtonBusy(button, false);
+    }
+}
+
+function configureStrategyLookupTab() {
+    const strategyTab = document.getElementById('dashboard-tab-strategy');
+    const aiTab = document.getElementById('dashboard-tab-ai');
+    const signals = document.querySelector('.panel-signals');
+    if (aiTab && signals) aiTab.insertBefore(signals, aiTab.firstChild);
+
+    strategyTab?.querySelector('.panel-candidates-history')?.remove();
+    strategyTab?.querySelector('.panel-execution-plan')?.remove();
+
+    const candidatePanel = strategyTab?.querySelector('.panel-candidates');
+    if (candidatePanel) {
+        const title = candidatePanel.querySelector('.panel-header h2');
+        const help = candidatePanel.querySelector('.panel-header .section-help');
+        const button = document.getElementById('btn-candidates');
+        if (title) title.textContent = '전략매수후보';
+        if (help) help.textContent = 'AI 전략 탭에서 선택한 전략을 스케줄 실행 전에 분석 전용으로 조회합니다. 주문은 생성되지 않습니다.';
+        if (button) button.textContent = '선택 전략 조회';
+        candidatePanel.querySelector('.ai-strategy-control-bar')?.remove();
+        candidatePanel.querySelector('#ai-strategy-summary')?.remove();
+        candidatePanel.querySelector('#ai-flow-list')?.remove();
+        const table = candidatePanel.querySelector('.table-responsive');
+        if (table && !document.getElementById('strategy-preview-selection')) {
+            const selection = document.createElement('div');
+            selection.id = 'strategy-preview-selection';
+            selection.className = 'strategy-preview-selection';
+            selection.innerHTML = '<strong>조회 대기</strong><span>AI 전략 탭에서 사용할 전략을 선택하세요.</span><small>스케줄과 동일한 후보 분석을 주문 없이 실행합니다.</small>';
+            table.before(selection);
+        }
+    }
+
+    if (signals) {
+        const title = signals.querySelector('.panel-header h2');
+        const help = signals.querySelector('.panel-header .section-help');
+        if (title) title.textContent = '보유종목 매매신호';
+        if (help) help.textContent = '보유종목의 기술 신호와 선택 전략 판단을 AI 최적화 결과와 함께 확인합니다.';
     }
 }
 
@@ -3968,6 +4271,7 @@ async function fetchDashboardData() {
 
 // 매수후보 포착 히스토리 새로고침 버튼 바인딩
 document.addEventListener('DOMContentLoaded', () => {
+    configureStrategyLookupTab();
     document.getElementById('select-performance-scope')?.addEventListener('change', () => {
         renderTrades();
     });
@@ -3990,23 +4294,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     document.querySelectorAll('.easy-strategy-preset').forEach((button) => {
         button.addEventListener('click', async () => {
-            const preset = button.getAttribute('data-preset');
-            setButtonBusy(button, true);
-            try {
-                const result = await postJson(`/api/ai-strategy-presets/${encodeURIComponent(preset)}/apply`, {});
-                const strategyId = result.strategy?.id;
-                if (strategyId) {
-                    localStorage.setItem('hanstock_ai_ranker', strategyId);
-                    activeStrategyAuditId = strategyId;
-                }
-                const applyResult = await postJson('/api/ai-strategies/apply-selected', {});
-                await Promise.all([renderAiStrategies(), syncStrategiesToDropdown(), renderStrategyContext(), renderScheduleInfo()]);
-                await renderStrategyAudit(strategyId);
-                setStatus(result.message || '쉬운 전략을 적용했습니다.', true);
-            } catch (err) {
-                setStatus(`쉬운 전략 적용 실패: ${err.message}`);
-            } finally {
-                setButtonBusy(button, false);
+            const category = button.getAttribute('data-preset');
+            if (chooseAiStrategyCategory(category)) {
+                await renderAiStrategies();
+                setStatus(`${strategyScheduleCategoryLabel({ schedule_category: category })} 전략을 선택했습니다. '스케줄 적용' 버튼을 눌러 반영하세요.`, true);
             }
         });
     });
@@ -4075,9 +4366,20 @@ document.addEventListener('DOMContentLoaded', () => {
         applySelectedBtn.addEventListener('click', async () => {
             setButtonBusy(applySelectedBtn, true);
             try {
-                const applyResult = await postJson('/api/ai-strategies/apply-selected', {});
+                const selectedIds = Array.from(aiStrategyDraftSelection || []).filter((id) =>
+                    aiStrategyCatalog.some((strategy) =>
+                        strategy.id === id && isSharedScheduleSelectable(strategy)
+                    )
+                );
+                await postJson('/api/ai-strategies/selection', {
+                    strategy_ids: selectedIds,
+                });
+                const applyResult = selectedIds.length
+                    ? await postJson('/api/ai-strategies/apply-selected', {})
+                    : { applied_strategy_ids: [] };
+                aiStrategySelectionDirty = false;
                 await Promise.all([renderAiStrategies(), syncStrategiesToDropdown(), renderStrategyContext(), renderScheduleInfo()]);
-                
+
                 const select = document.getElementById('select-ai-ranker');
                 if (select && select.options.length > 0) {
                     const data = await fetchJson('/api/ai-strategies');
@@ -4089,17 +4391,15 @@ document.addEventListener('DOMContentLoaded', () => {
                         localStorage.setItem('hanstock_ai_ranker', select.value);
                     }
                 }
-                
-                const strategyTabBtn = document.querySelector('.dashboard-tab[data-dashboard-tab="strategy"]');
-                if (strategyTabBtn) {
-                    strategyTabBtn.click();
-                }
-                
-                await Promise.all([renderSignals(), renderCandidates()]);
                 const appliedCount = (applyResult.applied_strategy_ids || []).length;
-                setStatus(`AI 전략 ${appliedCount}개 적용 · 모의계좌 거래로 성과를 확인합니다.`, appliedCount > 0);
+                setStatus(
+                    appliedCount
+                        ? `AI 전략 ${appliedCount}개를 공용 스케줄에 적용했습니다.`
+                        : '공용 스케줄의 AI 전략을 모두 해제했습니다.',
+                    true
+                );
             } catch (err) {
-                setStatus(`전략 자동 적용 실패: ${err.message}`);
+                setStatus(`전략 스케줄 적용 실패: ${err.message}`);
             } finally {
                 setButtonBusy(applySelectedBtn, false);
             }
@@ -4272,7 +4572,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const btnCandidates = document.getElementById('btn-candidates');
     if (btnCandidates) {
-        btnCandidates.addEventListener('click', startCommonAnalysisRefresh);
+        btnCandidates.addEventListener('click', previewSelectedStrategies);
     }
     const btnExecutionPlan = document.getElementById('btn-execution-plan');
     if (btnExecutionPlan) {

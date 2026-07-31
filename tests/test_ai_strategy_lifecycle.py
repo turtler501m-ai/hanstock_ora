@@ -77,6 +77,23 @@ class AiStrategyLifecycleTests(unittest.TestCase):
         ]
         self.assertEqual(selected, ["first"])
 
+    def test_batch_selection_replaces_only_mutable_strategy_scope(self):
+        first = self._create("First", selected=True)
+        second = self._create("Second")
+        independent = self._create("Independent", selected=True)
+
+        repository.replace_ai_strategy_selection(
+            [second["id"]],
+            mutable_strategy_ids=[first["id"], second["id"]],
+        )
+
+        selected = {
+            item["id"]
+            for item in repository.load_ai_strategies()
+            if item.get("selected")
+        }
+        self.assertEqual(selected, {second["id"], independent["id"]})
+
     def test_duplicate_strategy_name_is_rejected(self):
         self._create("Unique Name")
 
