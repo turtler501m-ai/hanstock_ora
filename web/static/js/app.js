@@ -4255,6 +4255,7 @@ async function loadAiScheduleSettings() {
     if (end) end.value = scheduleHmToInput(schedule.end_hm, '1530');
     if (mode) mode.value = schedule.mode || 'analysis_only';
     if (autoApprove) autoApprove.checked = Boolean(schedule.auto_approve);
+    return schedule;
 }
 
 async function saveAiScheduleSettings() {
@@ -4288,7 +4289,25 @@ async function renderScheduleInfo() {
         const query = strategyId ? `?strategy_id=${encodeURIComponent(strategyId)}` : '';
         const data = await fetchJson(`/api/scheduler/status${query}`);
         await renderSchedulerStrategyChecklist(data.strategy_dispatch?.schedules || []);
-        await loadAiScheduleSettings();
+        const aiSchedule = await loadAiScheduleSettings();
+        const dispatch = data.strategy_dispatch || {};
+
+        const scheduleStateEl = document.getElementById('sched-overview-schedule-state');
+        if (scheduleStateEl) {
+            scheduleStateEl.textContent = aiSchedule.enabled
+                ? `사용 · ${Number(aiSchedule.interval_minutes || 15)}분 간격`
+                : '사용 안 함';
+            scheduleStateEl.className = aiSchedule.enabled ? 'is-active' : '';
+        }
+        const strategyCountEl = document.getElementById('sched-overview-strategy-count');
+        if (strategyCountEl) {
+            strategyCountEl.textContent = `사용 ${dispatch.enabled_count || 0} / 전체 ${dispatch.schedule_count || 0}`;
+        }
+        const overviewEnvEl = document.getElementById('sched-overview-env');
+        if (overviewEnvEl) {
+            overviewEnvEl.textContent = data.config.trading_env === 'real' ? '실전투자' : '모의투자';
+            overviewEnvEl.className = data.config.trading_env === 'real' ? 'is-warning' : 'is-active';
+        }
         
         // 1. Config / Settings
         const cronTzEl = document.getElementById('sched-cron-tz');
@@ -4317,13 +4336,20 @@ async function renderScheduleInfo() {
 
         const activeStrategyEl = document.getElementById('sched-active-strategy');
         if (activeStrategyEl) {
-            const dispatch = data.strategy_dispatch || {};
             const dispatchText = dispatch.summary || `사용 ${dispatch.enabled_count || 0}개 / 전체 ${dispatch.schedule_count || 0}개 / 감시종목 ${dispatch.universe_count || 0}개`;
             activeStrategyEl.textContent = `${data.active_strategy_name || '-'} (${data.active_strategy_id || '-'}) · ${dispatchText}`;
         }
         
         // 2. Dynamic status of current/last execution state
         const runState = data.run_state;
+        const runStateEl = document.getElementById('sched-overview-run-state');
+        if (runStateEl) {
+            const modeLabel = runState.mode === 'daily_auto'
+                ? 'AI 자동매매'
+                : (runState.mode === 'execute' ? '주문 실행' : '분석 전용');
+            runStateEl.textContent = runState.is_running ? `실행 중 · ${modeLabel}` : '대기';
+            runStateEl.className = runState.is_running ? 'is-warning' : 'is-active';
+        }
         const runningPanel = document.getElementById('scheduler-running-panel');
         if (runningPanel) {
             if (runState.is_running) {
@@ -4691,7 +4717,7 @@ async function renderSchedulerStrategyChecklist(schedules = []) {
         const checked = scheduled.has(String(strategy.id))
             || String(strategy.id) === activeStrategyId
             || (!activeStrategyId && strategy.selected);
-        return `<label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+        return `<label class="scheduler-strategy-option">
             <input type="checkbox" class="scheduler-strategy-checkbox" value="${escapeHtml(strategy.id)}" ${checked ? 'checked' : ''}>
             <span>${escapeHtml(strategyDisplayName(strategy))}</span>
         </label>`;

@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=32">
+    <link rel="stylesheet" href="/static/css/style.css?v=33">
 </head>
 
 <body>
@@ -381,173 +381,243 @@
             </section>
 
             <section class="dashboard-section" id="dashboard-tab-schedule">
-                <!-- Schedule Controls & Overview -->
-                <div class="dashboard-two-column">
-                    <!-- Config & Settings Card -->
+                <div class="schedule-page-heading">
+                    <div>
+                        <span class="schedule-eyebrow">AUTOMATION CONTROL</span>
+                        <h2>자동매매 스케줄</h2>
+                        <p class="section-help">정기 실행 설정, 즉시 실행, 최근 처리 결과를 한곳에서 관리합니다.</p>
+                    </div>
+                    <span class="schedule-safety-note">주문 실행 모드는 승인·거래환경을 확인하세요</span>
+                </div>
+
+                <div class="schedule-overview-grid" aria-label="스케줄 운영 요약">
+                    <div class="schedule-overview-item">
+                        <span>현재 실행 상태</span>
+                        <strong id="sched-overview-run-state">확인 중</strong>
+                    </div>
+                    <div class="schedule-overview-item">
+                        <span>공용 정기 실행</span>
+                        <strong id="sched-overview-schedule-state">확인 중</strong>
+                    </div>
+                    <div class="schedule-overview-item">
+                        <span>등록 전략</span>
+                        <strong id="sched-overview-strategy-count">-</strong>
+                    </div>
+                    <div class="schedule-overview-item">
+                        <span>거래 환경</span>
+                        <strong id="sched-overview-env">-</strong>
+                    </div>
+                </div>
+
+                <div class="schedule-control-grid">
                     <section class="card glass panel-schedule-config">
-                        <h2>스케쥴 환경설정 및 상태</h2>
-                        <p class="section-help">스케쥴러 실행 시 적용되는 환경설정 값과 구동 시간대입니다.</p>
-                        
-                        <div class="settings-grid" id="schedule-config-grid">
-                            <div class="setting-item">
-                                <span class="label">동작 시간 표준 (CRON_TZ)</span>
-                                <strong id="sched-cron-tz">-</strong>
+                        <div class="schedule-card-heading">
+                            <div>
+                                <span class="schedule-card-kicker">정기 실행</span>
+                                <h2>AI 전략 공용 스케줄</h2>
+                                <p class="section-help">AI 전략 탭에서 적용한 승인 전략을 평일 지정 시간에 실행합니다.</p>
                             </div>
-                            <div class="setting-item">
-                                <span class="label">AI 자동실행(daily_auto) 재시도</span>
-                                <strong id="sched-daily-retries">-</strong>
-                            </div>
-                            <div class="setting-item">
-                                <span class="label">AI 자동실행 재시도 대기시간</span>
-                                <strong id="sched-daily-retry-delay">-</strong>
-                            </div>
-                            <div class="setting-item">
-                                <span class="label">일반 실행 재시도 횟수</span>
-                                <strong id="sched-retries">-</strong>
-                            </div>
-                            <div class="setting-item">
-                                <span class="label">일반 실행 재시도 대기시간</span>
-                                <strong id="sched-retry-delay">-</strong>
-                            </div>
-                            <div class="setting-item">
-                                <span class="label">Slack 알림 연동</span>
-                                <strong id="sched-slack-enabled">-</strong>
-                            </div>
-                            <div class="setting-item">
-                                <span class="label">주문 완료 후 잔고 동기화</span>
-                                <strong id="sched-sync-enabled">-</strong>
-                            </div>
-                            <div class="setting-item">
-                                <span class="label">거래 환경</span>
-                                <strong id="sched-trading-env">-</strong>
-                            </div>
-                            <div class="setting-item" style="grid-column: span 2;">
-                                <span class="label">현재 활성화된 매매 전략</span>
-                                <strong id="sched-active-strategy" style="color: #60a5fa; font-weight: bold;">-</strong>
-                            </div>
+                            <span class="schedule-card-number">01</span>
                         </div>
-                        <div class="panel-sub" style="margin-top: 1rem;">
-                            <h3>AI전략 공용 정기 스케줄</h3>
-                            <p class="control-help">AI전략 탭에서 적용된 승인 전략들을 실행합니다. 전략 적용만으로 자동 실행되지는 않습니다.</p>
-                            <div class="settings-grid">
-                                <label class="setting-item">
-                                    <span class="label">정기 실행</span>
+
+                        <div class="schedule-settings-grid">
+                            <label class="schedule-field schedule-checkbox-field">
+                                <span>
+                                    <strong>정기 실행 사용</strong>
+                                    <small>설정한 시간 안에서 반복 실행</small>
+                                </span>
+                                <span class="switch-toggle">
                                     <input type="checkbox" id="ai-schedule-enabled">
-                                </label>
-                                <label class="setting-item">
-                                    <span class="label">실행 간격(분)</span>
+                                    <span class="slider-toggle"></span>
+                                </span>
+                            </label>
+                            <label class="schedule-field">
+                                <span>실행 간격</span>
+                                <span class="schedule-input-unit">
                                     <input type="number" id="ai-schedule-interval" min="1" value="15">
-                                </label>
-                                <label class="setting-item">
-                                    <span class="label">시작 시각</span>
-                                    <input type="time" id="ai-schedule-start" value="09:00">
-                                </label>
-                                <label class="setting-item">
-                                    <span class="label">종료 시각</span>
-                                    <input type="time" id="ai-schedule-end" value="15:30">
-                                </label>
-                                <label class="setting-item">
-                                    <span class="label">실행 모드</span>
-                                    <select id="ai-schedule-mode">
-                                        <option value="analysis_only">분석 전용</option>
-                                        <option value="execute">주문 실행</option>
-                                    </select>
-                                </label>
-                                <label class="setting-item">
-                                    <span class="label">자동 승인</span>
+                                    <em>분</em>
+                                </span>
+                            </label>
+                            <label class="schedule-field">
+                                <span>시작 시각</span>
+                                <input type="time" id="ai-schedule-start" value="09:00">
+                            </label>
+                            <label class="schedule-field">
+                                <span>종료 시각</span>
+                                <input type="time" id="ai-schedule-end" value="15:30">
+                            </label>
+                            <label class="schedule-field">
+                                <span>실행 모드</span>
+                                <select id="ai-schedule-mode">
+                                    <option value="analysis_only">분석 전용 — 주문 없음</option>
+                                    <option value="execute">주문 실행</option>
+                                </select>
+                            </label>
+                            <label class="schedule-field schedule-checkbox-field">
+                                <span>
+                                    <strong>자동 승인</strong>
+                                    <small>생성된 주문을 승인 대기 없이 처리</small>
+                                </span>
+                                <span class="switch-toggle">
                                     <input type="checkbox" id="ai-schedule-auto-approve">
-                                </label>
-                            </div>
-                            <button type="button" class="button-ghost" id="btn-save-ai-schedule" style="margin-top: .75rem;">AI 정기 스케줄 저장</button>
+                                    <span class="slider-toggle"></span>
+                                </span>
+                            </label>
+                        </div>
+                        <div class="schedule-save-row">
+                            <span class="schedule-weekday-note">월–금 · 한국시간 기준</span>
+                            <button type="button" class="button-primary" id="btn-save-ai-schedule">정기 스케줄 저장</button>
                             <span id="ai-schedule-save-status" class="time-muted" role="status"></span>
                         </div>
+
+                        <details class="schedule-runtime-details">
+                            <summary>
+                                <span>
+                                    <strong>운영 환경 상세</strong>
+                                    <small>재시도, 연동, 활성 전략 정보</small>
+                                </span>
+                                <span class="schedule-details-action">펼쳐보기</span>
+                            </summary>
+                            <div class="schedule-runtime-grid" id="schedule-config-grid">
+                                <div class="schedule-runtime-item">
+                                    <span>시간 표준</span>
+                                    <strong id="sched-cron-tz">-</strong>
+                                </div>
+                                <div class="schedule-runtime-item">
+                                    <span>AI 자동실행 재시도</span>
+                                    <strong id="sched-daily-retries">-</strong>
+                                </div>
+                                <div class="schedule-runtime-item">
+                                    <span>AI 재시도 대기</span>
+                                    <strong id="sched-daily-retry-delay">-</strong>
+                                </div>
+                                <div class="schedule-runtime-item">
+                                    <span>일반 실행 재시도</span>
+                                    <strong id="sched-retries">-</strong>
+                                </div>
+                                <div class="schedule-runtime-item">
+                                    <span>일반 재시도 대기</span>
+                                    <strong id="sched-retry-delay">-</strong>
+                                </div>
+                                <div class="schedule-runtime-item">
+                                    <span>Slack 알림</span>
+                                    <strong id="sched-slack-enabled">-</strong>
+                                </div>
+                                <div class="schedule-runtime-item">
+                                    <span>잔고 동기화</span>
+                                    <strong id="sched-sync-enabled">-</strong>
+                                </div>
+                                <div class="schedule-runtime-item">
+                                    <span>거래 환경</span>
+                                    <strong id="sched-trading-env">-</strong>
+                                </div>
+                                <div class="schedule-runtime-item is-wide">
+                                    <span>현재 활성 전략</span>
+                                    <strong id="sched-active-strategy">-</strong>
+                                </div>
+                            </div>
+                        </details>
                     </section>
 
-                    <!-- Instant Execution Trigger Card -->
                     <section class="card glass panel-schedule-trigger">
-                        <h2>스케쥴 즉시 실행</h2>
-                        <p class="section-help">지정한 모드로 스케쥴러를 즉시 기동하여 신호를 추출하거나 주문을 실행합니다.</p>
-                        <div class="panel-sub" style="margin-bottom: 1rem;">
-                            <h3>이번 즉시 실행 대상 (복수 선택)</h3>
-                            <p class="control-help">체크 상태는 정기 스케줄 설정으로 저장되지 않습니다.</p>
-                            <div id="scheduler-strategy-checklist" style="display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:8px;"></div>
+                        <div class="schedule-card-heading">
+                            <div>
+                                <span class="schedule-card-kicker">수동 실행</span>
+                                <h2>지금 한 번 실행</h2>
+                                <p class="section-help">대상 전략과 실행 범위를 확인한 후 필요한 모드를 선택합니다.</p>
+                            </div>
+                            <span class="schedule-card-number">02</span>
                         </div>
-                        
-                        <div class="trigger-controls">
-                            <div class="trigger-item">
-                                <h3>1. AI 자동 매매 모드 (daily_auto)</h3>
-                                <p class="control-help">강화학습/계획 수립 및 자동 승인/주문 전송까지 한 번에 완료합니다.</p>
-                                <button type="button" class="button-primary w-100" id="btn-run-daily-auto" style="width: 100%; margin-top: 0.5rem; min-height: 40px;">daily_auto 즉시 실행</button>
-                            </div>
-                            
-                            <div class="trigger-item" style="margin-top: 1.5rem;">
-                                <h3>2. 분석 전용 모드 (analysis_only)</h3>
-                                <p class="control-help">신호를 도출하고 매매 계획을 수립하되, 주문 전송을 보류합니다.</p>
-                                <button type="button" class="button-ghost w-100" id="btn-run-analysis-only" style="width: 100%; margin-top: 0.5rem; min-height: 40px;">analysis_only 즉시 실행</button>
-                            </div>
 
-                            <div class="trigger-item" style="margin-top: 1.5rem;">
-                                <h3>3. 즉시 실행 모드 (execute)</h3>
-                                <p class="control-help">수립된 매매 계획을 즉시 전송합니다.</p>
-                                <button type="button" class="button-ghost w-100" id="btn-run-execute" style="width: 100%; margin-top: 0.5rem; min-height: 40px;">execute 즉시 실행</button>
+                        <div class="schedule-strategy-picker">
+                            <div>
+                                <strong>실행 대상 전략</strong>
+                                <small>복수 선택 가능 · 정기 설정에는 저장되지 않음</small>
                             </div>
+                            <div id="scheduler-strategy-checklist"></div>
+                        </div>
+
+                        <div class="schedule-mode-list">
+                            <article class="schedule-mode-card is-safe">
+                                <div>
+                                    <span class="schedule-mode-tag">ANALYSIS ONLY</span>
+                                    <h3>분석 전용</h3>
+                                    <p>신호와 매매 계획만 생성하며 주문은 전송하지 않습니다.</p>
+                                </div>
+                                <button type="button" class="button-ghost" id="btn-run-analysis-only">분석 시작</button>
+                            </article>
+                            <article class="schedule-mode-card is-auto">
+                                <div>
+                                    <span class="schedule-mode-tag">DAILY AUTO</span>
+                                    <h3>AI 자동매매 전체 사이클</h3>
+                                    <p>분석부터 계획, 자동 승인과 주문 전송까지 한 번에 수행합니다.</p>
+                                </div>
+                                <button type="button" class="button-primary" id="btn-run-daily-auto">전체 사이클 실행</button>
+                            </article>
+                            <article class="schedule-mode-card is-execute">
+                                <div>
+                                    <span class="schedule-mode-tag">EXECUTE</span>
+                                    <h3>주문 실행</h3>
+                                    <p>수립된 매매 계획을 주문으로 즉시 전송합니다.</p>
+                                </div>
+                                <button type="button" class="button-danger" id="btn-run-execute">주문 실행</button>
+                            </article>
                         </div>
                     </section>
                 </div>
 
-                <!-- Running Overlay / Progress State -->
-                <div id="scheduler-running-panel" class="card glass panel-schedule-running" style="display: none; margin-top: 1.5rem; border-color: rgba(59, 130, 246, 0.45);">
-                    <div class="running-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <span class="dot live pulsing" style="background-color: var(--warning); width: 10px; height: 10px; border-radius: 50%;"></span>
-                            <h2 style="margin: 0; font-size: 1.25rem;">스케쥴러 동작 중...</h2>
+                <div id="scheduler-running-panel" class="card glass panel-schedule-running schedule-running-panel" style="display: none;">
+                    <div class="schedule-running-header">
+                        <div>
+                            <span class="dot live pulsing"></span>
+                            <h2>스케줄러 실행 중</h2>
                         </div>
-                        <button type="button" class="button-ghost" id="btn-copy-scheduler-log" style="padding: 2px 10px; font-size: 0.75rem; min-height: 26px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); color: var(--text-color); cursor: pointer;" onclick="copySchedulerLog()">로그 복사</button>
+                        <button type="button" class="button-ghost compact-button" id="btn-copy-scheduler-log" onclick="copySchedulerLog()">로그 복사</button>
                     </div>
-                    <p class="section-help">스케쥴러가 실시간으로 매매 분석 및 KIS API 통신을 수행하고 있습니다. 잠시만 기다려 주세요.</p>
-                    <div class="running-log-box" id="scheduler-running-log" style="background: rgba(0,0,0,0.4); padding: 1rem; border-radius: 6px; font-family: monospace; font-size: 0.85rem; max-height: 200px; overflow-y: auto; white-space: pre-wrap; border: 1px solid rgba(255,255,255,0.08); margin-top: 0.5rem; color: #34d399;">
+                    <p class="section-help">매매 분석과 API 통신을 수행하고 있습니다. 완료될 때까지 페이지를 유지해 주세요.</p>
+                    <div class="running-log-box schedule-running-log" id="scheduler-running-log">
                         [System] 스케쥴 실행 요청을 처리 중입니다...
                     </div>
                 </div>
 
-                <!-- Last Execution Result Card -->
-                <section class="card glass panel-schedule-result" style="margin-top: 1.5rem;">
-                    <div class="panel-header split-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <section class="card glass panel-schedule-result schedule-result-panel">
+                    <div class="panel-header split-header">
                         <div>
-                            <h2>최근 스케쥴 실행 결과</h2>
-                            <p class="section-help">최종 자동매매 스케쥴러 실행 시 도출된 판단 및 주문 내역입니다.</p>
+                            <span class="schedule-card-kicker">실행 이력</span>
+                            <h2>최근 스케줄 실행 결과</h2>
+                            <p class="section-help">최근 사이클에서 생성된 계획, 승인과 주문 처리 결과입니다.</p>
                         </div>
                         <span class="time-muted" id="sched-last-run-time">-</span>
                     </div>
 
-                    <div class="result-summary-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
-                        <div class="card glass" style="padding: 1rem; text-align: center;">
-                            <span class="label" style="font-size: 0.8rem; display: block; margin-bottom: 0.25rem;">최종 상태</span>
-                            <strong id="sched-result-status" style="font-size: 1.1rem;">-</strong>
+                    <div class="schedule-result-metrics">
+                        <div class="schedule-result-metric is-status">
+                            <span>최종 상태</span>
+                            <strong id="sched-result-status">-</strong>
                         </div>
-                        <div class="card glass" style="padding: 1rem; text-align: center;">
-                            <span class="label" style="font-size: 0.8rem; display: block; margin-bottom: 0.25rem;">총 계획 건수</span>
-                            <strong id="sched-result-plan-cnt" style="font-size: 1.25rem;">-</strong>
+                        <div class="schedule-result-metric">
+                            <span>총 계획</span>
+                            <strong id="sched-result-plan-cnt">-</strong>
                         </div>
-                        <div class="card glass" style="padding: 1rem; text-align: center;">
-                            <span class="label" style="font-size: 0.8rem; display: block; margin-bottom: 0.25rem;">승인 대기 건수</span>
-                            <strong id="sched-result-queue-cnt" style="font-size: 1.25rem;">-</strong>
+                        <div class="schedule-result-metric">
+                            <span>승인 대기</span>
+                            <strong id="sched-result-queue-cnt">-</strong>
                         </div>
-                        <div class="card glass" style="padding: 1rem; text-align: center;">
-                            <span class="label" style="font-size: 0.8rem; display: block; margin-bottom: 0.25rem;">자동 승인 완료</span>
-                            <strong id="sched-result-approved-cnt" style="font-size: 1.25rem;">-</strong>
+                        <div class="schedule-result-metric">
+                            <span>자동 승인</span>
+                            <strong id="sched-result-approved-cnt">-</strong>
                         </div>
-                        <div class="card glass" style="padding: 1rem; text-align: center;">
-                            <span class="label" style="font-size: 0.8rem; display: block; margin-bottom: 0.25rem;">성공 건수</span>
-                            <strong id="sched-result-success-cnt" style="font-size: 1.25rem; color: var(--success);">-</strong>
+                        <div class="schedule-result-metric is-success">
+                            <span>성공</span>
+                            <strong id="sched-result-success-cnt">-</strong>
                         </div>
-                        <div class="card glass" style="padding: 1rem; text-align: center;">
-                            <span class="label" style="font-size: 0.8rem; display: block; margin-bottom: 0.25rem;">실패 건수</span>
-                            <strong id="sched-result-failed-cnt" style="font-size: 1.25rem; color: var(--danger);">-</strong>
+                        <div class="schedule-result-metric is-failure">
+                            <span>실패</span>
+                            <strong id="sched-result-failed-cnt">-</strong>
                         </div>
                     </div>
 
-                    <div class="schedule-tables" style="margin-top: 1.5rem;">
+                    <div class="schedule-tables">
                         <div id="scheduler-runs-container">
                             <div class="text-center" style="color: var(--text-muted); font-size: 0.95rem; padding: 2rem 0;">
                                 <i class="fas fa-spinner fa-spin" style="margin-right: 0.5rem;"></i> 로딩 중이거나 내역이 없습니다...
@@ -1890,7 +1960,7 @@
     </script>
     <script src="/static/js/environment_badge.js?v=1"></script>
     <script src="/static/js/common-analysis.js?v=1"></script>
-    <script src="/static/js/app.js?v=52"></script>
+    <script src="/static/js/app.js?v=53"></script>
 
     <!-- Plunge Bounce Strategy Scripts -->
     <script>

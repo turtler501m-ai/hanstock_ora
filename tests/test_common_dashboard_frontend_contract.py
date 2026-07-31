@@ -124,6 +124,22 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("'/api/watchlist/policy'", APP_JS)
         self.assertIn("row.policy_status === policyFilter", APP_JS)
 
+    def test_schedule_tab_groups_overview_settings_execution_and_results(self):
+        self.assertIn('class="schedule-overview-grid"', INDEX_HTML)
+        self.assertIn('id="sched-overview-run-state"', INDEX_HTML)
+        self.assertIn('id="sched-overview-schedule-state"', INDEX_HTML)
+        self.assertIn('class="schedule-runtime-details"', INDEX_HTML)
+        self.assertIn('class="schedule-mode-card is-safe"', INDEX_HTML)
+        self.assertIn('class="schedule-mode-card is-auto"', INDEX_HTML)
+        self.assertIn('class="schedule-mode-card is-execute"', INDEX_HTML)
+        self.assertIn('class="schedule-result-metrics"', INDEX_HTML)
+        self.assertEqual(INDEX_HTML.count('id="btn-run-analysis-only"'), 1)
+        self.assertEqual(INDEX_HTML.count('id="btn-run-daily-auto"'), 1)
+        self.assertEqual(INDEX_HTML.count('id="btn-run-execute"'), 1)
+        self.assertIn("runStateEl.textContent", APP_JS)
+        self.assertIn("scheduleStateEl.textContent", APP_JS)
+        self.assertIn('class="scheduler-strategy-option"', APP_JS)
+
 
 if __name__ == "__main__":
     unittest.main()
