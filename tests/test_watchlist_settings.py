@@ -8,7 +8,10 @@ class TestWatchlistSettings(unittest.TestCase):
         # 테스트용 임시 DB 설정
         init_db()
         with connect_db() as conn:
-            conn.execute("DELETE FROM watchlist_settings WHERE key IN ('ai_auto_add', 'ai_auto_add_threshold')")
+            conn.execute(
+                "DELETE FROM watchlist_settings "
+                "WHERE key IN ('ai_auto_add', 'ai_auto_add_threshold', 'watchlist_policy')"
+            )
             conn.commit()
 
     def test_watchlist_threshold_defaults_and_updates(self):
@@ -32,6 +35,24 @@ class TestWatchlistSettings(unittest.TestCase):
 
         final_data = load_watchlist_data()
         self.assertEqual(final_data["ai_auto_add_threshold"], 2.5)
+
+    def test_watchlist_policy_defaults_and_updates(self):
+        data = load_watchlist_data()
+        self.assertEqual(data["policy"]["min_price"], 5_000.0)
+        self.assertEqual(data["policy"]["min_market_cap"], 300_000_000_000.0)
+
+        data["policy"] = {
+            "enabled": True,
+            "min_price": 8_000,
+            "min_market_cap": 500_000_000_000,
+            "require_mid_large_when_market_cap_unknown": False,
+        }
+        save_watchlist_data({"policy": data["policy"]})
+
+        updated = load_watchlist_data()
+        self.assertEqual(updated["policy"]["min_price"], 8_000.0)
+        self.assertEqual(updated["policy"]["min_market_cap"], 500_000_000_000.0)
+        self.assertFalse(updated["policy"]["require_mid_large_when_market_cap_unknown"])
 
 if __name__ == "__main__":
     unittest.main()

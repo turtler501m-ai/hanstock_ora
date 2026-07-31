@@ -2382,6 +2382,89 @@ class DashboardCoreTests(unittest.TestCase):
         self.assertEqual(result["symbols"][0]["name"], "신일전자")
         self.assertEqual(result["symbols"][0]["sector"], "전기제품")
 
+    def test_watchlist_summary_reports_counts_sectors_and_policy_status(self):
+        with patch("src.db.repository.load_watchlist_data", return_value={
+            "symbols": ["005930", "000660"],
+            "names": {},
+            "ai_auto_add": False,
+            "ai_auto_add_threshold": 3.0,
+            "policy": {
+                "enabled": True,
+                "min_price": 100_000,
+                "min_market_cap": 0,
+                "require_mid_large_when_market_cap_unknown": False,
+            },
+        }), patch(
+            "src.db.repository.get_watchlist_extra_info",
+            side_effect=[
+                {
+                    "price": 70_000, "score": 3, "reason": "test",
+                    "change_rate": 1, "rsi": 50, "updated_at": "2026-07-31 10:00:00",
+                },
+                {
+                    "price": 120_000, "score": 2, "reason": "test",
+                    "change_rate": -1, "rsi": 40, "updated_at": "2026-07-31 10:00:00",
+                },
+            ],
+        ), patch(
+            "src.market_metadata.resolve_stock_sector",
+            side_effect=["반도체", "반도체"],
+        ):
+            result = dashboard.get_watchlist()
+
+        self.assertEqual(result["summary"]["total_count"], 2)
+        self.assertEqual(result["summary"]["eligible_count"], 1)
+        self.assertEqual(result["summary"]["ineligible_count"], 1)
+        self.assertEqual(result["summary"]["sector_count"], 1)
+        self.assertEqual(result["summary"]["sectors"][0]["count"], 2)
+        self.assertEqual(result["symbols"][0]["policy_status"], "ineligible")
+        self.assertEqual(result["symbols"][1]["policy_status"], "eligible")
+
+    def test_watchlist_scan_applies_saved_registration_policy(self):
+        watchlist_data = {
+            "symbols": [],
+            "policy": {
+                "enabled": True,
+                "min_price": 100_000,
+                "min_market_cap": 0,
+                "require_mid_large_when_market_cap_unknown": False,
+            },
+        }
+        result = dashboard._sync_watchlist_from_scan_result(
+            watchlist_data,
+            {
+                "candidates": [
+                    {"ticker": "005930", "name": "Samsung", "score": 3, "current_price": 70_000},
+                    {"ticker": "000660", "name": "SK Hynix", "score": 3, "current_price": 120_000},
+                ],
+            },
+            add_threshold=3,
+        )
+
+        self.assertEqual(watchlist_data["symbols"], ["000660"])
+        self.assertEqual(result["eligible_count"], 1)
+
+    def test_watchlist_policy_update_persists_policy_without_rewriting_symbols(self):
+        with patch("src.db.repository.save_watchlist_data") as save:
+            result = dashboard.update_watchlist_policy(
+                dashboard.WatchlistPolicyPayload(
+                    enabled=True,
+                    min_price=7_000,
+                    min_market_cap=500_000_000_000,
+                    require_mid_large_when_market_cap_unknown=False,
+                )
+            )
+
+        self.assertTrue(result["ok"])
+        save.assert_called_once_with({
+            "policy": {
+                "enabled": True,
+                "min_price": 7_000.0,
+                "min_market_cap": 500_000_000_000.0,
+                "require_mid_large_when_market_cap_unknown": False,
+            },
+        })
+
     def test_watchlist_scan_uses_threshold_from_same_request(self):
         saved = []
         with patch.object(dashboard, "_required_env_missing", return_value=[]), \

@@ -113,6 +113,17 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("진입 이후 최고가 기준", APP_JS)
         self.assertIn("전략 설정 저장", APP_JS)
 
+    def test_watchlist_exposes_summary_policy_and_filters(self):
+        self.assertIn('id="watchlist-total-count"', INDEX_HTML)
+        self.assertIn('id="watchlist-sector-summary"', INDEX_HTML)
+        self.assertIn('id="form-watchlist-policy"', INDEX_HTML)
+        self.assertIn('id="num-watchlist-min-price"', INDEX_HTML)
+        self.assertIn('value="5000"', INDEX_HTML)
+        self.assertIn('id="select-watchlist-policy-filter"', INDEX_HTML)
+        self.assertIn("function renderWatchlistSummary(data)", APP_JS)
+        self.assertIn("'/api/watchlist/policy'", APP_JS)
+        self.assertIn("row.policy_status === policyFilter", APP_JS)
+
 
 if __name__ == "__main__":
     unittest.main()

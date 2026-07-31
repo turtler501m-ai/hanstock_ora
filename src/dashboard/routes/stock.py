@@ -1261,9 +1261,13 @@ def review_ai_strategy_performance(id: str, days: int = 30):
 @router.get("/api/watchlist")
 def get_watchlist(strategy_id: str | None = None):
     from src.db.repository import load_watchlist_data, get_watchlist_extra_info
-    from src.strategy.seven_split import STOCK_NAMES, STOCK_SECTORS
+    from src.strategy.seven_split import STOCK_NAMES, STOCK_SECTORS, KOSPI_UNIVERSE
+    from src.strategy.watchlist_policy import eligibility_reason, normalize_watchlist_policy
     from src.market_metadata import resolve_stock_name, resolve_stock_sector
+    from collections import Counter
+
     data = load_watchlist_data()
+    policy = normalize_watchlist_policy(data.get("policy"))
     names_by_symbol = data.get("names", {}) if isinstance(data.get("names"), dict) else {}
     inherited = False
     if strategy_id:
@@ -1280,28 +1284,77 @@ def get_watchlist(strategy_id: str | None = None):
     else:
         symbols = data.get("symbols", [])
     symbols_detail = []
+    sector_counts = Counter()
+    eligible_count = 0
+    ineligible_count = 0
+    unknown_count = 0
     for code in symbols:
         extra = get_watchlist_extra_info(code)
         stored_name = str(names_by_symbol.get(code) or "").strip()
         static_name = STOCK_NAMES.get(code)
+        sector = resolve_stock_sector(code, STOCK_SECTORS.get(code)) or "미분류"
+        sector_counts[sector] += 1
+        price = extra["price"]
+        if price is None or float(price or 0) <= 0:
+            policy_status = "unknown"
+            policy_reason = "현재가 미수집"
+            unknown_count += 1
+        else:
+            rejection = eligibility_reason(
+                price=price,
+                market_cap=None,
+                known_mid_large=code in KOSPI_UNIVERSE,
+                policy=policy,
+            )
+            if rejection:
+                policy_status = "ineligible"
+                policy_reason = rejection
+                ineligible_count += 1
+            else:
+                policy_status = "eligible"
+                policy_reason = "조건 충족"
+                eligible_count += 1
         symbols_detail.append({
             "symbol": code,
             "name": resolve_stock_name(code, stored_name or static_name),
-            "sector": resolve_stock_sector(code, STOCK_SECTORS.get(code)),
-            "price": extra["price"],
+            "sector": sector,
+            "price": price,
             "score": extra["score"],
             "reason": extra["reason"],
             "change_rate": extra["change_rate"],
             "rsi": extra["rsi"],
-            "updated_at": extra["updated_at"]
+            "updated_at": extra["updated_at"],
+            "policy_status": policy_status,
+            "policy_reason": policy_reason,
         })
+    total_count = len(symbols_detail)
+    sector_summary = [
+        {
+            "sector": sector,
+            "count": count,
+            "ratio": round((count / total_count * 100) if total_count else 0.0, 1),
+        }
+        for sector, count in sorted(
+            sector_counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+    ]
     return {
         "strategy_id": strategy_id,
         "inherited": inherited,
         "universe_source": "shared" if inherited or not strategy_id else "strategy",
         "symbols": symbols_detail,
         "ai_auto_add": data.get("ai_auto_add", False),
-        "ai_auto_add_threshold": data.get("ai_auto_add_threshold", 3.0)
+        "ai_auto_add_threshold": data.get("ai_auto_add_threshold", 3.0),
+        "policy": policy,
+        "summary": {
+            "total_count": total_count,
+            "eligible_count": eligible_count,
+            "ineligible_count": ineligible_count,
+            "unknown_count": unknown_count,
+            "sector_count": len(sector_counts),
+            "sectors": sector_summary,
+        },
     }
 
 
@@ -1310,18 +1363,21 @@ def get_watchlist(strategy_id: str | None = None):
 def add_to_watchlist(payload: WatchlistAddPayload):
     from src.db.repository import load_watchlist_data, save_watchlist_data
     from src.strategy.seven_split import sync_watchlist_runtime, STOCK_NAMES, KOSPI_UNIVERSE
-    from src.strategy.watchlist_policy import eligibility_reason
+    from src.strategy.watchlist_policy import eligibility_reason, normalize_watchlist_policy
     from src.market_metadata import resolve_stock_name
     
     code = payload.symbol.strip()
     if not code.isdigit() or len(code) != 6:
         raise HTTPException(status_code=400, detail="유효하지 않은 종목코드 형식입니다. (6자리 숫자)")
 
+    settings_data = load_watchlist_data()
+    policy = normalize_watchlist_policy(settings_data.get("policy"))
     quote = _get_api().get_quote(code)
     rejection = eligibility_reason(
         price=quote.get("current"),
         market_cap=quote.get("market_cap"),
         known_mid_large=code in KOSPI_UNIVERSE,
+        policy=policy,
     )
     if rejection:
         raise HTTPException(status_code=400, detail=rejection)
@@ -1352,6 +1408,20 @@ def add_to_watchlist(payload: WatchlistAddPayload):
         "ok": True,
         "symbol": code,
         "name": resolve_stock_name(code, STOCK_NAMES.get(code, "알 수 없는 종목"))
+    }
+
+
+@router.post("/api/watchlist/policy")
+def update_watchlist_policy(payload: WatchlistPolicyPayload):
+    from src.db.repository import save_watchlist_data
+    from src.strategy.watchlist_policy import normalize_watchlist_policy
+
+    policy = normalize_watchlist_policy(payload.model_dump())
+    save_watchlist_data({"policy": policy})
+    return {
+        "ok": True,
+        "policy": policy,
+        "message": "관심종목 정책이 수동 추가와 AI 자동 추가에 적용되었습니다.",
     }
 
 

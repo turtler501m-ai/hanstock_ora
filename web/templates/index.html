@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=31">
+    <link rel="stylesheet" href="/static/css/style.css?v=32">
 </head>
 
 <body>
@@ -1055,6 +1055,80 @@
             </section>
 
             <section class="dashboard-section" id="dashboard-tab-watchlist">
+                <div class="watchlist-overview-grid">
+                    <section class="card glass watchlist-summary-card" aria-labelledby="watchlist-summary-title">
+                        <div class="watchlist-card-heading">
+                            <div>
+                                <h2 id="watchlist-summary-title">관심종목 요약</h2>
+                                <p class="section-help">목록 건수와 정책 충족 여부, 섹터 편중을 한눈에 확인합니다.</p>
+                            </div>
+                            <span class="watchlist-policy-state" id="watchlist-policy-state">정책 확인 중</span>
+                        </div>
+                        <div class="watchlist-stat-grid">
+                            <div class="watchlist-stat">
+                                <span>전체 종목</span>
+                                <strong id="watchlist-total-count">0</strong>
+                            </div>
+                            <div class="watchlist-stat is-success">
+                                <span>조건 충족</span>
+                                <strong id="watchlist-eligible-count">0</strong>
+                            </div>
+                            <div class="watchlist-stat is-warning">
+                                <span>미충족</span>
+                                <strong id="watchlist-ineligible-count">0</strong>
+                            </div>
+                            <div class="watchlist-stat">
+                                <span>가격 미수집</span>
+                                <strong id="watchlist-unknown-count">0</strong>
+                            </div>
+                            <div class="watchlist-stat">
+                                <span>섹터 수</span>
+                                <strong id="watchlist-sector-count">0</strong>
+                            </div>
+                        </div>
+                        <div class="watchlist-sector-summary" id="watchlist-sector-summary">
+                            <span class="watchlist-empty-copy">섹터 통계를 불러오는 중입니다.</span>
+                        </div>
+                    </section>
+
+                    <section class="card glass watchlist-policy-card" aria-labelledby="watchlist-policy-title">
+                        <div class="watchlist-card-heading">
+                            <div>
+                                <h2 id="watchlist-policy-title">등록 제약 조건</h2>
+                                <p class="section-help">저장 후 수동 등록과 AI 자동 추가에 즉시 적용됩니다.</p>
+                            </div>
+                        </div>
+                        <form id="form-watchlist-policy" class="watchlist-policy-form">
+                            <label class="watchlist-policy-toggle">
+                                <input type="checkbox" id="chk-watchlist-policy-enabled" checked>
+                                <span>등록 정책 사용</span>
+                            </label>
+                            <label>
+                                <span>최소 현재가</span>
+                                <span class="watchlist-input-unit">
+                                    <input type="number" id="num-watchlist-min-price" min="0" max="10000000" step="100" value="5000" required>
+                                    <em>원</em>
+                                </span>
+                            </label>
+                            <label>
+                                <span>최소 시가총액</span>
+                                <span class="watchlist-input-unit">
+                                    <input type="number" id="num-watchlist-min-market-cap" min="0" max="100000000" step="100" value="3000" required>
+                                    <em>억원</em>
+                                </span>
+                            </label>
+                            <label class="watchlist-policy-check">
+                                <input type="checkbox" id="chk-watchlist-mid-large-fallback" checked>
+                                <span>시총 미수집 시 중대형주 유니버스 확인</span>
+                            </label>
+                            <button type="submit" class="button-primary">정책 저장·적용</button>
+                        </form>
+                        <p class="watchlist-policy-note">
+                            기존 등록 종목은 삭제하지 않고 목록에서 미충족 사유만 표시합니다.
+                        </p>
+                    </section>
+                </div>
+
                 <!-- 관심종목 컨트롤 바 (관심종목 위로 이동) -->
                 <div class="card glass panel-watchlist-control" style="display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; padding: 1.25rem;">
                     
@@ -1106,6 +1180,23 @@
                             <h2>현재 포트폴리오 관심 종목 (Watchlist)</h2>
                             <p class="section-help">지정된 종목들은 AI 매수후보 스캔 시 항시 스캔 모수에 병합되어 우선 연산됩니다.</p>
                         </div>
+                        <div class="watchlist-table-filters" aria-label="관심종목 목록 필터">
+                            <label>
+                                <span>조건</span>
+                                <select id="select-watchlist-policy-filter">
+                                    <option value="all">전체</option>
+                                    <option value="eligible">충족</option>
+                                    <option value="ineligible">미충족</option>
+                                    <option value="unknown">가격 미수집</option>
+                                </select>
+                            </label>
+                            <label>
+                                <span>섹터</span>
+                                <select id="select-watchlist-sector-filter">
+                                    <option value="all">전체 섹터</option>
+                                </select>
+                            </label>
+                        </div>
                     </div>
                     <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
                         <table id="table-watchlist" style="width: 100%; border-collapse: collapse;">
@@ -1116,6 +1207,7 @@
                                     <th style="cursor: pointer; user-select: none;" class="sort-header" data-sort="name">종목명 <span class="sort-icon" style="font-size: 0.72rem; margin-left: 2px;"></span></th>
                                     <th style="text-align: center; width: 100px; cursor: pointer; user-select: none;" class="sort-header" data-sort="sector">섹터 <span class="sort-icon" style="font-size: 0.72rem; margin-left: 2px;"></span></th>
                                     <th style="text-align: right; width: 140px; cursor: pointer; user-select: none;" class="sort-header" data-sort="price">현재가(등락률) <span class="sort-icon" style="font-size: 0.72rem; margin-left: 2px;"></span></th>
+                                    <th style="text-align: center; width: 100px; cursor: pointer; user-select: none;" class="sort-header" data-sort="policy_status">등록 조건 <span class="sort-icon" style="font-size: 0.72rem; margin-left: 2px;"></span></th>
                                     <th style="text-align: center; width: 90px; cursor: pointer; user-select: none;" class="sort-header" data-sort="score">AI 점수 <span class="sort-icon" style="font-size: 0.72rem; margin-left: 2px;"></span></th>
                                     <th style="text-align: center; width: 90px; cursor: pointer; user-select: none;" class="sort-header" data-sort="rsi">RSI 지표 <span class="sort-icon" style="font-size: 0.72rem; margin-left: 2px;"></span></th>
                                     <th style="cursor: pointer; user-select: none;" class="sort-header" data-sort="reason">대표 조건 <span class="sort-icon" style="font-size: 0.72rem; margin-left: 2px;"></span></th>
@@ -1798,7 +1890,7 @@
     </script>
     <script src="/static/js/environment_badge.js?v=1"></script>
     <script src="/static/js/common-analysis.js?v=1"></script>
-    <script src="/static/js/app.js?v=51"></script>
+    <script src="/static/js/app.js?v=52"></script>
 
     <!-- Plunge Bounce Strategy Scripts -->
     <script>

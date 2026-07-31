@@ -209,6 +209,8 @@ KOSPI_UNIVERSE = list(dict.fromkeys(KOSPI_UNIVERSE))
 
 
 def load_watchlist_data() -> dict:
+    from src.strategy.watchlist_policy import normalize_watchlist_policy
+
     try:
         init_db()
         with connect_db() as conn:
@@ -266,12 +268,29 @@ def load_watchlist_data() -> dict:
                     ai_auto_add_threshold = float(row_thresh[0])
                 except ValueError:
                     ai_auto_add_threshold = 3.0
-                
+
+            c_policy = conn.execute(
+                "SELECT value FROM watchlist_settings WHERE key = 'watchlist_policy'"
+            )
+            row_policy = c_policy.fetchone()
+            try:
+                saved_policy = json.loads(row_policy[0]) if row_policy else None
+            except (json.JSONDecodeError, TypeError):
+                saved_policy = None
+            policy = normalize_watchlist_policy(saved_policy)
+            if row_policy is None:
+                conn.execute(
+                    "INSERT OR IGNORE INTO watchlist_settings (key, value) VALUES ('watchlist_policy', ?)",
+                    (json.dumps(policy, ensure_ascii=False),),
+                )
+                conn.commit()
+
             return {
                 "symbols": symbols,
                 "names": names,
                 "ai_auto_add": ai_auto_add,
-                "ai_auto_add_threshold": ai_auto_add_threshold
+                "ai_auto_add_threshold": ai_auto_add_threshold,
+                "policy": policy,
             }
     except (sqlite3.Error, OSError, ValueError, TypeError) as e:
         logger.warning(f"Failed to load watchlist from DB: {e}")
@@ -279,11 +298,14 @@ def load_watchlist_data() -> dict:
             "symbols": KOSPI_UNIVERSE,
             "names": {s: resolve_stock_name(s, STOCK_NAMES.get(s, "우량 종목")) for s in KOSPI_UNIVERSE},
             "ai_auto_add": False,
-            "ai_auto_add_threshold": 3.0
+            "ai_auto_add_threshold": 3.0,
+            "policy": normalize_watchlist_policy(),
         }
 
 
 def save_watchlist_data(data: dict) -> None:
+    from src.strategy.watchlist_policy import normalize_watchlist_policy
+
     try:
         init_db()
         with connect_db() as conn:
@@ -298,6 +320,13 @@ def save_watchlist_data(data: dict) -> None:
                 conn.execute(
                     "INSERT OR REPLACE INTO watchlist_settings (key, value) VALUES ('ai_auto_add_threshold', ?)",
                     (str(float(data["ai_auto_add_threshold"])),)
+                )
+
+            if "policy" in data:
+                policy = normalize_watchlist_policy(data["policy"])
+                conn.execute(
+                    "INSERT OR REPLACE INTO watchlist_settings (key, value) VALUES ('watchlist_policy', ?)",
+                    (json.dumps(policy, ensure_ascii=False),),
                 )
             
             names_by_symbol = data.get("names", {}) if isinstance(data.get("names"), dict) else {}

@@ -2266,6 +2266,17 @@ class WatchlistTogglePayload(BaseModel):
     threshold: Optional[float] = None
 
 
+class WatchlistPolicyPayload(BaseModel):
+    enabled: bool = True
+    min_price: float = Field(5_000.0, ge=0.0, le=10_000_000.0)
+    min_market_cap: float = Field(
+        300_000_000_000.0,
+        ge=0.0,
+        le=10_000_000_000_000_000.0,
+    )
+    require_mid_large_when_market_cap_unknown: bool = True
+
+
 WATCHLIST_MIN_SCAN_SCORE = 2.0
 
 
@@ -2276,7 +2287,7 @@ def _sync_watchlist_from_scan_result(
     keep_threshold: float | None = None,
 ) -> dict:
     from src.strategy.seven_split import KOSPI_UNIVERSE
-    from src.strategy.watchlist_policy import eligibility_reason
+    from src.strategy.watchlist_policy import eligibility_reason, normalize_watchlist_policy
 
     if keep_threshold is None:
         keep_threshold = add_threshold
@@ -2284,6 +2295,7 @@ def _sync_watchlist_from_scan_result(
     symbol_set = set(symbols)
     scanned_rows = scan_result.get("scan_summary") or scan_result.get("candidates") or []
     candidates = scan_result.get("candidates") or []
+    policy = normalize_watchlist_policy(watchlist_data.get("policy"))
 
     score_by_symbol: dict[str, float] = {}
     name_by_symbol: dict[str, str] = {}
@@ -2312,6 +2324,7 @@ def _sync_watchlist_from_scan_result(
             price=cand.get("current_price") or cand.get("price"),
             market_cap=cand.get("market_cap"),
             known_mid_large=str(cand.get("ticker") or cand.get("symbol") or "") in KOSPI_UNIVERSE,
+            policy=policy,
         ):
             continue
         eligible_count += 1

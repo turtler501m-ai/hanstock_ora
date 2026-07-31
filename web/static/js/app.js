@@ -3,6 +3,7 @@ let watchlistCache = [];
 let watchlistSortKey = '';
 let watchlistSortAsc = true;
 let watchlistInherited = false;
+let watchlistPolicy = null;
 let holdingsCache = [];
 let holdingsSortKey = 'value';
 let holdingsSortAsc = false;
@@ -1887,6 +1888,80 @@ async function renderAiStrategies() {
     }
 }
 
+function renderWatchlistSummary(data) {
+    const summary = data.summary || {};
+    const policy = data.policy || {};
+    watchlistPolicy = policy;
+
+    const values = {
+        'watchlist-total-count': summary.total_count || 0,
+        'watchlist-eligible-count': summary.eligible_count || 0,
+        'watchlist-ineligible-count': summary.ineligible_count || 0,
+        'watchlist-unknown-count': summary.unknown_count || 0,
+        'watchlist-sector-count': summary.sector_count || 0,
+    };
+    Object.entries(values).forEach(([id, value]) => {
+        const element = document.getElementById(id);
+        if (element) element.textContent = formatNumber(value);
+    });
+
+    const state = document.getElementById('watchlist-policy-state');
+    if (state) {
+        state.textContent = policy.enabled === false
+            ? '정책 사용 안 함'
+            : `최소 ${formatNumber(policy.min_price || 0)}원`;
+        state.classList.toggle('is-disabled', policy.enabled === false);
+    }
+
+    const sectors = summary.sectors || [];
+    const sectorSummary = document.getElementById('watchlist-sector-summary');
+    if (sectorSummary) {
+        const visibleSectors = sectors.slice(0, 8);
+        const remainingSectorCount = Math.max(0, sectors.length - visibleSectors.length);
+        sectorSummary.innerHTML = sectors.length
+            ? visibleSectors.map((row) => `
+                <span class="watchlist-sector-chip">
+                    ${escapeHtml(row.sector)}
+                    <strong>${formatNumber(row.count)}개</strong>
+                    <span>${Number(row.ratio || 0).toFixed(1)}%</span>
+                </span>
+            `).join('') + (
+                remainingSectorCount
+                    ? `<span class="watchlist-sector-chip">그 외 <strong>${remainingSectorCount}개 섹터</strong></span>`
+                    : ''
+            )
+            : '<span class="watchlist-empty-copy">등록된 종목의 섹터 정보가 없습니다.</span>';
+    }
+
+    const sectorFilter = document.getElementById('select-watchlist-sector-filter');
+    if (sectorFilter) {
+        const selected = sectorFilter.value;
+        sectorFilter.innerHTML = '<option value="all">전체 섹터</option>';
+        sectors.forEach((row) => {
+            const option = document.createElement('option');
+            option.value = row.sector;
+            option.textContent = `${row.sector} (${row.count})`;
+            sectorFilter.appendChild(option);
+        });
+        sectorFilter.value = Array.from(sectorFilter.options).some((option) => option.value === selected)
+            ? selected
+            : 'all';
+    }
+
+    const enabledInput = document.getElementById('chk-watchlist-policy-enabled');
+    const minPriceInput = document.getElementById('num-watchlist-min-price');
+    const minMarketCapInput = document.getElementById('num-watchlist-min-market-cap');
+    const fallbackInput = document.getElementById('chk-watchlist-mid-large-fallback');
+    if (enabledInput) enabledInput.checked = policy.enabled !== false;
+    if (minPriceInput) minPriceInput.value = Number(policy.min_price || 0);
+    if (minMarketCapInput) {
+        minMarketCapInput.value = Number(policy.min_market_cap || 0) / 100000000;
+    }
+    if (fallbackInput) {
+        fallbackInput.checked = policy.require_mid_large_when_market_cap_unknown !== false;
+    }
+}
+
 // 데이터 정렬 처리 유틸리티
 function sortWatchlistData() {
     if (!watchlistSortKey) return;
@@ -1937,11 +2012,22 @@ function drawWatchlist() {
     }
 
     if (!watchlistCache.length) {
-        setTableMessage('#table-watchlist tbody', 10, '등록된 관심 종목이 없습니다.');
+        setTableMessage('#table-watchlist tbody', 11, '등록된 관심 종목이 없습니다.');
         return;
     }
-    
-    watchlistCache.forEach((s, idx) => {
+
+    const policyFilter = document.getElementById('select-watchlist-policy-filter')?.value || 'all';
+    const sectorFilter = document.getElementById('select-watchlist-sector-filter')?.value || 'all';
+    const visibleRows = watchlistCache.filter((row) => (
+        (policyFilter === 'all' || row.policy_status === policyFilter)
+        && (sectorFilter === 'all' || row.sector === sectorFilter)
+    ));
+    if (!visibleRows.length) {
+        setTableMessage('#table-watchlist tbody', 11, '선택한 조건에 해당하는 관심 종목이 없습니다.');
+        return;
+    }
+
+    visibleRows.forEach((s) => {
         const tr = document.createElement('tr');
         
         // 1. 현재가 및 등락률 포맷
@@ -2005,6 +2091,19 @@ function drawWatchlist() {
         }
         const sectorHtml = `<span style="${sectorBadgeStyle}">${sectorStr}</span>`;
 
+        const policyLabels = {
+            eligible: '충족',
+            ineligible: '미충족',
+            unknown: '가격 미수집',
+        };
+        const policyStatus = s.policy_status || 'unknown';
+        const policyHtml = `
+            <span class="watchlist-policy-badge is-${escapeHtml(policyStatus)}"
+                title="${escapeHtml(s.policy_reason || '')}">
+                ${policyLabels[policyStatus] || '확인 필요'}
+            </span>
+        `;
+
         // 5. 대표 조건 / 스코어 사유
         const reasonStr = s.reason ? escapeHtml(s.reason) : "분석 데이터 없음";
         
@@ -2019,6 +2118,7 @@ function drawWatchlist() {
             <td style="color: rgba(255,255,255,0.8);">${escapeHtml(s.name)}</td>
             <td style="text-align: center;">${sectorHtml}</td>
             <td style="text-align: right;">${priceHtml}</td>
+            <td style="text-align: center;">${policyHtml}</td>
             <td style="text-align: center;">${scoreStr}</td>
             <td style="text-align: center;">${rsiStr}</td>
             <td style="color: rgba(255,255,255,0.6); font-size: 0.85rem;" title="${reasonStr}">${reasonStr}</td>
@@ -2089,7 +2189,8 @@ async function renderWatchlist() {
         if (threshInput && data.ai_auto_add_threshold !== undefined) {
             threshInput.value = data.ai_auto_add_threshold;
         }
-        
+
+        renderWatchlistSummary(data);
         drawWatchlist();
     } catch (err) {
         console.error("Failed to render watchlist:", err);
@@ -3785,6 +3886,47 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    const watchlistPolicyForm = document.getElementById('form-watchlist-policy');
+    if (watchlistPolicyForm) {
+        watchlistPolicyForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const submitBtn = watchlistPolicyForm.querySelector('button[type="submit"]');
+            const minPrice = Number(document.getElementById('num-watchlist-min-price')?.value || 0);
+            const minMarketCapEok = Number(
+                document.getElementById('num-watchlist-min-market-cap')?.value || 0
+            );
+            if (!Number.isFinite(minPrice) || !Number.isFinite(minMarketCapEok)) {
+                setStatus('관심종목 정책 값은 숫자로 입력해 주세요.');
+                return;
+            }
+            setButtonBusy(submitBtn, true);
+            try {
+                const result = await postJson('/api/watchlist/policy', {
+                    enabled: document.getElementById('chk-watchlist-policy-enabled')?.checked !== false,
+                    min_price: minPrice,
+                    min_market_cap: minMarketCapEok * 100000000,
+                    require_mid_large_when_market_cap_unknown:
+                        document.getElementById('chk-watchlist-mid-large-fallback')?.checked !== false,
+                });
+                setStatus(
+                    `관심종목 정책 적용 완료: 최소 ${formatNumber(result.policy.min_price)}원, ` +
+                    `최소 시총 ${formatNumber(result.policy.min_market_cap / 100000000)}억원`,
+                    true
+                );
+                await renderWatchlist();
+            } catch (err) {
+                setStatus(`관심종목 정책 저장 실패: ${err.message}`);
+            } finally {
+                setButtonBusy(submitBtn, false);
+            }
+        });
+    }
+
+    ['select-watchlist-policy-filter', 'select-watchlist-sector-filter'].forEach((id) => {
+        const select = document.getElementById(id);
+        if (select) select.addEventListener('change', drawWatchlist);
+    });
 
     // AI 자동 추가 적용 토글 및 임계값 제어 바인딩
     const chkWatchlistAiAuto = document.getElementById('chk-watchlist-ai-auto');
