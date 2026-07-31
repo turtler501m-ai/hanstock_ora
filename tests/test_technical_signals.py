@@ -170,6 +170,26 @@ class TechnicalSignalsTests(unittest.TestCase):
         self.assertEqual(kr_symbols, ["005930"])
         self.assertEqual(us_symbols, ["AAPL", "MSFT"])
 
+    def test_condition_monitor_cycle_queries_only_open_market_selection(self):
+        kr_api = Mock()
+        kr_api.get_volume_rank.return_value = ["005930"]
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RuntimeStateStore(Path(tmp) / "runtime.sqlite")
+            with (
+                patch("src.strategy.condition_monitor.runtime_state_store", store),
+                patch("src.trader.KIStockAPI", return_value=kr_api),
+                patch(
+                    "src.strategy.seven_split._condition_search_universe",
+                    return_value=[],
+                ),
+                patch("src.mistock.trader._get_kis_client") as us_client,
+            ):
+                result = run_condition_monitor_cycle({"KR"})
+
+        self.assertTrue(result["ok"])
+        kr_api.get_volume_rank.assert_called_once_with(top_n=50)
+        us_client.assert_not_called()
+
     def test_walk_forward_models_costs_and_multiple_folds(self):
         prices = [100 + index * 0.2 + (index % 10) for index in range(140)]
         highs = [price * 1.01 for price in prices]

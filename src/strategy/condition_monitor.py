@@ -56,50 +56,62 @@ def condition_monitor_status(*, max_age_seconds: float = 180, now: float | None 
             "symbol_count": len(row.get("symbols") or []),
             "updated_at_epoch": updated or None,
             "age_seconds": age,
-            "fresh": bool(updated > 0 and age is not None and age <= max(1.0, float(max_age_seconds))),
+            "fresh": bool(
+                row.get("symbols")
+                and updated > 0
+                and age is not None
+                and age <= max(1.0, float(max_age_seconds))
+            ),
         }
+    market_open = market_open_status()
     return {
         "running_data_available": any(row["updated_at_epoch"] for row in markets.values()),
         "fresh": any(row["fresh"] for row in markets.values()),
         "max_age_seconds": max_age_seconds,
+        "market_open": market_open,
         "markets": markets,
     }
 
 
-def run_condition_monitor_cycle() -> dict:
+def run_condition_monitor_cycle(markets: set[str] | None = None) -> dict:
+    active_markets = {"KR", "US"} if markets is None else {
+        str(market).upper() for market in markets
+    }
     result = {"KR": {"symbols": [], "source": ""}, "US": {"symbols": [], "source": ""}, "errors": []}
-    try:
-        from src.trader import KIStockAPI
-        from src.strategy.seven_split import _condition_search_universe
+    if "KR" in active_markets:
+        try:
+            from src.trader import KIStockAPI
+            from src.strategy.seven_split import _condition_search_universe
 
-        api = KIStockAPI()
-        symbols = _condition_search_universe(api)
-        source = "kis_condition"
-        if not symbols:
-            symbols = api.get_volume_rank(top_n=50)
-            source = "kis_volume_rank"
-        result["KR"] = save_condition_symbols("KR", symbols, source=source)
-    except Exception as exc:
-        result["errors"].append(f"KR:{type(exc).__name__}:{exc}")
-        logger.info(f"[CONDITION_MONITOR] KR unavailable: {exc}")
+            api = KIStockAPI()
+            symbols = _condition_search_universe(api)
+            source = "kis_condition"
+            if not symbols:
+                symbols = api.get_volume_rank(top_n=50)
+                source = "kis_volume_rank"
+            result["KR"] = save_condition_symbols("KR", symbols, source=source)
+        except Exception as exc:
+            result["errors"].append(f"KR:{type(exc).__name__}:{exc}")
+            logger.info(f"[CONDITION_MONITOR] KR unavailable: {exc}")
 
-    try:
-        from src.mistock.trader import _get_kis_client
+    if "US" in active_markets:
+        try:
+            from src.mistock.trader import _get_kis_client
 
-        api = _get_kis_client()
-        symbols = list(dict.fromkeys(
-            api.get_overseas_volume_rank(excd="NAS", cnt=50)
-            + api.get_overseas_volume_rank(excd="NYS", cnt=50)
-        ))
-        result["US"] = save_condition_symbols("US", symbols, source="kis_overseas_volume_rank")
-    except Exception as exc:
-        result["errors"].append(f"US:{type(exc).__name__}:{exc}")
-        logger.info(f"[CONDITION_MONITOR] US unavailable: {exc}")
+            api = _get_kis_client()
+            symbols = list(dict.fromkeys(
+                api.get_overseas_volume_rank(excd="NAS", cnt=50)
+                + api.get_overseas_volume_rank(excd="NYS", cnt=50)
+            ))
+            result["US"] = save_condition_symbols("US", symbols, source="kis_overseas_volume_rank")
+        except Exception as exc:
+            result["errors"].append(f"US:{type(exc).__name__}:{exc}")
+            logger.info(f"[CONDITION_MONITOR] US unavailable: {exc}")
     result["ok"] = bool(result["KR"].get("symbols") or result["US"].get("symbols"))
     return result
 
 
-def is_any_market_open() -> bool:
+def market_open_status() -> dict[str, bool]:
     kr_open = False
     us_open = False
     try:
@@ -120,7 +132,11 @@ def is_any_market_open() -> bool:
         us_open = bool(is_us_market_open())
     except Exception:
         pass
-    return kr_open or us_open
+    return {"KR": kr_open, "US": us_open}
+
+
+def is_any_market_open() -> bool:
+    return any(market_open_status().values())
 
 
 def run_forever(
@@ -131,8 +147,11 @@ def run_forever(
     should_stop = stop_requested or (lambda: False)
     interval = max(10.0, float(interval_seconds or 60))
     while not should_stop():
-        if is_any_market_open():
-            run_condition_monitor_cycle()
+        open_markets = market_open_status()
+        if any(open_markets.values()):
+            run_condition_monitor_cycle({
+                market for market, is_open in open_markets.items() if is_open
+            })
         deadline = time.monotonic() + interval
         while not should_stop() and time.monotonic() < deadline:
             time.sleep(min(1.0, deadline - time.monotonic()))
