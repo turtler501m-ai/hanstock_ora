@@ -22,7 +22,23 @@ class StrategyLookupTabContractTests(unittest.TestCase):
         self.assertIn("mode: 'analysis_only'", script)
         self.assertIn("auto_approve: false", script)
         self.assertIn("allowed_categories: ['candidate']", script)
-        self.assertIn("await renderCandidates({ strategyIds });", script)
+        self.assertIn("await renderCandidates({ strategyIds, strategies: selected });", script)
+
+    def test_each_selected_strategy_has_its_own_result_card(self):
+        script = (ROOT / "web/static/js/app.js").read_text(encoding="utf-8")
+        stylesheet = (ROOT / "web/static/css/style.css").read_text(encoding="utf-8")
+        self.assertIn("function renderStrategyPreviewCards(results, strategies = [])", script)
+        self.assertIn("results.id = 'strategy-preview-results';", script)
+        self.assertIn('class="strategy-preview-card"', script)
+        self.assertIn(".strategy-preview-card", stylesheet)
+
+    def test_approved_independent_strategy_can_be_selected(self):
+        script = (ROOT / "web/static/js/app.js").read_text(encoding="utf-8")
+        function_body = script.split(
+            "function isSharedScheduleSelectable(strategy) {", 1
+        )[1].split("}", 1)[0]
+        self.assertIn("strategy.status", function_body)
+        self.assertNotIn("independent_schedule", function_body)
 
 
 if __name__ == "__main__":

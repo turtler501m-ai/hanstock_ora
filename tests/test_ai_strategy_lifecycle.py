@@ -94,6 +94,31 @@ class AiStrategyLifecycleTests(unittest.TestCase):
         }
         self.assertEqual(selected, {second["id"], independent["id"]})
 
+    def test_batch_selection_endpoint_accepts_independent_schedule_strategy(self):
+        independent = next(
+            item
+            for item in repository.load_ai_strategies()
+            if item["id"] == "volatility_adaptive_momentum_strategy"
+        )
+
+        result = dashboard.replace_ai_strategy_selection(
+            dashboard.StrategySelectionPayload(
+                strategy_ids=[independent["id"]],
+            )
+        )
+
+        self.assertIn(independent["id"], result["selected_strategy_ids"])
+        selected = {
+            item["id"]
+            for item in repository.load_ai_strategies()
+            if item.get("selected")
+        }
+        self.assertEqual(selected, {independent["id"]})
+        applied = dashboard.apply_selected_ai_strategies()
+        self.assertTrue(applied["ok"])
+        self.assertEqual(applied["applied_strategy_ids"], [])
+        self.assertEqual(applied["excluded_strategy_ids"], [independent["id"]])
+
     def test_duplicate_strategy_name_is_rejected(self):
         self._create("Unique Name")
 

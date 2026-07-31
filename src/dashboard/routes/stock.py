@@ -789,24 +789,20 @@ def select_ai_strategy(id: str, payload: SelectStrategyPayload):
 
 @router.post("/api/ai-strategies/selection")
 def replace_ai_strategy_selection(payload: StrategySelectionPayload):
-    """Replace the shared-schedule strategy selection in one transaction."""
+    """Replace the enabled AI strategy selection in one transaction."""
     from src.db.repository import (
         load_ai_strategies,
         replace_ai_strategy_selection as replace_selection,
     )
-    from src.strategy_ids import INDEPENDENT_STOCK_SCHEDULE_IDS
-
     strategies = load_ai_strategies()
     mutable_ids = [
         str(item.get("id") or "")
         for item in strategies
-        if str(item.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
     ]
     selectable_ids = {
         str(item.get("id") or "")
         for item in strategies
-        if str(item.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
-        and str(item.get("status") or "") == "approved"
+        if str(item.get("status") or "") == "approved"
     }
     requested_ids = list(dict.fromkeys(
         str(strategy_id).strip()
@@ -818,7 +814,7 @@ def replace_ai_strategy_selection(payload: StrategySelectionPayload):
         raise HTTPException(
             status_code=409,
             detail=(
-                "공용 스케줄에 적용할 수 없는 전략입니다: "
+                "사용하도록 선택할 수 없는 전략입니다: "
                 + ", ".join(invalid_ids)
             ),
         )
@@ -835,7 +831,6 @@ def replace_ai_strategy_selection(payload: StrategySelectionPayload):
             str(item.get("id"))
             for item in updated
             if item.get("selected")
-            and str(item.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
         ],
         "strategies": [_strategy_api_payload(item) for item in updated],
     }
@@ -914,14 +909,22 @@ def apply_selected_ai_strategies():
     )
     from src.strategy_ids import INDEPENDENT_STOCK_SCHEDULE_IDS
 
-    selected = [
+    all_selected = [
         item for item in load_ai_strategies()
-            if item.get("selected")
-            and str(item.get("status") or "") == "approved"
-            and str(item.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
+        if item.get("selected")
+        and str(item.get("status") or "") == "approved"
     ]
-    if not selected:
+    if not all_selected:
         raise HTTPException(status_code=409, detail="Select at least one AI strategy")
+    selected = [
+        item for item in all_selected
+        if str(item.get("id") or "") not in INDEPENDENT_STOCK_SCHEDULE_IDS
+    ]
+    independent_ids = [
+        str(item["id"])
+        for item in all_selected
+        if str(item.get("id") or "") in INDEPENDENT_STOCK_SCHEDULE_IDS
+    ]
     strategy_ids = [str(item["id"]) for item in selected]
     for strategy in selected:
         record_ai_strategy_event(
@@ -950,7 +953,7 @@ def apply_selected_ai_strategies():
     return {
         "ok": True,
         "applied_strategy_ids": strategy_ids,
-        "excluded_strategy_ids": [],
+        "excluded_strategy_ids": independent_ids,
         "schedule_strategy_id": AI_STOCK_SCHEDULE_ID,
         "verification_mode": "demo_account_trading",
     }

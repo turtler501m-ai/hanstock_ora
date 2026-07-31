@@ -2091,7 +2091,7 @@ function strategyScheduleCategoryLabel(strategy) {
 }
 
 function isSharedScheduleSelectable(strategy) {
-    return !strategy.independent_schedule && String(strategy.status || '') === 'approved';
+    return String(strategy.status || '') === 'approved';
 }
 
 function updateAiStrategySelectionUi() {
@@ -2184,13 +2184,13 @@ async function renderAiStrategies() {
             const pendingChange = checked !== Boolean(strategy.selected);
             const builtIn = ['gpt_5_mini_default', 'rule_only_default'].includes(strategy.id);
             let scheduleLabel = strategy.independent_schedule
-                ? '전용 스케줄'
+                ? (strategy.selected ? '전용 스케줄 사용' : '전용 스케줄 중지')
                 : (strategy.selected ? '적용 중' : '미적용');
             let scheduleKind = strategy.independent_schedule
-                ? 'hold'
+                ? (strategy.selected ? 'buy' : 'hold')
                 : (strategy.selected ? 'buy' : 'hold');
-            if (pendingChange && !strategy.independent_schedule) {
-                scheduleLabel = checked ? '적용 대기' : '해제 대기';
+            if (pendingChange) {
+                scheduleLabel = checked ? '사용 대기' : '중지 대기';
                 scheduleKind = 'hold';
             }
             const tr = document.createElement('tr');
@@ -2203,9 +2203,9 @@ async function renderAiStrategies() {
                         data-id="${escapeHtml(strategy.id)}"
                         ${checked ? 'checked' : ''}
                         ${selectable ? '' : 'disabled'}
-                        title="${strategy.independent_schedule
-                            ? '전용 스케줄 탭에서 관리하는 전략입니다.'
-                            : (selectable ? '공용 스케줄 적용 대상 선택' : '승인 완료 전략만 적용할 수 있습니다.')}">
+                        title="${selectable
+                            ? (strategy.independent_schedule ? '전용 스케줄 전략 사용 여부 선택' : '공용 스케줄 적용 대상 선택')
+                            : '승인 완료 전략만 사용할 수 있습니다.'}">
                 </td>
                 <td>
                     <div class="symbol-name">${escapeHtml(strategyDisplayName(strategy))}</div>
@@ -2700,6 +2700,59 @@ async function renderSignals() {
     }
 }
 
+function renderStrategyPreviewCards(results, strategies = []) {
+    const container = document.getElementById('strategy-preview-results');
+    const legacyTable = document.querySelector('.panel-candidates .candidate-legacy-table');
+    if (!container) return;
+    const strategyMap = new Map(strategies.map((strategy) => [String(strategy.id), strategy]));
+    container.hidden = false;
+    if (legacyTable) legacyTable.hidden = true;
+    container.innerHTML = results.map((result) => {
+        const strategy = strategyMap.get(String(result.strategyId)) ||
+            aiStrategyCatalog.find((item) => String(item.id) === String(result.strategyId)) ||
+            { id: result.strategyId, name: result.strategyId };
+        const data = result.data || {};
+        const candidates = data.candidates || [];
+        const error = result.error || data.scan_error;
+        const rows = candidates.length
+            ? candidates.slice(0, 10).map((row) => {
+                const reasons = (row.reasons || []).map(strategyReasonLabel).join(' · ') || '-';
+                return `<tr>
+                    <td><span class="symbol-name">${escapeHtml(row.name || row.ticker)}</span><span class="symbol-code">${escapeHtml(row.ticker || '')}</span></td>
+                    <td>${pill(formatNumber(row.score, 2), Number(row.score) >= 3 ? 'buy' : 'warn')}</td>
+                    <td>${formatCurrency(row.current_price)}</td>
+                    <td>${Number(row.planned_qty || 0).toLocaleString()}</td>
+                    <td>${formatCurrency(row.estimated_cost)}</td>
+                    <td><div class="reason-detail">${escapeHtml(reasons)}</div></td>
+                </tr>`;
+            }).join('')
+            : `<tr><td colspan="6" class="table-message">${
+                error
+                    ? `조회 실패 — ${escapeHtml(String(error))}`
+                    : `${Number(data.scanned || 0).toLocaleString()}종목 분석, 기준 충족 후보 없음`
+            }</td></tr>`;
+        return `<article class="strategy-preview-card">
+            <header>
+                <div>
+                    <h3>${escapeHtml(strategyDisplayName(strategy))}</h3>
+                    <small>${escapeHtml(String(strategy.id || result.strategyId))}</small>
+                </div>
+                <div class="strategy-preview-metrics">
+                    <span>분석 <strong>${Number(data.scanned || 0).toLocaleString()}</strong></span>
+                    <span>후보 <strong>${candidates.length.toLocaleString()}</strong></span>
+                    ${error ? '<span class="is-error">오류</span>' : '<span class="is-complete">완료</span>'}
+                </div>
+            </header>
+            <div class="table-responsive">
+                <table>
+                    <thead><tr><th>종목</th><th>점수</th><th>현재가</th><th>예상수량</th><th>예상금액</th><th>선정 근거</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        </article>`;
+    }).join('');
+}
+
 async function renderCandidates(options = {}) {
     const request = captureStrategyRequest();
     setButtonBusy('btn-candidates', true);
@@ -2711,30 +2764,46 @@ async function renderCandidates(options = {}) {
             ? options.strategyIds.filter(Boolean)
             : [];
         if (previewStrategyIds.length) {
-            const responses = await Promise.all(previewStrategyIds.map(async (strategyId) => {
-                const params = new URLSearchParams({
-                    strategy_id: strategyId,
-                    min_score: '2',
-                    optimizer,
-                    refresh: 'false',
-                });
-                const response = await fetchJson(`/api/candidates?${params.toString()}`, 90000);
-                return {
-                    ...response,
-                    candidates: (response.candidates || []).map((candidate) => ({
-                        ...candidate,
-                        strategy_id: candidate.strategy_id || strategyId,
-                    })),
-                };
+            const results = await Promise.all(previewStrategyIds.map(async (strategyId) => {
+                try {
+                    const params = new URLSearchParams({
+                        strategy_id: strategyId,
+                        min_score: '2',
+                        optimizer,
+                        refresh: 'false',
+                    });
+                    const response = await fetchJson(`/api/candidates?${params.toString()}`, 90000);
+                    return {
+                        strategyId,
+                        data: {
+                            ...response,
+                            candidates: (response.candidates || []).map((candidate) => ({
+                                ...candidate,
+                                strategy_id: candidate.strategy_id || strategyId,
+                            })),
+                        },
+                    };
+                } catch (error) {
+                    return { strategyId, data: { candidates: [], scanned: 0 }, error: error.message };
+                }
             }));
+            renderStrategyPreviewCards(results, options.strategies || []);
+            const responses = results.map((result) => result.data);
             data = {
                 candidates: responses.flatMap((response) => response.candidates || []),
                 scanned: responses.reduce((sum, response) => sum + Number(response.scanned || 0), 0),
                 min_score: 2,
-                scan_error: responses.map((response) => response.scan_error).filter(Boolean).join(' · ') || null,
+                scan_error: results.map((result) => result.error || result.data.scan_error).filter(Boolean).join(' · ') || null,
                 preview_strategy_ids: previewStrategyIds,
             };
         } else {
+            const previewContainer = document.getElementById('strategy-preview-results');
+            const legacyTable = document.querySelector('.panel-candidates .candidate-legacy-table');
+            if (previewContainer) {
+                previewContainer.hidden = true;
+                previewContainer.innerHTML = '';
+            }
+            if (legacyTable) legacyTable.hidden = false;
             const query = await commonAnalysisPath('/api/candidates', {
                 min_score: 2,
                 ranker: getActiveStrategyId() ? '' : 'rule_only',
@@ -2904,7 +2973,7 @@ async function previewSelectedStrategies() {
         });
         setStatus(`선택 전략 ${strategyIds.length}개를 분석 전용으로 실행 중입니다. 주문은 생성되지 않습니다.`, true);
         await waitForStrategyPreviewCompletion();
-        await renderCandidates({ strategyIds });
+        await renderCandidates({ strategyIds, strategies: selected });
         setStatus(`전략 조회 완료 · ${strategyIds.length}개 전략 · 주문 없음`, true);
     } catch (error) {
         setTableMessage('#table-candidates tbody', 9, error.message);
@@ -2933,6 +3002,15 @@ function configureStrategyLookupTab() {
         if (button) button.textContent = '선택 전략 조회';
         candidatePanel.querySelector('.ai-strategy-control-bar')?.remove();
         candidatePanel.querySelector('#ai-strategy-summary')?.remove();
+        if (!candidatePanel.querySelector('#strategy-preview-results')) {
+            const results = document.createElement('div');
+            results.id = 'strategy-preview-results';
+            results.className = 'strategy-preview-results';
+            results.hidden = true;
+            const table = candidatePanel.querySelector('.table-responsive');
+            table?.classList.add('candidate-legacy-table');
+            candidatePanel.insertBefore(results, table);
+        }
         candidatePanel.querySelector('#ai-flow-list')?.remove();
         const table = candidatePanel.querySelector('.table-responsive');
         if (table && !document.getElementById('strategy-preview-selection')) {
