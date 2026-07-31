@@ -3179,7 +3179,7 @@ function updatePeriodicPerformanceUI() {
     if (tbody) {
         tbody.innerHTML = '';
         if (!dataList.length) {
-            tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; padding: 2rem; color: #94a3b8;">성과 분석 데이터가 없습니다.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 2rem; color: #94a3b8;">성과 분석 데이터가 없습니다.</td></tr>`;
         } else {
             // Sort to display latest data first in the table
             const tableDataList = [...dataList].reverse();
@@ -3198,9 +3198,7 @@ function updatePeriodicPerformanceUI() {
                     <td class="${pnlClass}">${pnlRate > 0 ? '+' : ''}${pnlRate.toFixed(2)}%</td>
                     <td class="${pnl > 0 ? 'text-success' : (pnl < 0 ? 'text-danger' : '')}">${formatCurrency(item.net_cashflow)}</td>
                     <td>${formatMarketIndex(item.kospi, item.kospi_change_pct)}</td>
-                    <td>${formatOptionalPercent(item.kospi_volatility)}</td>
                     <td>${formatMarketIndex(item.kosdaq, item.kosdaq_change_pct)}</td>
-                    <td>${formatOptionalPercent(item.kosdaq_volatility)}</td>
                 `;
                 const periodCell = tr.querySelector('td');
                 if (periodCell) {
@@ -3248,6 +3246,8 @@ function updatePeriodicPerformanceUI() {
     const labels = dataList.map(item => item.period);
     const pnlData = dataList.map(item => item.realized_pnl || 0);
     const pnlRateData = dataList.map(item => item.realized_pnl_rate || 0);
+    const kospiChangeData = dataList.map(item => item.kospi_change_pct ?? null);
+    const kosdaqChangeData = dataList.map(item => item.kosdaq_change_pct ?? null);
     
     Chart.defaults.color = '#94a3b8';
     Chart.defaults.font.family = "'Noto Sans KR', 'Inter', sans-serif";
@@ -3272,7 +3272,7 @@ function updatePeriodicPerformanceUI() {
                         borderRadius: 4
                     },
                     {
-                        label: '실현수익률 (%)',
+                        label: '성과 등락 (%)',
                         data: pnlRateData,
                         type: 'line',
                         borderColor: '#3b82f6',
@@ -3283,6 +3283,30 @@ function updatePeriodicPerformanceUI() {
                         pointRadius: 4,
                         pointHoverRadius: 6,
                         tension: 0.3,
+                        yAxisID: 'y2'
+                    },
+                    {
+                        label: '코스피 등락 (%)',
+                        data: kospiChangeData,
+                        type: 'line',
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        tension: 0.3,
+                        spanGaps: true,
+                        yAxisID: 'y2'
+                    },
+                    {
+                        label: '코스닥 등락 (%)',
+                        data: kosdaqChangeData,
+                        type: 'line',
+                        borderColor: '#a855f7',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        tension: 0.3,
+                        spanGaps: true,
                         yAxisID: 'y2'
                     }
                 ]

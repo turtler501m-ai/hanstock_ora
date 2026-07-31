@@ -158,7 +158,7 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
         self.assertEqual(validation["win_rate"], 100.0)
         self.assertEqual(validation["validation_status"], "effective")
 
-    def test_periodic_performance_adds_daily_indices_and_volatility(self):
+    def test_periodic_performance_adds_daily_and_monthly_index_changes(self):
         trader.DRY_RUN = True
         trades = [{
             "ok": 1, "dry_run": 1, "symbol": "005930", "action": "buy",
@@ -178,12 +178,19 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
         }
 
         with patch("src.dashboard.core._load_index_rows", return_value=indices):
-            row = _build_periodic_performance(trades)["daily"][0]
+            performance = _build_periodic_performance(trades)
+            row = performance["daily"][0]
 
         self.assertEqual(row["kospi"], 2500.0)
         self.assertEqual(row["kosdaq"], 816.0)
-        self.assertIsNotNone(row["kospi_volatility"])
-        self.assertIsNotNone(row["kosdaq_volatility"])
+        self.assertEqual(row["kospi_change_pct"], -0.99)
+        self.assertEqual(row["kosdaq_change_pct"], 0.99)
+        self.assertNotIn("kospi_volatility", row)
+        self.assertNotIn("kosdaq_volatility", row)
+
+        monthly_row = performance["monthly"][0]
+        self.assertEqual(monthly_row["kospi"], 2500.0)
+        self.assertEqual(monthly_row["kosdaq"], 816.0)
 
 
 if __name__ == "__main__":

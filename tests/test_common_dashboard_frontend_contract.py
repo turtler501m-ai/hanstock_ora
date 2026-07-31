@@ -45,8 +45,13 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("`/api/trades/local/${tradeId}?confirm=true`", APP_JS)
 
     def test_performance_tab_exposes_market_context_strategy_validation_and_sorting(self):
-        self.assertIn("코스피 변동성", INDEX_HTML)
-        self.assertIn("코스닥 변동성", INDEX_HTML)
+        self.assertIn("성과 등락", INDEX_HTML)
+        self.assertIn("코스피 (등락)", INDEX_HTML)
+        self.assertIn("코스닥 (등락)", INDEX_HTML)
+        self.assertNotIn("코스피 변동성", INDEX_HTML)
+        self.assertNotIn("코스닥 변동성", INDEX_HTML)
+        self.assertIn("코스피 등락 (%)", APP_JS)
+        self.assertIn("코스닥 등락 (%)", APP_JS)
         self.assertIn('id="table-strategy-validation"', INDEX_HTML)
         self.assertIn("strategy_name", APP_JS)
         self.assertIn("sortable-header", APP_JS)

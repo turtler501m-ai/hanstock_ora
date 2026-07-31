@@ -13,41 +13,22 @@ import hashlib
 import json
 import math
 import os
-import sqlite3
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from src.ai_stock.constants import SCAN_ACTIVE, SCAN_QUEUED, SCAN_RUNNING
 from src.ai_stock.markets import require_storable_market
 from src.ai_stock.schemas import dumps_json, loads_json
-
-KST = timezone(timedelta(hours=9))
+from src.db.ai_stock_support import (
+    KST,
+    begin_write as _begin_write,
+    connect_ai_stock as _connect,
+    now_kst as _now,
+)
 
 
 class ScanConflict(RuntimeError):
     """동일 (market, strategy_id) 활성 스캔 중복."""
-
-
-def _now() -> str:
-    return datetime.now(KST).isoformat()
-
-
-def _connect():
-    from src.db.repository import connect_db  # 지연 import (순환 방지)
-
-    conn = connect_db()
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _begin_write(conn) -> None:
-    """Acquire the strongest available write transaction before read/check/write.
-
-    SQLite needs ``BEGIN IMMEDIATE`` to serialize budget and state-machine
-    decisions. PostgreSQL starts a transaction with ``BEGIN`` and obtains row/
-    index locks through the following statements.
-    """
-    conn.execute("BEGIN" if getattr(conn, "is_pg", False) else "BEGIN IMMEDIATE")
 
 
 def _scan_stale_min() -> int:

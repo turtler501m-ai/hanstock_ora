@@ -7,6 +7,7 @@ import os
 LOG_LEVEL = os.environ.get("HANSTOCK_LOG_LEVEL", "INFO").upper()
 LOG_ROTATION = os.environ.get("HANSTOCK_LOG_ROTATION", "5 MB")
 LOG_RETENTION = os.environ.get("HANSTOCK_LOG_RETENTION", "14 days")
+TESTING = os.environ.get("HANSTOCK_TESTING") == "1"
 
 # Remove default handler
 logger.remove()
@@ -26,15 +27,16 @@ log_dir = os.path.dirname(config.log_file)
 if log_dir:
     os.makedirs(log_dir, exist_ok=True)
 
-logger.add(
-    config.log_file,
-    format="{time:YYYY-MM-DD HH:mm:ss KST} | {level: <8} | {name}:{function}:{line} - {message}",
-    level=LOG_LEVEL,
-    rotation=LOG_ROTATION,
-    retention=LOG_RETENTION,
-    compression="zip",
-    encoding="utf-8"
-)
+if not TESTING:
+    logger.add(
+        config.log_file,
+        format="{time:YYYY-MM-DD HH:mm:ss KST} | {level: <8} | {name}:{function}:{line} - {message}",
+        level=LOG_LEVEL,
+        rotation=LOG_ROTATION,
+        retention=LOG_RETENTION,
+        compression="zip",
+        encoding="utf-8"
+    )
 
 
 class _InterceptHandler(logging.Handler):
@@ -57,4 +59,8 @@ class _InterceptHandler(logging.Handler):
 
 # Some trading integrations use the standard logging module.  Intercepting the
 # root logger keeps their order/execution records in the same trader.log file.
-logging.basicConfig(handlers=[_InterceptHandler()], level=logging.INFO, force=True)
+logging.basicConfig(
+    handlers=[_InterceptHandler()],
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    force=True,
+)

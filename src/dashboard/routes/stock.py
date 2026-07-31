@@ -2383,7 +2383,7 @@ def _execute_trade_sync(*, days: int, run_id: str, started_at: str) -> dict:
                     action=action,
                     qty=abs(diff),
                     price=price,
-                    reason="利앷텒???붽퀬 媛뺤젣 ?숆린??(?섎룞/?꾨씫遺?蹂댁젙)",
+                    reason="증권사 잔고 강제 동기화(수동/누락분 보정)",
                     ok=True,
                     order_submission_enabled=False,
                     order_status="reconciled",
@@ -2433,7 +2433,7 @@ def _execute_trade_sync(*, days: int, run_id: str, started_at: str) -> dict:
                     qty=db_qty,
                     price=avg_cost,  # Use avg_cost to avoid distorting Realized PnL
 
-                    reason="利앷텒???붽퀬 媛뺤젣 ?숆린??(?꾨웾留ㅻ룄 蹂댁젙)",
+                    reason="증권사 잔고 강제 동기화(수량 매도 보정)",
                     ok=True,
                     order_submission_enabled=False,
                     order_status="reconciled",
@@ -2749,8 +2749,8 @@ def get_performance(response: Response, strategy_id: str | None = None):
         except Exception:
             pass
 
-        # ?ъ슜???붿껌: 遺덉씪移섍? 諛쒖깮?섎㈃ 利앷텒???뺣낫濡?留욎떠??蹂댁젙
-        # ?먮룞留ㅻℓ 湲곕줉(trades.json)?쇰줈 異붿쟻??蹂댁쑀????? 利앷텒???ㅼ젣 ?붽퀬瑜?媛뺤젣濡???뼱?뚯? (?? DRY_RUN???뚮뒗 DB ?곗꽑)
+        # 사용자 요청: 불일치가 발생하면 증권사 잔고 정보에 맞춰 보정한다.
+        # 자동매매 기록으로 추적한 보유량보다 증권사 실제 잔고를 우선한다.
         eval_details = []
         total_eval_pnl = total_broker_pnl
         
@@ -2813,7 +2813,7 @@ def get_performance(response: Response, strategy_id: str | None = None):
                     "diff_reason": diff_reason
                 })
 
-        untracked_details = [] # ???댁긽 ?ъ슜?섏? ?딆쓬 (紐⑤몢 eval_details濡??≪닔)
+        untracked_details = []  # 호환성을 위해 유지하며 상세 내용은 eval_details에 수집한다.
                     
         return {
             "total_trades": total_trades,

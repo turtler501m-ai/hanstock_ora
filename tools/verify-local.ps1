@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet("quick", "dashboard", "trading", "ai", "autonomy", "all")]
+    [ValidateSet("quick", "dashboard", "trading", "ai", "autonomy", "futures", "mistock", "all")]
     [string]$Profile = "quick"
 )
 

@@ -1,12 +1,9 @@
 import json
 import hashlib
-import base64
-import binascii
 import concurrent.futures
 import math
 import os
 import re
-import secrets
 import socket
 import sqlite3
 import subprocess
@@ -76,6 +73,11 @@ from src.dashboard.services.balance_service import (  # noqa: E402
     to_float,
     to_int,
 )
+from src.dashboard.services.auth_service import (  # noqa: E402
+    dashboard_auth_config as _dashboard_auth_config,
+    dashboard_basic_credentials as _dashboard_basic_credentials,
+    require_dashboard_auth,
+)
 from src.dashboard.services.env_service import (  # noqa: E402
     env_bool_value,
     env_value_without_inline_comment,
@@ -132,62 +134,11 @@ async def online_access_blocked_handler(_request: Request, exc: OnlineAccessBloc
     return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
-def _dashboard_auth_config() -> dict[str, str | bool]:
-    enabled = str(os.environ.get("DASHBOARD_AUTH_ENABLED", "false")).lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    return {
-        "enabled": enabled,
-        "username": os.environ.get("DASHBOARD_AUTH_USERNAME", ""),
-        "password": os.environ.get("DASHBOARD_AUTH_PASSWORD", ""),
-    }
-
-
-def _dashboard_basic_credentials(request: Request) -> tuple[str, str] | None:
-    authorization = request.headers.get("authorization", "")
-    scheme, _, encoded = authorization.partition(" ")
-    if scheme.lower() != "basic" or not encoded:
-        return None
-    try:
-        decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
-    except (binascii.Error, UnicodeDecodeError, ValueError):
-        return None
-    username, separator, password = decoded.partition(":")
-    if not separator:
-        return None
-    return username, password
-
-
 @app.middleware("http")
 async def require_dashboard_auth(request: Request, call_next):
-    auth = _dashboard_auth_config()
-    if not auth["enabled"]:
-        return await call_next(request)
+    from src.dashboard.services.auth_service import require_dashboard_auth as authenticate
 
-    username = str(auth["username"])
-    password = str(auth["password"])
-    if not username or not password:
-        return JSONResponse(
-            status_code=503,
-            content={"detail": "dashboard authentication is enabled but not configured"},
-        )
-
-    credentials = _dashboard_basic_credentials(request)
-    if credentials is not None:
-        supplied_username, supplied_password = credentials
-        if secrets.compare_digest(supplied_username, username) and secrets.compare_digest(
-            supplied_password, password
-        ):
-            return await call_next(request)
-
-    return JSONResponse(
-        status_code=401,
-        content={"detail": "dashboard authentication required"},
-        headers={"WWW-Authenticate": 'Basic realm="Hanstock Dashboard"'},
-    )
+    return await authenticate(request, call_next)
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 WEB_DIR = BASE_DIR / "web"
@@ -225,17 +176,17 @@ ENV_FIELDS = [
     {"key": "KIS_REAL_CHECK_CONDITION_NAME", "label": "KIS real_check Condition Name", "type": "text"},
     {"key": "KISTOCK_APP_KEY", "label": "KIS App Key", "type": "secret"},
     {"key": "KISTOCK_APP_SECRET", "label": "KIS App Secret", "type": "secret"},
-    {"key": "KISTOCK_ACCOUNT", "label": "KIS Account", "type": "text", "hint": "怨꾩쥖踰덊샇 8?먮━ ?먮뒗 怨꾩쥖踰덊샇 8?먮━ + ?곹뭹肄붾뱶 2?먮━, ?? 12345678 ?먮뒗 1234567801"},
+    {"key": "KISTOCK_ACCOUNT", "label": "KIS Account", "type": "text", "hint": "계좌번호 8자리 또는 계좌번호 8자리 + 상품코드 2자리. 예: 12345678 또는 1234567801"},
     {"key": "KISTOCK_HTS_ID", "label": "KIS HTS ID", "type": "text", "hint": "실시간 주문체결 통보와 조건검색식 조회에 사용할 HTS ID입니다."},
     {"key": "KIS_WEBSOCKET_ENABLED", "label": "KIS WebSocket Enabled", "type": "bool", "hint": "true이면 서버에서 KIS 실시간 주문체결 통보 웹소켓을 시작할 수 있습니다."},
     {"key": "KIS_CONDITION_SEARCH_ENABLED", "label": "KIS Condition Search Enabled", "type": "bool", "hint": "true이면 매수 후보 스캔 유니버스에 KIS 조건검색식 결과를 우선 반영합니다."},
     {"key": "KIS_CONDITION_USER_ID", "label": "KIS Condition User ID", "type": "text", "hint": "조건검색식 API 조회용 사용자 ID입니다. 비워두면 KISTOCK_HTS_ID를 사용합니다."},
     {"key": "KIS_CONDITION_SEQ", "label": "KIS Condition Seq", "type": "text", "hint": "HTS에 저장된 조건검색식 일련번호입니다."},
     {"key": "KIS_CONDITION_NAME", "label": "KIS Condition Name", "type": "text", "hint": "HTS에 저장된 조건검색식 이름입니다."},
-    {"key": "TRADING_ENV", "label": "嫄곕옒?섍꼍", "type": "select", "options": ["demo", "real"], "hint": "demo=紐⑥쓽?ъ옄, real=?ㅼ쟾?ъ옄"},
-    {"key": "DRY_RUN", "label": "二쇰Ц李⑤떒", "type": "bool", "hint": "true?대㈃ 二쇰Ц李⑤떒 ON ?곹깭濡?KIS 二쇰Ц API ?꾩넚??留됯퀬 湲곕줉留??④퉩?덈떎."},
-    {"key": "ENABLE_LIVE_TRADING", "label": "?ㅼ쟾留ㅻℓ 理쒖쥌?덉슜", "type": "bool", "hint": "?ㅼ쟾二쇰Ц???덉슜?섎뒗 理쒖쥌 ?덉쟾 ?ㅼ쐞移섏엯?덈떎."},
-    {"key": "REQUIRE_APPROVAL", "label": "二쇰Ц?뱀씤 ?꾩슂", "type": "bool"},
+    {"key": "TRADING_ENV", "label": "거래 환경", "type": "select", "options": ["demo", "real"], "hint": "demo=모의투자, real=실전투자"},
+    {"key": "DRY_RUN", "label": "주문 차단", "type": "bool", "hint": "true이면 KIS 주문 API 전송을 막고 계획과 기록만 생성합니다."},
+    {"key": "ENABLE_LIVE_TRADING", "label": "실전매매 최종 허용", "type": "bool", "hint": "실전 주문을 허용하는 최종 안전 스위치입니다."},
+    {"key": "REQUIRE_APPROVAL", "label": "주문 승인 필요", "type": "bool"},
     {"key": "ONLINE_ACCESS_BLOCKED", "label": "Online Access Blocked", "type": "bool", "hint": "true이면 외부 API, 웹소켓, 주문 실행을 차단하고 DB에 저장된 정보만 표시합니다."},
     {"key": "SPLIT_N", "label": "Split N", "type": "int"},
     {"key": "STOP_LOSS_PCT", "label": "Stop Loss %", "type": "float"},
@@ -251,7 +202,7 @@ ENV_FIELDS = [
     {"key": "HANSTOCK_EXCLUDED_SYMBOLS", "label": "Hanstock Excluded Symbols", "type": "text", "hint": "Comma-separated domestic stock codes excluded from automated scans and orders."},
     {"key": "KIS_ORDER_MIN_INTERVAL_SECONDS", "label": "KIS Order Min Interval Seconds", "type": "float", "hint": "Minimum wait between broker order submissions."},
     {"key": "SCAN_UNIVERSE_SIZE", "label": "Scan Universe Size", "type": "int"},
-    {"key": "KIS_CIRCUIT_COOLDOWN_SECONDS", "label": "KIS API 李⑤떒 ?湲곗큹", "type": "int", "hint": "KIS API ?ㅻ쪟 ???ъ떆?꾧퉴吏 湲곕떎由??쒓컙(珥??낅땲?? ??????쒕쾭 ?ъ떆?????곸슜?⑸땲??"},
+    {"key": "KIS_CIRCUIT_COOLDOWN_SECONDS", "label": "KIS API 차단 대기시간", "type": "int", "hint": "KIS API 오류 후 재시도까지 기다리는 시간(초)입니다. 대시보드 재시작 후 적용됩니다."},
     {"key": "TRADE_DB_PATH", "label": "Trade DB Path", "type": "text"},
     {"key": "ACTIVE_MODEL_VERSION", "label": "Active Model Version", "type": "text"},
     {"key": "AI_STRATEGY_ENABLED", "label": "AI Strategy Enabled", "type": "bool"},
@@ -2967,7 +2918,7 @@ def _approve_pending_approval(approval_id: int, approval_label: str = "수동승
         status = "executed" if ok else "failed"
         response_msg = _approval_response_msg(result, ok=ok)
         if False:  # legacy non-English broker note disabled
-            response_msg = f"{response_msg} (二쇰Ц?묒닔 ?꾨즺 - ?ㅼ젣 泥닿껐 ?щ???HTS/MTS?먯꽌 ?뺤씤 ?붾쭩)"
+            response_msg = f"{response_msg} (주문 접수 완료 - 실제 체결 여부는 HTS/MTS에서 확인 필요)"
         trader.save_trade(
             item["symbol"],
             item["name"],
@@ -3114,7 +3065,7 @@ def _trade_is_sync_adjustment(trade: dict) -> bool:
     # Check Korean terms
     if any(token in reason for token in ("동기화", "보정", "조정")):
         return True
-    # Check broken Korean encoding terms (e.g. 利앷텒 for 증권, 媛뺤젣 for 강제, 숆린 for 동기, 蹂댁젙 for 보정, 섎룞 for 수동, 꾨씫遺 for 누락분)
+    # Detect known mojibake fragments retained in legacy database records.
     broken_tokens = ("利앷텒", "媛뺤젣", "숆린", "蹂댁젙", "섎룞", "꾨씫遺")
     if any(token in reason for token in broken_tokens):
         return True
@@ -3316,20 +3267,33 @@ def _daily_market_context(index_rows: dict[str, list[dict]]) -> dict[str, dict]:
             change_pct = None
             if idx and closes[idx - 1] > 0:
                 change_pct = (closes[idx] / closes[idx - 1] - 1) * 100
-            returns = [
-                closes[pos] / closes[pos - 1] - 1
-                for pos in range(max(1, idx - 19), idx + 1)
-                if closes[pos - 1] > 0
-            ]
-            volatility = None
-            if len(returns) >= 2:
-                mean = sum(returns) / len(returns)
-                variance = sum((value - mean) ** 2 for value in returns) / (len(returns) - 1)
-                volatility = math.sqrt(variance) * math.sqrt(252) * 100
             day = context.setdefault(row["date"], {})
             day[name.lower()] = round(float(row["close"]), 2)
             day[f"{name.lower()}_change_pct"] = round(change_pct, 2) if change_pct is not None else None
-            day[f"{name.lower()}_volatility"] = round(volatility, 2) if volatility is not None else None
+    return context
+
+
+def _monthly_market_context(index_rows: dict[str, list[dict]]) -> dict[str, dict]:
+    context: dict[str, dict] = {}
+    for name, rows in index_rows.items():
+        by_month: dict[str, list[float]] = {}
+        for row in rows:
+            date = str(row.get("date") or "")
+            close = float(row.get("close") or 0)
+            if len(date) >= 7 and close > 0:
+                by_month.setdefault(date[:7], []).append(close)
+        previous_close = None
+        for month, closes in sorted(by_month.items()):
+            close = closes[-1]
+            change_pct = None
+            if previous_close and previous_close > 0:
+                change_pct = (close / previous_close - 1) * 100
+            bucket = context.setdefault(month, {})
+            bucket[name.lower()] = round(close, 2)
+            bucket[f"{name.lower()}_change_pct"] = (
+                round(change_pct, 2) if change_pct is not None else None
+            )
+            previous_close = close
     return context
 
 
@@ -3443,14 +3407,19 @@ def _build_periodic_performance(trades: list[dict]) -> dict:
             bucket["net_cashflow"] = bucket["sell_amount"] - bucket["buy_amount"]
             bucket["realized_pnl_rate"] = round((bucket["realized_pnl"] / bucket["cost_of_sold"] * 100), 2) if bucket["cost_of_sold"] > 0 else 0.0
 
-    market_context = _daily_market_context(_load_index_rows())
+    index_rows = _load_index_rows()
+    market_context = _daily_market_context(index_rows)
+    monthly_market_context = _monthly_market_context(index_rows)
     daily_rows = [
         {"period": key, **value, **market_context.get(key, {})}
         for key, value in sorted(daily.items())
     ]
     return {
         "daily": daily_rows,
-        "monthly": [{"period": key, **value} for key, value in sorted(monthly.items())],
+        "monthly": [
+            {"period": key, **value, **monthly_market_context.get(key, {})}
+            for key, value in sorted(monthly.items())
+        ],
         "strategy_validation": _strategy_validation(strategy_stats),
         "market_data_available": bool(market_context),
     }

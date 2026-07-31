@@ -8,6 +8,22 @@ from pathlib import Path
 DEFAULT_BUSY_TIMEOUT_MS = 5_000
 
 
+class ClosingConnection(sqlite3.Connection):
+    """SQLite connection whose context manager also releases the handle.
+
+    ``sqlite3.Connection.__exit__`` only commits or rolls back; it does not
+    close the connection.  Repository code consistently uses ``with
+    open_sqlite(...) as conn``, so closing here makes that established pattern
+    safe without requiring every call site to add a second context manager.
+    """
+
+    def __exit__(self, exc_type, exc_value, traceback) -> bool:
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 def _busy_timeout_ms() -> int:
     raw = os.environ.get("SQLITE_BUSY_TIMEOUT_MS", str(DEFAULT_BUSY_TIMEOUT_MS))
     try:
@@ -28,6 +44,7 @@ def open_sqlite(
         db_path,
         timeout=timeout_ms / 1_000,
         check_same_thread=False,
+        factory=ClosingConnection,
     )
     conn.execute(f"PRAGMA busy_timeout={timeout_ms}")
     conn.execute("PRAGMA journal_mode=WAL")

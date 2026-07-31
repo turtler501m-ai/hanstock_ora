@@ -43,6 +43,19 @@ PROFILES = {
         "tests.test_ai_strategy_presets",
         "tests.test_autonomy_ai_stock_integration",
     ],
+    "futures": [
+        "tests.test_futures_signal_parser",
+        "tests.test_futures_signal_verifier",
+        "tests.test_futures_signals_dashboard",
+        "tests.test_kis_futures_api",
+        "tests.test_quantconnect_api",
+        "tests.test_quantconnect_mnq_algorithm",
+    ],
+    "mistock": [
+        "tests.test_mistock_dashboard",
+        "tests.test_mistock_indicator_strategy",
+        "tests.test_mistock_monitor",
+    ],
 }
 
 
@@ -63,6 +76,7 @@ def main() -> int:
     parser.add_argument("--profile", choices=[*PROFILES, "autonomy", "all"], default="quick")
     parser.add_argument("--batch-size", type=int, default=10)
     parser.add_argument("--timeout", type=int, default=180)
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
     modules = all_test_modules()
@@ -82,6 +96,7 @@ def main() -> int:
             "PYTHONUTF8": "1",
             "PYTHONIOENCODING": "utf-8",
             "PYTHONDONTWRITEBYTECODE": "1",
+            "HANSTOCK_LOG_LEVEL": "DEBUG" if args.verbose else "WARNING",
         }
     )
     started = time.monotonic()
@@ -92,7 +107,13 @@ def main() -> int:
         batch_started = time.monotonic()
         try:
             result = subprocess.run(
-                [sys.executable, "-m", "unittest", "-v", *group],
+                [
+                    sys.executable,
+                    "-m",
+                    "unittest",
+                    *(["-v"] if args.verbose else []),
+                    *group,
+                ],
                 env=env,
                 timeout=args.timeout,
                 check=False,
