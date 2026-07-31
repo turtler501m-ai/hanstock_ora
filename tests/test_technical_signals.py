@@ -147,6 +147,21 @@ class TechnicalSignalsTests(unittest.TestCase):
                     [],
                 )
 
+    def test_empty_condition_result_does_not_overwrite_last_good_symbols(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = RuntimeStateStore(Path(tmp) / "runtime.sqlite")
+            with (
+                patch("src.strategy.condition_monitor.runtime_state_store", store),
+                patch("src.strategy.condition_monitor.time.time", return_value=1000),
+            ):
+                saved = save_condition_symbols("KR", ["005930"], source="good")
+                skipped = save_condition_symbols("KR", [], source="empty")
+                symbols = get_fresh_condition_symbols("KR", now=1001)
+
+        self.assertTrue(saved["saved"])
+        self.assertFalse(skipped["saved"])
+        self.assertEqual(symbols, ["005930"])
+
     def test_condition_monitor_cycle_updates_both_markets(self):
         kr_api = Mock()
         us_api = Mock()

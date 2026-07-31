@@ -16,12 +16,21 @@ STATE_KEY = "technical_condition_monitor_v1"
 
 def save_condition_symbols(market: str, symbols: list[str], *, source: str) -> dict:
     normalized = list(dict.fromkeys(str(symbol or "").upper().strip() for symbol in symbols if symbol))
+    if not normalized:
+        return {
+            "market": str(market).upper(),
+            "symbols": [],
+            "source": source,
+            "updated_at_epoch": None,
+            "saved": False,
+        }
     state = runtime_state_store.get(STATE_KEY, {"markets": {}})
     row = {
         "market": str(market).upper(),
         "symbols": normalized,
         "source": source,
         "updated_at_epoch": time.time(),
+        "saved": True,
     }
     state.setdefault("markets", {})[row["market"]] = row
     runtime_state_store.set(STATE_KEY, state)
@@ -63,12 +72,19 @@ def condition_monitor_status(*, max_age_seconds: float = 180, now: float | None 
                 and age <= max(1.0, float(max_age_seconds))
             ),
         }
-    market_open = market_open_status()
+    heartbeat_epoch = float(state.get("heartbeat_epoch") or 0)
+    heartbeat_age = (
+        round(max(0.0, current - heartbeat_epoch), 1)
+        if heartbeat_epoch > 0
+        else None
+    )
     return {
-        "running_data_available": any(row["updated_at_epoch"] for row in markets.values()),
+        "running_data_available": any(row["symbol_count"] > 0 for row in markets.values()),
         "fresh": any(row["fresh"] for row in markets.values()),
         "max_age_seconds": max_age_seconds,
-        "market_open": market_open,
+        "market_open": state.get("market_open") or {"KR": False, "US": False},
+        "heartbeat_epoch": heartbeat_epoch or None,
+        "heartbeat_age_seconds": heartbeat_age,
         "markets": markets,
     }
 
@@ -139,6 +155,16 @@ def is_any_market_open() -> bool:
     return any(market_open_status().values())
 
 
+def save_monitor_heartbeat(market_open: dict[str, bool]) -> None:
+    state = runtime_state_store.get(STATE_KEY, {"markets": {}})
+    state["market_open"] = {
+        "KR": bool(market_open.get("KR")),
+        "US": bool(market_open.get("US")),
+    }
+    state["heartbeat_epoch"] = time.time()
+    runtime_state_store.set(STATE_KEY, state)
+
+
 def run_forever(
     *,
     interval_seconds: float = 60,
@@ -148,6 +174,7 @@ def run_forever(
     interval = max(10.0, float(interval_seconds or 60))
     while not should_stop():
         open_markets = market_open_status()
+        save_monitor_heartbeat(open_markets)
         if any(open_markets.values()):
             run_condition_monitor_cycle({
                 market for market, is_open in open_markets.items() if is_open
