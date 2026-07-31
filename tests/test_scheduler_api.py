@@ -165,6 +165,12 @@ class SchedulerApiTests(unittest.TestCase):
             schedule["schedule_strategy_id"] == "ai_stock_default_v1"
             for schedule in schedules
         ))
+        self.assertTrue(all(
+            schedule["execution_policy_label"] in {
+                "자동 주문 실행", "승인 대기열 등록", "계획만 생성"
+            }
+            for schedule in schedules
+        ))
 
     def test_get_scheduler_status_merges_last_30_days_scheduler_results(self):
         from datetime import datetime, timedelta

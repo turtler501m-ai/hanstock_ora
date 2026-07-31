@@ -3031,6 +3031,11 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
                     applied_id = str(strategy.get("id") or "")
                     universe_count = len(load_strategy_universe(applied_id))
                     total_universe_count += universe_count
+                    from src.db.ai_stock_repository import get_policy
+
+                    policy = get_policy(applied_id, "KR") or {}
+                    policy_auto_approve = bool(policy.get("auto_approve"))
+                    policy_auto_execute = bool(policy.get("auto_execute"))
                     schedule_items.append({
                         **schedule,
                         "strategy_id": applied_id,
@@ -3041,6 +3046,18 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
                             _strategy_display_name(applied_id, strategy.get("name")),
                         ),
                         "universe_count": universe_count,
+                        "policy_automation_level": int(
+                            policy.get("automation_level") or 0
+                        ),
+                        "policy_auto_approve": policy_auto_approve,
+                        "policy_auto_execute": policy_auto_execute,
+                        "execution_policy_label": (
+                            "자동 주문 실행"
+                            if policy_auto_execute
+                            else "승인 대기열 등록"
+                            if policy_auto_approve
+                            else "계획만 생성"
+                        ),
                     })
                 continue
             universe_count = len(load_strategy_universe(sid)) if sid else 0

@@ -137,6 +137,7 @@ def dispatch_due_schedules() -> list[str]:
                 markets = STORABLE_MARKETS if raw_market == "ALL" else (raw_market,)
                 result: dict = {"strategy_id": strategy_id, "market": raw_market, "by_market": {}}
                 market_errors = []
+                market_blocks = []
                 for m in markets:
                     # 한 시장의 실패가 다른 시장 실행/이력 저장/스케줄 갱신을 막지 않도록 시장별로 격리한다.
                     try:
@@ -152,10 +153,19 @@ def dispatch_due_schedules() -> list[str]:
                     except Exception as rt_exc:
                         logger.warning(f"[dispatch] {strategy_id} realtime cycle failed for {m}: {rt_exc}")
                     result["by_market"][m] = m_result
+                    blocked = (m_result.get("automation") or {}).get("blocked") or []
+                    market_blocks.extend(f"{m}:{reason}" for reason in blocked)
                 if market_errors:
                     result["errors"] = market_errors
                     result["status"] = "failed"
                     result["ok"] = False
+                elif market_blocks:
+                    result["blocked"] = market_blocks
+                    result["status"] = "blocked"
+                    result["ok"] = True
+                else:
+                    result["status"] = "completed"
+                    result["ok"] = True
                 save_scheduler_result(mode, datetime.now(KST).isoformat(), result)
             else:
                 result = run_scheduled_cycle(
@@ -172,7 +182,12 @@ def dispatch_due_schedules() -> list[str]:
                 )
             mark_strategy_schedule_run(schedule_strategy_id)
             ran.append(strategy_id)
-            logger.info(f"[dispatch] done {strategy_id}")
+            if isinstance(result, dict) and result.get("status") == "blocked":
+                logger.warning(
+                    f"[dispatch] blocked {strategy_id}: {result.get('blocked')}"
+                )
+            else:
+                logger.info(f"[dispatch] done {strategy_id}")
         except Exception as exc:  # noqa: BLE001
             failures.append(f"{strategy_id}: {exc}")
             logger.error(f"[dispatch] {strategy_id} failed: {exc}")

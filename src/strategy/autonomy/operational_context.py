@@ -148,7 +148,13 @@ class OperationalSnapshotProvider:
                 quote.get("price", quote.get("current")), f"{symbol} quote"
             )
             data_as_of = _parse_time(quote.get("data_as_of"), f"{symbol} quote time")
-            _require_fresh(data_as_of, now, self.max_age_seconds, f"{symbol} quote")
+            # Providers stamp a quote when it is read.  The snapshot-level
+            # ``now`` was captured before that I/O, so comparing against it
+            # incorrectly classifies a newly fetched quote as future/stale.
+            quote_now = _aware(self.clock(), "quote clock")
+            _require_fresh(
+                data_as_of, quote_now, self.max_age_seconds, f"{symbol} quote"
+            )
             row = by_symbol.get(symbol, {})
             adv = row.get("avg_trading_value")
             if adv is None:

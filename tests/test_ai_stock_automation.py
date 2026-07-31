@@ -129,6 +129,22 @@ class AutomationTests(unittest.TestCase):
         finally:
             automation_service.live_trading_allowed = orig
 
+    def test_terminal_execution_run_has_completed_timestamp(self):
+        repo.log_execution_run({
+            "strategy_id": "ai_stock_default_v1",
+            "market": "KR",
+            "run_type": "scheduled",
+            "automation_level": 5,
+            "status": "blocked",
+            "blocked_stage": "autonomy",
+            "blocked_reason": "quote is stale",
+        })
+
+        run = repo.list_execution_runs(
+            market="KR", strategy_id="ai_stock_default_v1", limit=1
+        )[0]
+        self.assertIsNotNone(run["completed_at"])
+
     def test_execute_gate_blocks_stale_candidate_by_default(self):
         orig = automation_service.live_trading_allowed
         automation_service.live_trading_allowed = lambda: True

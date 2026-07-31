@@ -100,6 +100,21 @@ class OperationalContextTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeConfigurationError, "stale"):
             provider.snapshot("KR", "s1")
 
+    def test_quote_fetched_after_snapshot_clock_is_not_false_stale(self):
+        quote_time = self.now + timedelta(milliseconds=10)
+        clock_values = iter((self.now, self.now + timedelta(milliseconds=20)))
+        provider = OperationalSnapshotProvider(
+            kr_broker=_KR(),
+            market_data=_Market(quote_time),
+            candidate_repository=_Repo(self.now),
+            clock=lambda: next(clock_values),
+            account_id="acct",
+        )
+
+        result = provider.snapshot("KR", "s1")
+
+        self.assertEqual(quote_time.isoformat(), result.market["instruments"]["AAA"]["data_as_of"])
+
     def test_invalid_candidate_price_does_not_block_valid_candidates(self):
         repo = _Repo(self.now)
         original = repo.list_candidates

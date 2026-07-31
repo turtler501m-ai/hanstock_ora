@@ -158,6 +158,42 @@ class SchedulerModeTests(unittest.TestCase):
         )
         mark.assert_called_once_with("ai_stock_default_v1")
 
+    def test_ai_schedule_slot_reports_policy_block_in_saved_result(self):
+        schedule = {
+            "strategy_id": "ai_stock_default_v1",
+            "market": "KR",
+            "mode": "execute",
+            "auto_approve": True,
+        }
+        applied = {
+            "id": "easy_aggressive_live",
+            "selected": True,
+            "status": "approved",
+        }
+        with patch.object(
+            strategy_scheduler, "list_strategy_schedules", return_value=[schedule]
+        ), patch.object(
+            strategy_scheduler, "is_schedule_due", return_value=True
+        ), patch(
+            "src.db.repository.load_ai_strategies", return_value=[applied]
+        ), patch(
+            "src.ai_stock.automation_service.run_strategy",
+            return_value={"automation": {"blocked": ["quote is stale"]}},
+        ), patch(
+            "src.ai_stock.realtime_service.run_realtime_cycle", return_value={}
+        ), patch.object(
+            strategy_scheduler, "save_scheduler_result"
+        ) as save_result, patch.object(
+            strategy_scheduler, "mark_strategy_schedule_run"
+        ) as mark:
+            ran = strategy_scheduler.dispatch_due_schedules()
+
+        self.assertEqual(ran, ["easy_aggressive_live"])
+        saved = save_result.call_args.args[2]
+        self.assertEqual(saved["status"], "blocked")
+        self.assertEqual(saved["blocked"], ["KR:quote is stale"])
+        mark.assert_called_once_with("ai_stock_default_v1")
+
     def test_ai_schedule_slot_does_not_duplicate_explicit_schedule(self):
         from src.strategy_ids import resolve_ai_schedule_strategy_ids
 

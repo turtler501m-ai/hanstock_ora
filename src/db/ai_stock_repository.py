@@ -1073,6 +1073,8 @@ def update_execution_plan_status(
 def log_execution_run(data: dict[str, Any]) -> int:
     row = dict(data)
     row.setdefault("started_at", _now())
+    if row.get("status") in {"completed", "blocked", "failed"}:
+        row.setdefault("completed_at", _now())
     for f in ("policy_snapshot", "safety_checks"):
         if f in row:
             row[f] = dumps_json(row.get(f))
