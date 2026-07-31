@@ -3364,6 +3364,16 @@ async function renderApprovals() {
                 ? ` · 증권사 미체결 ${Number(row.blocking_remaining_qty).toLocaleString()}주 (#${escapeHtml(row.blocking_order_id || '-')})`
                 : '';
             const responseText = `${escapeHtml(row.response_msg || row.order_status || '')}${blockingText}`;
+            const classificationKind = row.order_classification
+                || (row.strategy_id ? 'strategy' : 'manual');
+            const classificationLabel = row.order_classification_label
+                || row.strategy_name
+                || row.strategy_id
+                || '수동 주문';
+            const classificationDetail = row.order_classification_detail
+                || (row.strategy_id
+                    ? `전략 주문 · ${row.strategy_id}`
+                    : (row.source ? `출처: ${row.source}` : '출처 미기록 · 수동 처리'));
             const controls = status === 'pending' && autoApprovalInProgress
                 ? `<span class="time-muted">자동승인 진행중</span>`
                 : status === 'pending'
@@ -3379,7 +3389,12 @@ async function renderApprovals() {
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>#${escapeHtml(row.id || '-')}</td>
-                <td>${pill(row.strategy_name || row.strategy_id || '미분류', 'hold')}</td>
+                <td>
+                    <div class="approval-classification">
+                        <span class="approval-classification-badge is-${escapeHtml(classificationKind)}">${escapeHtml(classificationLabel)}</span>
+                        <small>${escapeHtml(classificationDetail)}</small>
+                    </div>
+                </td>
                 <td>
                     <div>${escapeHtml(String(row.created_at || '').split(' ')[0])}</div>
                     <div class="time-muted">${escapeHtml(String(row.created_at || '').split(' ')[1] || '')}</div>

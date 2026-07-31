@@ -35,7 +35,9 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
     def test_orders_show_strategy_and_performance_has_explicit_scope(self):
         self.assertIn('<th>전략</th>', INDEX_HTML)
         self.assertIn('id="select-performance-scope"', INDEX_HTML)
-        self.assertIn("row.strategy_name || row.strategy_id || '미분류'", APP_JS)
+        self.assertIn("row.order_classification_label", APP_JS)
+        self.assertIn("approval-classification-badge", APP_JS)
+        self.assertIn("'수동 주문'", APP_JS)
 
 
     def test_performance_tab_exposes_local_trade_cleanup(self):

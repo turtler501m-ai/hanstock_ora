@@ -92,6 +92,21 @@ STRATEGY_MODE_LABELS = {
     "analysis_only": "분석전용",
 }
 
+APPROVAL_SOURCE_CLASSIFICATIONS = {
+    "dashboard": ("수동 주문", "manual"),
+    "manual": ("수동 주문", "manual"),
+    "dashboard_holding_sell": ("수동 보유종목 매도", "manual"),
+    "dashboard_sell_all": ("수동 전량매도", "manual"),
+    "signal": ("수동 신호 주문", "manual"),
+    "candidate": ("수동 후보 주문", "manual"),
+    "execution_plan": ("수동 실행계획 주문", "manual"),
+    "portfolio-optimizer": ("포트폴리오 최적화", "tool"),
+    "ai-allocation": ("AI 자산배분", "tool"),
+    "scheduler-test": ("테스트 주문", "test"),
+    "auto_trader": ("자동매매 · 전략 미기록", "automation"),
+    "autonomous_strategy": ("자율매매 · 전략 미기록", "automation"),
+}
+
 
 def _strategy_display_name(strategy_id: str | None, fallback: str | None = None) -> str:
     sid = str(strategy_id or "").strip()
@@ -99,6 +114,46 @@ def _strategy_display_name(strategy_id: str | None, fallback: str | None = None)
     if text:
         return text
     return STRATEGY_DISPLAY_NAMES.get(sid, sid or "-")
+
+
+def _approval_classification(
+    *,
+    strategy_id: str | None,
+    strategy_name: str | None,
+    source: str | None,
+) -> dict:
+    strategy_id = str(strategy_id or "").strip()
+    source = str(source or "").strip()
+    if strategy_id:
+        return {
+            "order_classification": "strategy",
+            "order_classification_label": (
+                str(strategy_name or "").strip()
+                or _strategy_display_name(strategy_id)
+            ),
+            "order_classification_detail": f"전략 주문 · {strategy_id}",
+        }
+
+    normalized_source = source.lower()
+    label, kind = APPROVAL_SOURCE_CLASSIFICATIONS.get(
+        normalized_source,
+        (
+            ("수동 주문", "manual")
+            if not normalized_source
+            or normalized_source.startswith("dashboard")
+            or normalized_source.startswith("manual")
+            else ("기타 주문", "other")
+        ),
+    )
+    return {
+        "order_classification": kind,
+        "order_classification_label": label,
+        "order_classification_detail": (
+            "출처 미기록 · 수동 처리"
+            if not source
+            else f"출처: {source}"
+        ),
+    }
 
 
 def _strategy_status_label(status: str | None) -> str:
@@ -1732,11 +1787,38 @@ def get_approvals(limit: int = 50, strategy_id: str | None = None):
         rows_by_id = {int(row["id"]): row for row in recent_rows}
         rows_by_id.update({int(row["id"]): row for row in actionable_rows})
         rows = sorted(rows_by_id.values(), key=lambda row: int(row["id"]), reverse=True)
+    try:
+        from src.db.repository import load_ai_strategies
+
+        strategy_names = {
+            str(strategy.get("id") or ""): _strategy_display_name(
+                strategy.get("id"),
+                strategy.get("name"),
+            )
+            for strategy in load_ai_strategies()
+            if strategy.get("id")
+        }
+    except Exception:
+        strategy_names = {}
+
     approvals = []
     latest_trades = _latest_trades_by_approval_ids([int(row["id"]) for row in rows])
     open_sells = _latest_open_sell_trades_by_symbols([str(row["symbol"]) for row in rows])
     for row in rows:
         item = _approval_row(row)
+        strategy_id_value = str(item.get("strategy_id") or "").strip()
+        strategy_name_value = (
+            strategy_names.get(strategy_id_value)
+            if strategy_id_value
+            else None
+        )
+        if strategy_name_value:
+            item["strategy_name"] = strategy_name_value
+        item.update(_approval_classification(
+            strategy_id=strategy_id_value,
+            strategy_name=strategy_name_value,
+            source=item.get("source"),
+        ))
         trade = latest_trades.get(int(item.get("id") or 0))
         if trade:
             item["trade_id"] = trade.get("id")
