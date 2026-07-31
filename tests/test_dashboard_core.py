@@ -4,6 +4,9 @@ import asyncio
 import json
 import math
 import sqlite3
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
@@ -46,6 +49,31 @@ class MemoryTextPath:
 
 
 class DashboardCoreTests(unittest.TestCase):
+    def test_approval_submission_is_serialized_across_workers(self):
+        active = 0
+        max_active = 0
+        guard = threading.Lock()
+
+        def fake_submit(approval_id, approval_label="수동승인"):
+            nonlocal active, max_active
+            with guard:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.03)
+            with guard:
+                active -= 1
+            return {"id": approval_id, "status": "executed"}
+
+        with patch(
+            "src.dashboard.core._approve_pending_approval_serialized",
+            side_effect=fake_submit,
+        ):
+            with ThreadPoolExecutor(max_workers=3) as executor:
+                results = list(executor.map(dashboard_core._approve_pending_approval, [1, 2, 3]))
+
+        self.assertEqual([item["id"] for item in results], [1, 2, 3])
+        self.assertEqual(max_active, 1)
+
     def test_json_safe_value_replaces_non_finite_floats(self):
         payload = {
             "ok": True,
@@ -657,6 +685,21 @@ class DashboardCoreTests(unittest.TestCase):
 
                 self.assertEqual(balance["pending_sell_symbols"], [])
                 self.assertFalse(balance["holdings"][0]["sell_pending"])
+
+                with dashboard.trader.connect_db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE trades
+                        SET order_status = 'submitted', filled_qty = 0
+                        WHERE source_approval_id = ?
+                        """,
+                        (approval_id,),
+                    )
+
+                balance = dashboard.get_balance()
+
+                self.assertEqual(balance["pending_sell_symbols"], ["005930"])
+                self.assertTrue(balance["holdings"][0]["sell_pending"])
         finally:
             dashboard.trader.config.trade_db_path = original_db_path
             dashboard._required_env_missing = original_required_env_missing

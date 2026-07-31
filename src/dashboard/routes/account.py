@@ -75,7 +75,7 @@ def _active_sell_approval_symbols() -> set[str]:
                                   WHERE t2.source_approval_id = a.id
                               )
                               AND t.action = 'sell'
-                              AND t.order_status IN ('open', 'partial')
+                              AND t.order_status IN ('submitted', 'open', 'partial')
                               AND t.qty > COALESCE(t.filled_qty, 0)
                         )
                     )

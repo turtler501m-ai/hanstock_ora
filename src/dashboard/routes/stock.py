@@ -2029,7 +2029,7 @@ def _active_dashboard_sell_symbols() -> set[str]:
                                   WHERE t2.source_approval_id = a.id
                               )
                               AND t.action = 'sell'
-                              AND t.order_status IN ('open', 'partial')
+                              AND t.order_status IN ('submitted', 'open', 'partial')
                               AND t.qty > COALESCE(t.filled_qty, 0)
                         )
                     )
@@ -2046,6 +2046,10 @@ def sell_all_holdings(payload: dict | None = Body(default=None)):
     missing = _required_env_missing()
     if missing:
         raise HTTPException(status_code=503, detail=f"Missing environment variables: {', '.join(missing)}")
+
+    halt_new_buys = bool((payload or {}).get("halt_new_buys"))
+    if halt_new_buys:
+        activate_kill_switch()
 
     try:
         api = _get_api()
@@ -2098,6 +2102,7 @@ def sell_all_holdings(payload: dict | None = Body(default=None)):
         return {
             "status": "empty",
             "created_count": 0,
+            "new_buys_halted": halt_new_buys,
             "skipped_count": len(skipped),
             "skipped": skipped,
             "orders": [],
@@ -2119,6 +2124,7 @@ def sell_all_holdings(payload: dict | None = Body(default=None)):
         "failed_count": sum(1 for item in created if isinstance(item, dict) and item.get("status") == "failed"),
         "auto_approved": False,
         "auto_approval_queued": auto_approval_queued,
+        "new_buys_halted": halt_new_buys,
         "fill_status_note": "KIS 주문 접수 결과입니다. 실제 체결 여부는 주문내역 동기화 후 확정됩니다.",
         "skipped_count": len(skipped),
         "skipped": skipped,

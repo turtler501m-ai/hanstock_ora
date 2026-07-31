@@ -657,6 +657,9 @@ def daily_loss_halt_triggered(pnl: int) -> bool:
 
 
 def check_daily_loss(pnl: int) -> bool:
+    if Path(".runtime/kill_switch.json").exists():
+        logger.warning("Kill switch active — 신규 매수 중단, 보유 포지션 방어는 계속")
+        return True
     halted = daily_loss_halt_triggered(pnl)
     if halted:
         logger.warning(f"일일 손실 한도 초과: {pnl:+,} KRW — 신규 매수 중단, 보유 포지션 방어는 계속")

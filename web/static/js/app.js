@@ -2513,14 +2513,14 @@ function bindQueueButtons() {
 
 async function sellAllHoldings() {
     const button = document.getElementById('btn-sell-all-holdings');
-    if (!window.confirm('현재 보유 종목을 전량 시장가 매도 승인으로 등록할까요?')) {
+    if (!window.confirm('신규 매수를 중단하고 현재 보유 종목을 전량 시장가 매도 승인으로 등록할까요?')) {
         return;
     }
     if (button) {
         button.disabled = true;
     }
     try {
-        const result = await postJson('/api/holdings/sell-all', {});
+        const result = await postJson('/api/holdings/sell-all', { halt_new_buys: true });
         if (result.status === 'empty') {
             setStatus('매도할 보유 종목이 없습니다.', true);
             return;

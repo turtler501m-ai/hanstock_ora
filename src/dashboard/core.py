@@ -618,6 +618,7 @@ AUTO_APPROVAL_STALE_EXECUTING_SECONDS = int(
 )
 _auto_approval_sweeper_thread: threading.Thread | None = None
 _auto_approval_sweeper_stop = threading.Event()
+_approval_submission_lock = threading.Lock()
 
 
 def _reclaim_stale_executing_approvals(max_age_seconds: int | None = None) -> int:
@@ -2900,6 +2901,17 @@ def _auto_approve_pending_approvals(limit: int = 200) -> list[dict]:
 
 
 def _approve_pending_approval(approval_id: int, approval_label: str = "수동승인") -> dict:
+    # Explicit sell-all batches, the periodic sweeper, scheduler jobs, and
+    # manual approvals can all reach this function concurrently. Serialize the
+    # broker-facing path so KIS sees one approval order at a time.
+    with _approval_submission_lock:
+        return _approve_pending_approval_serialized(approval_id, approval_label)
+
+
+def _approve_pending_approval_serialized(
+    approval_id: int,
+    approval_label: str = "수동승인",
+) -> dict:
     from src.online_access import is_online_access_blocked
 
     if is_online_access_blocked():
@@ -2908,6 +2920,14 @@ def _approve_pending_approval(approval_id: int, approval_label: str = "수동승
             detail="Online access is blocked. Approval remains pending.",
         )
     pending = _load_pending_approval(approval_id)
+    if (
+        str(pending.get("action") or "").lower() == "buy"
+        and Path(".runtime/kill_switch.json").exists()
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Kill switch is active. Buy approval remains pending.",
+        )
     if pending.get("managed_order_id"):
         from src.strategy.autonomy.ai_stock_integration import (
             approve_managed_ai_stock_order,
