@@ -516,6 +516,55 @@ class KIStockAPI:
             self._fail()
             return {"rt_cd": "1", "msg1": str(e)}
 
+    def cancel_order(
+        self,
+        order_no: str,
+        *,
+        qty: int = 0,
+        order_division: str = "00",
+        original_order_branch: str = "",
+        exchange_id: str = "KRX",
+        cancel_all: bool = True,
+    ) -> dict:
+        require_online_access("KIS order cancellation")
+        flags = trading_flags(get_settings())
+        if not flags.order_submission_enabled:
+            return {"rt_cd": "0", "msg1": "DRY_RUN"}
+        order_no = str(order_no or "").strip()
+        if not order_no:
+            raise ValueError("order_no is required")
+        body = {
+            "CANO": self.account_no[:8],
+            "ACNT_PRDT_CD": self.account_no[8:] if len(self.account_no) > 8 else "01",
+            "KRX_FWDG_ORD_ORGNO": str(original_order_branch or ""),
+            "ORGN_ODNO": order_no,
+            "ORD_DVSN": str(order_division or "00"),
+            "RVSE_CNCL_DVSN_CD": "02",
+            "ORD_QTY": str(max(0, int(qty))),
+            "ORD_UNPR": "0",
+            "QTY_ALL_ORD_YN": "Y" if cancel_all else "N",
+            "EXCG_ID_DVSN_CD": str(exchange_id or "KRX"),
+        }
+        tr_id = "VTTC0803U" if self.trading_env == "demo" else "TTTC0803U"
+        headers = self._headers(tr_id)
+        hashkey = self._hashkey(body)
+        if hashkey:
+            headers["hashkey"] = hashkey
+        _kis_order_throttle()
+        try:
+            response = HTTP.post(
+                f"{self.base_url}/uapi/domestic-stock/v1/trading/order-rvsecncl",
+                headers=headers,
+                json=body,
+                timeout=15,
+            )
+            data = response.json()
+            self._record_result(data)
+            return data
+        except Exception:
+            self._fail()
+            raise
+
     def get_trade_history(self, start_date: str, end_date: str) -> list:
         tr_id = "VTTC0081R" if self.trading_env == "demo" else "TTTC0081R"
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-daily-ccld"

@@ -1619,6 +1619,56 @@ class DashboardCoreTests(unittest.TestCase):
             dashboard.trader.config.trade_db_path = original_db_path
             dashboard.fetch_cloud_trades = original_fetch_cloud_trades
 
+    def test_filled_trade_history_sync_preserves_partial_order_status(self):
+        original_db_path = dashboard.trader.config.trade_db_path
+        original_fetch_cloud_trades = dashboard.fetch_cloud_trades
+
+        class _FakeAPI:
+            def get_trade_history(self, start_date, end_date):
+                return [{
+                    "odno": "P12345",
+                    "pdno": "005930",
+                    "prdt_name": "Samsung",
+                    "sll_buy_dvsn_cd": "01",
+                    "ord_dt": "20260731",
+                    "ord_tmd": "110000",
+                    "ord_qty": "10",
+                    "tot_ccld_qty": "4",
+                    "rmn_qty": "6",
+                    "avg_prvs": "70100",
+                }]
+
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                dashboard.fetch_cloud_trades = lambda: []
+                dashboard.trader.save_trade(
+                    "005930",
+                    "Samsung",
+                    "sell",
+                    10,
+                    0,
+                    "partial sell",
+                    True,
+                    True,
+                    broker_order_id="P12345",
+                    order_status="submitted",
+                    filled_qty=0,
+                )
+
+                dashboard._sync_filled_trades_from_history(_FakeAPI(), days=1)
+
+                with dashboard.trader.connect_db() as conn:
+                    conn.row_factory = sqlite3.Row
+                    row = conn.execute(
+                        "SELECT * FROM trades WHERE broker_order_id = 'P12345'"
+                    ).fetchone()
+                self.assertEqual(row["order_status"], "partial")
+                self.assertEqual(row["filled_qty"], 4)
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+            dashboard.fetch_cloud_trades = original_fetch_cloud_trades
+
     def test_balance_sync_adjustment_is_reconciled_not_submitted(self):
         import src.dashboard.routes.stock as stock_routes
 
@@ -2155,6 +2205,53 @@ class DashboardCoreTests(unittest.TestCase):
         finally:
             dashboard.trader.config.trade_db_path = original_db_path
             stock_routes._auto_approval_enabled = original_auto_approval
+
+    def test_liquidation_cancels_open_buy_orders_before_selling(self):
+        import src.dashboard.routes.stock as stock_routes
+
+        original_db_path = dashboard.trader.config.trade_db_path
+
+        class _FakeAPI:
+            def __init__(self):
+                self.calls = []
+
+            def cancel_order(self, order_no, **kwargs):
+                self.calls.append((order_no, kwargs))
+                return {"rt_cd": "0", "msg1": "cancel accepted"}
+
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                dashboard.trader.save_trade(
+                    "005930",
+                    "Samsung",
+                    "buy",
+                    10,
+                    70000,
+                    "open buy",
+                    True,
+                    True,
+                    broker_order_id="B12345",
+                    order_status="partial",
+                    filled_qty=4,
+                    filled_price=70000,
+                )
+                api = _FakeAPI()
+
+                result = stock_routes._cancel_open_buy_orders_before_liquidation(api)
+
+                self.assertEqual(api.calls, [(
+                    "B12345",
+                    {"qty": 6, "cancel_all": True},
+                )])
+                self.assertEqual(result[0]["status"], "canceled")
+                with dashboard.trader.connect_db() as conn:
+                    row = conn.execute(
+                        "SELECT order_status FROM trades WHERE broker_order_id = 'B12345'"
+                    ).fetchone()
+                self.assertEqual(row[0], "canceled")
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
 
     def test_watchlist_inherits_shared_symbols_for_non_isolated_strategy(self):
         with patch("src.db.repository.load_watchlist_data", return_value={

@@ -3511,9 +3511,24 @@ def _sync_filled_trades_from_history(
                     _to_int(stored.get("filled_qty")),
                     _to_int(stored.get("filled_price")),
                 )
+                requested_qty = _to_int(stored.get("qty"))
+                filled_qty = _to_int(trade.get("filled_qty"))
+                remaining_qty = _history_remaining_qty(row)
+                if _history_order_is_canceled(row):
+                    incoming_status = "canceled"
+                elif _history_order_is_rejected(row) and filled_qty <= 0:
+                    incoming_status = "failed"
+                elif remaining_qty > 0 and filled_qty <= 0:
+                    incoming_status = "open"
+                elif remaining_qty > 0 or (
+                    requested_qty > 0 and filled_qty < requested_qty
+                ):
+                    incoming_status = "partial"
+                else:
+                    incoming_status = "filled"
                 incoming_state = (
-                    "filled",
-                    _to_int(trade.get("filled_qty")),
+                    incoming_status,
+                    filled_qty,
                     _to_int(trade.get("filled_price")),
                 )
                 if trade["broker_order_id"] and stored_state != incoming_state:
@@ -3531,7 +3546,7 @@ def _sync_filled_trades_from_history(
                           AND action = ?
                         """,
                         (
-                            "filled",
+                            incoming_status,
                             trade["filled_qty"],
                             trade["filled_price"],
                             trade["response_msg"],

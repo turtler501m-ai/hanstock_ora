@@ -2039,6 +2039,70 @@ def _active_dashboard_sell_symbols() -> set[str]:
     return {str(row["symbol"]) for row in rows}
 
 
+def _cancel_open_buy_orders_before_liquidation(api) -> list[dict]:
+    trader.init_db()
+    with trader.connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM trades
+            WHERE action = 'buy'
+              AND order_status IN ('submitted', 'open', 'partial')
+              AND COALESCE(broker_order_id, '') <> ''
+              AND qty > COALESCE(filled_qty, 0)
+            ORDER BY id ASC
+            """
+        ).fetchall()
+
+    results = []
+    for row in rows:
+        item = dict(row)
+        order_no = str(item.get("broker_order_id") or "")
+        remaining_qty = max(
+            0,
+            _to_int(item.get("qty")) - _to_int(item.get("filled_qty")),
+        )
+        if remaining_qty <= 0:
+            continue
+        try:
+            result = api.cancel_order(
+                order_no,
+                qty=remaining_qty,
+                cancel_all=True,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"open buy cancellation failed for {order_no}: {exc}",
+            ) from exc
+        ok = str(result.get("rt_cd") or "") == "0"
+        message = str(result.get("msg1") or "")
+        no_cancelable_qty = "취소할 수량이 없습니다" in message
+        if not ok and not no_cancelable_qty:
+            raise HTTPException(
+                status_code=409,
+                detail=f"open buy cancellation rejected for {order_no}: {message or result}",
+            )
+        if ok:
+            trader.update_trade_order_status(
+                order_no,
+                trade_id=_to_int(item.get("id")) or None,
+                order_status="canceled",
+                filled_qty=_to_int(item.get("filled_qty")),
+                filled_price=_to_int(item.get("filled_price")),
+                response_msg="Canceled open buy before dashboard liquidation",
+                broker_result=result,
+            )
+        results.append({
+            "broker_order_id": order_no,
+            "remaining_qty": remaining_qty,
+            "status": "canceled" if ok else "already_terminal",
+            "message": message,
+        })
+    return results
+
+
 
 
 @router.post("/api/holdings/sell-all")
@@ -2053,6 +2117,11 @@ def sell_all_holdings(payload: dict | None = Body(default=None)):
 
     try:
         api = _get_api()
+        canceled_buy_orders = (
+            _cancel_open_buy_orders_before_liquidation(api)
+            if halt_new_buys
+            else []
+        )
         parsed = _parse_balance(_get_balance_data(api, allow_cache=False))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"KIS balance API request failed: {e}") from e
@@ -2103,6 +2172,7 @@ def sell_all_holdings(payload: dict | None = Body(default=None)):
             "status": "empty",
             "created_count": 0,
             "new_buys_halted": halt_new_buys,
+            "canceled_buy_orders": canceled_buy_orders,
             "skipped_count": len(skipped),
             "skipped": skipped,
             "orders": [],
@@ -2125,6 +2195,7 @@ def sell_all_holdings(payload: dict | None = Body(default=None)):
         "auto_approved": False,
         "auto_approval_queued": auto_approval_queued,
         "new_buys_halted": halt_new_buys,
+        "canceled_buy_orders": canceled_buy_orders,
         "fill_status_note": "KIS 주문 접수 결과입니다. 실제 체결 여부는 주문내역 동기화 후 확정됩니다.",
         "skipped_count": len(skipped),
         "skipped": skipped,
