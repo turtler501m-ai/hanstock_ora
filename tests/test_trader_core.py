@@ -35,6 +35,27 @@ class TraderCoreTests(unittest.TestCase):
         self.assertEqual(len(orders), 1)
         self.assertLessEqual(orders[0]["estimated_cost"], 1_000_000)
 
+    def test_build_orders_scales_single_candidate_by_absolute_score(self):
+        with patch("src.strategy.seven_split.config.total_capital", 100_000_000), \
+                patch("src.strategy.seven_split.config.max_single_weight", 0.10), \
+                patch("src.strategy.seven_split.config.cash_buffer", 0.20):
+            low = build_orders(
+                [{"ticker": "005930", "score": 2, "volatility": 0.03, "reasons": []}],
+                lambda _symbol: {"ask1": 10_000, "current": 10_000},
+                held_count=0,
+                cash=100_000_000,
+            )[0]
+            high = build_orders(
+                [{"ticker": "000660", "score": 5, "volatility": 0.03, "reasons": []}],
+                lambda _symbol: {"ask1": 10_000, "current": 10_000},
+                held_count=0,
+                cash=100_000_000,
+            )[0]
+
+        self.assertEqual(low["target_weight"], 0.025)
+        self.assertEqual(high["target_weight"], 0.10)
+        self.assertGreater(high["quantity"], low["quantity"] * 3)
+
     def test_build_orders_returns_empty_when_cash_budget_is_zero(self):
         orders = build_orders(
             [{"ticker": "005930", "score": 2, "reasons": ["test"]}],

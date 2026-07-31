@@ -2,6 +2,19 @@ import math
 from src.config import config
 from src.utils.logger import logger
 
+
+def conviction_weight_cap(score: float, max_single_weight: float) -> float:
+    """Scale the per-symbol ceiling by absolute signal quality.
+
+    A relative allocator otherwise assigns its full single-name ceiling when
+    only one candidate exists, regardless of whether that candidate barely
+    passed or had a top-quality signal.
+    """
+    normalized_score = max(2.0, min(5.0, float(score or 0.0)))
+    conviction = (normalized_score - 1.0) / 4.0
+    return max(0.0, float(max_single_weight)) * conviction
+
+
 class PortfolioAllocator:
     def __init__(self):
         self.max_single_weight = config.max_single_weight
@@ -31,7 +44,10 @@ class PortfolioAllocator:
             score = max(0.1, c.get("score", 0))
             
             # AI 예측 점수 비례 가중치 (리스크 최소화 전략 적용 가능)
-            target_weight = min(self.max_single_weight, (score / score_sum) * (1 - self.cash_buffer))
+            target_weight = min(
+                conviction_weight_cap(score, self.max_single_weight),
+                (score / score_sum) * (1 - self.cash_buffer),
+            )
             
             # 비용 적용 및 수량 계산
             per_position = deployable * target_weight
@@ -45,6 +61,7 @@ class PortfolioAllocator:
                     "limit_price": price,
                     "estimated_cost": qty * price * cost_mult,
                     "score": c.get("score", 0),
+                    "target_weight": round(target_weight, 4),
                     "reasons": c.get("reasons", [])
                 })
 

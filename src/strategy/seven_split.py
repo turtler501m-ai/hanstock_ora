@@ -11,7 +11,7 @@ from src.notifier.slack import slack_error
 from src.strategy.indicators import calc_rsi, calc_sma, calc_macd, calc_bollinger
 from src.strategy.features import build_strategy_features
 from src.strategy.predict import ModelPredictor
-from src.strategy.allocator import PortfolioAllocator
+from src.strategy.allocator import PortfolioAllocator, conviction_weight_cap
 from src.strategy.technical_signals import (
     first_wave_pullback,
     moving_average_cross,
@@ -1164,7 +1164,10 @@ def build_orders(
             if price <= 0:
                 continue
             ml_val = c.get("ml_score") or c.get("rule_score") or 0.1
-            target_weight = min(config.max_single_weight, (ml_val / score_sum) * (1 - config.cash_buffer))
+            target_weight = min(
+                conviction_weight_cap(ml_val, config.max_single_weight),
+                (ml_val / score_sum) * (1 - config.cash_buffer),
+            )
             per_position = deployable * target_weight
             qty = math.floor(per_position / (price * cost_mult))
             if qty > 0:
@@ -1174,6 +1177,7 @@ def build_orders(
                     "limit_price": price,
                     "estimated_cost": qty * price * cost_mult,
                     "score": c.get("score", 0),
+                    "target_weight": round(target_weight, 4),
                     "reasons": c.get("reasons", [])
                 })
         
@@ -1203,7 +1207,10 @@ def build_orders(
             price = w.get("limit_price", 0)
             if price <= 0:
                 continue
-            target_weight = min(config.max_single_weight, (1 - config.cash_buffer) * w["weight_signal"] / signal_sum)
+            target_weight = min(
+                conviction_weight_cap(w.get("score", 0), config.max_single_weight),
+                (1 - config.cash_buffer) * w["weight_signal"] / signal_sum,
+            )
             per_position = deployable * target_weight
             qty = math.floor(per_position / (price * cost_mult))
             if qty > 0:
@@ -1213,6 +1220,7 @@ def build_orders(
                     "limit_price": price,
                     "estimated_cost": qty * price * cost_mult,
                     "score": w.get("score", 0),
+                    "target_weight": round(target_weight, 4),
                     "reasons": w.get("reasons", [])
                 })
                 
