@@ -83,11 +83,28 @@ class OperationalSnapshotProvider:
             if str(row.get("account_id") or "") == self.account_id
         )
         symbols.update(str(row["symbol"]) for row in active_positions)
+        kr_balance = None
+        if market == "KR":
+            broker = self.kr_broker or _default_kr_broker()
+            kr_balance = broker.get_balance()
+            if (
+                not isinstance(kr_balance, Mapping)
+                or kr_balance.get("_error")
+                or kr_balance.get("rt_cd") not in (None, "0")
+            ):
+                raise RuntimeConfigurationError("trusted KR account query failed")
+            symbols.update(
+                str(row.get("pdno") or "").strip()
+                for row in kr_balance.get("output1") or ()
+                if str(row.get("pdno") or "").strip()
+            )
         if not symbols:
             raise RuntimeConfigurationError("no candidate or active position symbols")
         instruments = self._instruments(market, symbols, candidates, now)
         account = (
-            self._kr_account(instruments, active_positions, strategy_id, now)
+            self._kr_account(
+                instruments, active_positions, strategy_id, now, raw=kr_balance
+            )
             if market == "KR"
             else self._us_account(instruments, active_positions, strategy_id, now)
         )
@@ -170,10 +187,17 @@ class OperationalSnapshotProvider:
                 # Use the universe admission floor only for guarded demo sizing.
                 adv = 5_000_000_000.0 if market == "KR" else 20_000_000.0
             adv = _positive(adv, f"{symbol} average_daily_trading_value")
+            sector = str(
+                row.get("sector") or row.get("instrument_type") or ""
+            ).strip()
+            if market == "KR":
+                from src.market_metadata import resolve_stock_sector
+
+                sector = resolve_stock_sector(symbol, sector)
             result[symbol] = {
                 "current_price": price,
                 "data_as_of": data_as_of.isoformat(),
-                "sector": str(row.get("sector") or row.get("instrument_type") or "").strip(),
+                "sector": sector,
                 "average_daily_trading_value": adv,
                 "sector_exposure_value": 0.0,
             }
@@ -218,9 +242,12 @@ class OperationalSnapshotProvider:
             "instruments": instruments,
         }
 
-    def _kr_account(self, instruments, active_positions, strategy_id, now):
-        broker = self.kr_broker or _default_kr_broker()
-        raw = broker.get_balance()
+    def _kr_account(
+        self, instruments, active_positions, strategy_id, now, *, raw=None
+    ):
+        if raw is None:
+            broker = self.kr_broker or _default_kr_broker()
+            raw = broker.get_balance()
         if not isinstance(raw, Mapping) or raw.get("_error") or raw.get("rt_cd") not in (None, "0"):
             raise RuntimeConfigurationError("trusted KR account query failed")
         holdings: dict[str, dict[str, float]] = {}

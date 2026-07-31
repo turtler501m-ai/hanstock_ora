@@ -185,6 +185,33 @@ class OperationalContextTest(unittest.TestCase):
         self.assertEqual(20, account["open_position_risk_amount_excluding_reservations"])
         self.assertFalse(account["kill_switch_active"])
 
+    def test_broker_only_holding_is_included_in_instrument_snapshot(self):
+        class Broker:
+            def get_balance(self):
+                return {
+                    "rt_cd": "0",
+                    "output1": [
+                        {"pdno": "BBB", "hldg_qty": "3", "evlu_amt": "330"}
+                    ],
+                    "output2": [
+                        {"tot_evlu_amt": "1330", "dnca_tot_amt": "1000"}
+                    ],
+                }
+
+        provider = OperationalSnapshotProvider(
+            kr_broker=Broker(),
+            market_data=_Market(self.now),
+            candidate_repository=_Repo(self.now),
+            clock=lambda: self.now,
+            account_id="acct",
+            kill_switch_reader=lambda: False,
+        )
+
+        result = provider.snapshot("KR", "s1")
+
+        self.assertIn("BBB", result.market["instruments"])
+        self.assertEqual(3, result.account["holdings"]["BBB"]["quantity"])
+
     def test_missing_position_stop_fails_closed(self):
         repo = _Repo(self.now)
         repo.positions = [{
