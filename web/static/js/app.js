@@ -655,40 +655,96 @@ let periodicActiveTab = 'daily';
 let periodicDataCache = null;
 let latestConfig = null;
 
-function strategySettingFields(config) {
+function strategySettingGroups(config) {
     return [
-        { key: 'SPLIT_N', label: '분할 횟수', value: config.split_n, type: 'int', step: '1', min: '1', suffix: '회' },
-        { key: 'STOP_LOSS_PCT', label: '손절 기준', value: config.stop_loss_pct, type: 'float', step: '0.1', suffix: '%' },
-        { key: 'TAKE_PROFIT', label: '익절 기준', value: config.take_profit, type: 'float', step: '0.1', suffix: '%' },
-        { key: 'RSI_BUY', label: 'RSI 매수선', value: config.rsi_buy, type: 'int', step: '1', min: '0', max: '100' },
-        { key: 'RSI_SELL', label: 'RSI 매도선', value: config.rsi_sell, type: 'int', step: '1', min: '0', max: '100' },
-        { key: 'TRAILING_STOP_ACTIVATION_PCT', label: '트레일링 활성 수익률', value: config.trailing_stop_activation_pct, type: 'float', step: '0.5', min: '0', suffix: '%' },
-        { key: 'TRAILING_STOP_PCT', label: '고점 대비 청산 하락률', value: config.trailing_stop_pct, type: 'float', step: '0.5', min: '0.5', suffix: '%' },
-        { key: 'TRAILING_STOP_LOOKBACK', label: '트레일링 참고 기간', value: config.trailing_stop_lookback, type: 'int', step: '1', min: '2', suffix: '일' },
-        { key: 'TRADE_VALUE_SURGE_RATIO', label: '거래대금 급등 배수', value: config.trade_value_surge_ratio, type: 'float', step: '0.1', min: '1', suffix: 'x' },
-        { key: 'FIRST_WAVE_MIN_PCT', label: '1차 파동 최소 상승률', value: config.first_wave_min_pct, type: 'float', step: '0.5', min: '1', suffix: '%' },
-        { key: 'FIRST_WAVE_PULLBACK_MIN_PCT', label: '눌림목 최소 조정률', value: config.first_wave_pullback_min_pct, type: 'float', step: '0.5', min: '0', suffix: '%' },
-        { key: 'FIRST_WAVE_PULLBACK_MAX_PCT', label: '눌림목 최대 조정률', value: config.first_wave_pullback_max_pct, type: 'float', step: '0.5', min: '0', suffix: '%' },
-        { key: 'TOTAL_CAPITAL', label: '기준 자본', value: config.total_capital, type: 'float', step: '100000', min: '0', suffix: '원' },
-        { key: 'MAX_POSITIONS', label: '최대 보유종목', value: config.max_positions, type: 'int', step: '1', min: '1', suffix: '개' },
-        { key: 'MAX_SINGLE_WEIGHT', label: '종목당 최대비중', value: Number(config.max_single_weight || 0) * 100, type: 'float', step: '0.1', min: '0', max: '100', suffix: '%', percent: true },
-        { key: 'CASH_BUFFER', label: '현금 보유비중', value: Number(config.cash_buffer || 0) * 100, type: 'float', step: '0.1', min: '0', max: '100', suffix: '%', percent: true },
-        { key: 'MAX_DAILY_LOSS_PCT', label: '일 손실 제한', value: config.max_daily_loss_pct, type: 'float', step: '0.1', min: '0', suffix: '%' },
+        {
+            id: 'entry',
+            title: '기본 매매',
+            description: '분할매수와 RSI 진입·청산 기준',
+            fields: [
+                { key: 'SPLIT_N', label: '분할 횟수', value: config.split_n, type: 'int', step: '1', min: '1', suffix: '회' },
+                { key: 'RSI_BUY', label: 'RSI 매수선', value: config.rsi_buy, type: 'int', step: '1', min: '0', max: '100' },
+                { key: 'RSI_SELL', label: 'RSI 매도선', value: config.rsi_sell, type: 'int', step: '1', min: '0', max: '100' },
+            ],
+        },
+        {
+            id: 'exit',
+            title: '손절·수익 보호',
+            description: '고정 손절 후 진입 이후 최고가 기준으로 수익을 보호합니다.',
+            fields: [
+                { key: 'STOP_LOSS_PCT', label: '고정 손절', value: config.stop_loss_pct, type: 'float', step: '0.1', suffix: '%' },
+                { key: 'TAKE_PROFIT', label: '목표 익절', value: config.take_profit, type: 'float', step: '0.1', suffix: '%' },
+                { key: 'TRAILING_STOP_ACTIVATION_PCT', label: '트레일링 시작 수익률', value: config.trailing_stop_activation_pct, type: 'float', step: '0.5', min: '0', suffix: '%' },
+                { key: 'TRAILING_STOP_PCT', label: '최고가 대비 청산 하락률', value: config.trailing_stop_pct, type: 'float', step: '0.5', min: '0.5', suffix: '%' },
+                { key: 'TRAILING_STOP_LOOKBACK', label: '호환 참고 기간', value: config.trailing_stop_lookback, type: 'int', step: '1', min: '2', suffix: '일' },
+            ],
+        },
+        {
+            id: 'candidate',
+            title: '후보 선별',
+            description: '거래대금 주도주와 1차 파동 눌림목 조건',
+            fields: [
+                { key: 'TRADE_VALUE_SURGE_RATIO', label: '거래대금 급등 배수', value: config.trade_value_surge_ratio, type: 'float', step: '0.1', min: '1', suffix: '배' },
+                { key: 'FIRST_WAVE_MIN_PCT', label: '1차 파동 최소 상승률', value: config.first_wave_min_pct, type: 'float', step: '0.5', min: '1', suffix: '%' },
+                { key: 'FIRST_WAVE_PULLBACK_MIN_PCT', label: '눌림목 최소 조정률', value: config.first_wave_pullback_min_pct, type: 'float', step: '0.5', min: '0', suffix: '%' },
+                { key: 'FIRST_WAVE_PULLBACK_MAX_PCT', label: '눌림목 최대 조정률', value: config.first_wave_pullback_max_pct, type: 'float', step: '0.5', min: '0', suffix: '%' },
+            ],
+        },
+        {
+            id: 'risk',
+            title: '자금·리스크',
+            description: '신규 주문 규모와 계좌 손실 한도',
+            fields: [
+                { key: 'TOTAL_CAPITAL', label: '운용 기준 자본', value: config.total_capital, type: 'float', step: '100000', min: '0', suffix: '원' },
+                { key: 'MAX_POSITIONS', label: '최대 보유종목', value: config.max_positions, type: 'int', step: '1', min: '1', suffix: '개' },
+                { key: 'MAX_SINGLE_WEIGHT', label: '종목당 최대비중', value: Number(config.max_single_weight || 0) * 100, type: 'float', step: '0.1', min: '0', max: '100', suffix: '%', percent: true },
+                { key: 'CASH_BUFFER', label: '현금 보유비중', value: Number(config.cash_buffer || 0) * 100, type: 'float', step: '0.1', min: '0', max: '100', suffix: '%', percent: true },
+                { key: 'MAX_DAILY_LOSS_PCT', label: '일 손실 제한', value: config.max_daily_loss_pct, type: 'float', step: '0.1', min: '0', suffix: '%' },
+            ],
+        },
     ];
 }
 
+function strategySettingFields(config) {
+    return strategySettingGroups(config).flatMap((group) => group.fields);
+}
+
 function renderStrategySettingsForm(config) {
-    const fields = strategySettingFields(config);
+    const groups = strategySettingGroups(config);
     const readiness = config.technical_strategy_readiness || {};
+    const readinessPct = Math.max(0, Math.min(100, Number(readiness.current_pct || 0)));
+    const readinessRows = Array.isArray(readiness.items) ? readiness.items : [];
+    const completedCount = readinessRows.filter((item) => item.complete).length;
     const readinessItems = (readiness.items || []).map((item) => (
-        `<span>${escapeHtml(item.name)} ${escapeHtml(String(item.current_pct ?? 0))}/${escapeHtml(String(item.target_pct ?? 100))}%</span>`
+        `<div class="strategy-readiness-item ${item.complete ? 'is-complete' : 'is-pending'}">
+            <span aria-hidden="true">${item.complete ? '✓' : '!'}</span>
+            <strong>${escapeHtml(item.name)}</strong>
+            <small>${escapeHtml(String(item.current_pct ?? 0))}%</small>
+        </div>`
     )).join('');
-    const fieldMarkup = fields.map((field) => `
+    const monitor = readiness.condition_monitor || {};
+    const monitorMarkets = monitor.markets || {};
+    const marketOpen = monitor.market_open || {};
+    const monitorMarkup = [
+        ['KR', '한국장'],
+        ['US', '미국장'],
+    ].map(([market, label]) => {
+        const row = monitorMarkets[market] || {};
+        const isOpen = Boolean(marketOpen[market]);
+        const isFresh = Boolean(row.fresh);
+        return `<div class="strategy-monitor-item ${isFresh ? 'is-fresh' : (isOpen ? 'is-waiting' : 'is-closed')}">
+            <span>${escapeHtml(label)}</span>
+            <strong>${isOpen ? '장중' : '장외'} · ${escapeHtml(String(row.symbol_count || 0))}종목</strong>
+            <small>${isFresh ? '최근 조건검색 반영' : (isOpen ? '조건검색 대기' : '장 시작 후 갱신')}</small>
+        </div>`;
+    }).join('');
+    const renderField = (field) => `
         <label class="strategy-setting-item">
             <span class="label">${escapeHtml(field.label)}</span>
             <div class="setting-input-row">
                 <input
                     type="number"
+                    aria-label="${escapeHtml(field.label)}"
                     name="${escapeHtml(field.key)}"
                     value="${escapeHtml(field.value)}"
                     step="${escapeHtml(field.step || '1')}"
@@ -700,24 +756,50 @@ function renderStrategySettingsForm(config) {
                 ${field.suffix ? `<span>${escapeHtml(field.suffix)}</span>` : ''}
             </div>
         </label>
+    `;
+    const groupMarkup = groups.map((group) => `
+        <section class="strategy-setting-group strategy-setting-group-${escapeHtml(group.id)}">
+            <div class="strategy-setting-group-header">
+                <h3>${escapeHtml(group.title)}</h3>
+                <p>${escapeHtml(group.description)}</p>
+            </div>
+            <div class="strategy-settings-grid">
+                ${group.fields.map(renderField).join('')}
+            </div>
+        </section>
     `).join('');
 
     return `
-        <div class="ai-strategy-summary">
-            <div>
-                <span>기술전략 현행화</span>
-                <strong>${escapeHtml(String(readiness.current_pct ?? 0))}%</strong>
-                <small>목표 ${escapeHtml(String(readiness.target_pct ?? 100))}%</small>
-            </div>
+        <div class="strategy-settings-shell">
+            <section class="strategy-readiness-card ${readiness.complete ? 'is-complete' : 'is-pending'}">
+                <div class="strategy-readiness-heading">
+                    <div>
+                        <span class="strategy-readiness-eyebrow">기술전략 적용 상태</span>
+                        <strong>${readiness.complete ? '현행화 완료' : '확인 필요'}</strong>
+                        <small>${completedCount}/${readinessRows.length || 0}개 항목 적용</small>
+                    </div>
+                    <div class="strategy-readiness-score">${escapeHtml(String(readinessPct))}%</div>
+                </div>
+                <div class="strategy-readiness-progress" role="progressbar" aria-label="기술전략 현행화율"
+                     aria-valuemin="0" aria-valuemax="100" aria-valuenow="${escapeHtml(String(readinessPct))}">
+                    <span style="width:${escapeHtml(String(readinessPct))}%"></span>
+                </div>
+                <div class="strategy-monitor-grid">${monitorMarkup}</div>
+                <details class="strategy-readiness-details">
+                    <summary>적용 항목 ${readinessRows.length || 0}개 상세 보기</summary>
+                    <div class="strategy-readiness-list">
+                        ${readinessItems || '<div class="strategy-readiness-item is-pending">현행화 상태를 확인 중입니다.</div>'}
+                    </div>
+                </details>
+            </section>
+            <form id="strategy-settings-form" class="strategy-settings-form">
+                <div class="strategy-setting-groups">${groupMarkup}</div>
+                <div class="strategy-settings-meta">
+                    <span class="time-muted">변경값은 저장 즉시 현재 서버 전략에 반영됩니다.</span>
+                    <button type="submit" id="btn-strategy-save">전략 설정 저장</button>
+                </div>
+            </form>
         </div>
-        <div class="ai-flow-list indicator-rules">${readinessItems || '<span>현행화 상태를 확인 중입니다.</span>'}</div>
-        <form id="strategy-settings-form" class="strategy-settings-form">
-            <div class="strategy-settings-grid">${fieldMarkup}</div>
-            <div class="strategy-settings-meta">
-                <span class="time-muted">저장하면 즉시 현재 서버에 반영됩니다.</span>
-                <button type="submit" id="btn-strategy-save">저장</button>
-            </div>
-        </form>
     `;
 }
 
