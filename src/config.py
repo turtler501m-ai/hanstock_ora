@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     take_profit: float = 30.0
     rsi_buy: int = 30
     rsi_sell: int = 70
+    trailing_stop_activation_pct: float = 10.0
+    trailing_stop_pct: float = 6.0
+    trailing_stop_lookback: int = 20
     
     # Risk Management
     total_capital: float = 10000000.0

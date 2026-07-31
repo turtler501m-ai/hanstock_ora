@@ -113,6 +113,30 @@ class TraderCoreTests(unittest.TestCase):
         self.assertEqual(signal["qty"], 7)
         self.assertEqual(signal["reason"], "stop loss -10.0%")
 
+    def test_generate_signal_trailing_stop_sells_all_after_peak_drawdown(self):
+        daily = [
+            {
+                "stck_clpr": "110",
+                "stck_hgpr": str(high),
+                "acml_vol": "1000",
+            }
+            for high in [110, 112, 115, 120, 125] + [110] * 15
+        ]
+        with (
+            patch("src.strategy.seven_split.config.trailing_stop_activation_pct", 10.0),
+            patch("src.strategy.seven_split.config.trailing_stop_pct", 8.0),
+            patch("src.strategy.seven_split.config.trailing_stop_lookback", 20),
+        ):
+            signal = generate_signal(
+                {"prpr": "110", "hldg_qty": "7", "evlu_pfls_rt": "10"},
+                daily,
+            )
+
+        self.assertEqual(signal["action"], "sell")
+        self.assertEqual(signal["qty"], 7)
+        self.assertEqual(signal["price"], 0)
+        self.assertIn("trailing stop", signal["reason"])
+
     def test_strategy_profile_exposes_composite_indicators(self):
         prices = [float(i) for i in range(1, 140)]
         highs = [p + 1 for p in prices]

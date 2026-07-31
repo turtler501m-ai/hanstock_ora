@@ -7,6 +7,7 @@ from src.mistock.config import config
 from src.mistock import db
 from src.mistock.strategy import NASDAQ_UNIVERSE, fetch_history, normalize_symbol, quote, strategy_profile, symbol_name
 from src.strategy.indicators import calc_bollinger
+from src.strategy.technical_signals import trailing_stop_signal
 from src.utils.exchange_rate import get_usd_krw_rate
 from src.utils.logger import logger
 
@@ -659,10 +660,28 @@ def signals() -> list[dict[str, Any]]:
         hist = fetch_history(holding["symbol"])
         profile = strategy_profile(hist["close"], hist["high"], hist["volume"])
         action = "hold"
-        if str(config.strategy_model or "").lower() == "macd_rsi_momentum" and (
+        reason = ", ".join(profile["reasons"])
+        trailing = trailing_stop_signal(
+            current_price=holding["price"],
+            return_pct=holding["rt"],
+            recent_highs=hist["high"],
+            activation_pct=config.trailing_stop_activation_pct,
+            trail_pct=config.trailing_stop_pct,
+            lookback=config.trailing_stop_lookback,
+        )
+        if trailing["triggered"]:
+            action = "sell"
+            reason = (
+                f"trailing stop peak={trailing['peak_price']:.2f} "
+                f"drawdown={trailing['drawdown_pct']:.1f}%"
+            )
+        elif str(config.strategy_model or "").lower() == "macd_rsi_momentum" and (
             profile.get("macd_bear_cross") or profile["rsi"] < config.indicator_rsi_entry_min
         ):
             action = "sell"
+        elif profile.get("sma_dead_cross") and holding["rt"] > 0:
+            action = "sell"
+            reason = f"SMA20/SMA60 dead cross profit protect {holding['rt']:.1f}%"
         elif profile["rsi"] >= config.rsi_sell or holding["rt"] >= config.take_profit:
             action = "sell"
         elif holding["rt"] <= config.stop_loss_pct:
@@ -677,7 +696,8 @@ def signals() -> list[dict[str, Any]]:
             "rsi": profile["rsi"],
             "rsi2": profile["rsi2"],
             "macd_hist": profile["macd_hist"],
-            "reason": ", ".join(profile["reasons"]),
+            "reason": reason,
+            "trailing_stop": trailing,
         })
     return rows
 

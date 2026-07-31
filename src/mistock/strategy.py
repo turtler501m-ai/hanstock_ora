@@ -7,6 +7,7 @@ import yfinance as yf
 
 from src.mistock.config import config
 from src.strategy.indicators import calc_bollinger, calc_macd, calc_rsi, calc_sma
+from src.strategy.technical_signals import moving_average_cross
 
 def fetch_wikipedia_universe() -> list[str]:
     import pandas as pd
@@ -231,6 +232,7 @@ def _macd_rsi_momentum_profile(
     sma20 = calc_sma(prices, 20)
     sma60 = calc_sma(prices, 60)
     macd = calc_macd(prices)
+    ma_cross = moving_average_cross(prices)
     prev_macd = calc_macd(prices[:-1]) if len(prices) >= 36 else {"hist": 0.0}
     hist = float(macd.get("hist", 0.0) or 0.0)
     prev_hist = float(prev_macd.get("hist", 0.0) or 0.0)
@@ -286,6 +288,12 @@ def _macd_rsi_momentum_profile(
     if len(prices) >= 20 and current > sma20:
         score += 1
         reasons.append("above SMA20")
+    if ma_cross["golden_cross"]:
+        score += 2
+        reasons.append("SMA20/SMA60 golden cross")
+    elif ma_cross["dead_cross"]:
+        score -= 2
+        reasons.append("SMA20/SMA60 dead cross")
 
     # --- 거래량 단독 확인 (hist_turn_up 아닐 때) ---
     if volume_confirmed and not hist_turn_up and vol_avg > 0:
@@ -324,6 +332,8 @@ def _macd_rsi_momentum_profile(
         "macd_hist": hist,
         "macd_bull_cross": bool(macd.get("bull_cross")),
         "macd_bear_cross": bool(macd.get("bear_cross")),
+        "sma_golden_cross": ma_cross["golden_cross"],
+        "sma_dead_cross": ma_cross["dead_cross"],
         "sma20": sma20,
         "sma60": sma60,
         "price": current,
@@ -353,6 +363,7 @@ def strategy_profile(
     sma120 = calc_sma(prices, 120)
     bb_lo, _bb_mid, _bb_hi = calc_bollinger(prices, 20)
     macd = calc_macd(prices)
+    ma_cross = moving_average_cross(prices)
     score = 0
     reasons: list[str] = []
 
@@ -398,6 +409,16 @@ def strategy_profile(
             score += 1
             reasons.append("volume spike")
 
+    if ma_cross["golden_cross"]:
+        score += 2
+        reasons.append("SMA20/SMA60 golden cross")
+    elif sma20 > sma60 > 0:
+        score += 1
+        reasons.append("SMA20>SMA60")
+    elif ma_cross["dead_cross"]:
+        score -= 2
+        reasons.append("SMA20/SMA60 dead cross")
+
     return {
         "score": score,
         "reasons": reasons or ["no signal"],
@@ -406,6 +427,8 @@ def strategy_profile(
         "macd_hist": float(macd.get("hist", 0.0) or 0.0),
         "sma20": sma20,
         "sma60": sma60,
+        "sma_golden_cross": ma_cross["golden_cross"],
+        "sma_dead_cross": ma_cross["dead_cross"],
         "price": current,
         "strategy_model": "default",
     }

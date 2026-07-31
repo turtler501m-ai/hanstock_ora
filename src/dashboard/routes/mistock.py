@@ -33,6 +33,9 @@ MISTOCK_ENV_FIELDS = [
     {"key": "MISTOCK_TAKE_PROFIT", "attr": "take_profit", "type": "float", "default": "25"},
     {"key": "MISTOCK_RSI_BUY", "attr": "rsi_buy", "type": "int", "default": "35"},
     {"key": "MISTOCK_RSI_SELL", "attr": "rsi_sell", "type": "int", "default": "72"},
+    {"key": "MISTOCK_TRAILING_STOP_ACTIVATION_PCT", "attr": "trailing_stop_activation_pct", "type": "float", "default": "10"},
+    {"key": "MISTOCK_TRAILING_STOP_PCT", "attr": "trailing_stop_pct", "type": "float", "default": "7"},
+    {"key": "MISTOCK_TRAILING_STOP_LOOKBACK", "attr": "trailing_stop_lookback", "type": "int", "default": "20"},
     {"key": "MISTOCK_STRATEGY_MODEL", "attr": "strategy_model", "type": "select", "default": "default", "options": ["default", "macd_rsi_momentum"]},
     {"key": "MISTOCK_INDICATOR_MIN_SCORE", "attr": "indicator_min_score", "type": "int", "default": "4"},
     {"key": "MISTOCK_INDICATOR_RSI_ENTRY_MIN", "attr": "indicator_rsi_entry_min", "type": "int", "default": "50"},
@@ -63,6 +66,9 @@ MISTOCK_STRATEGY_ALIAS = {
     "TAKE_PROFIT": "MISTOCK_TAKE_PROFIT",
     "RSI_BUY": "MISTOCK_RSI_BUY",
     "RSI_SELL": "MISTOCK_RSI_SELL",
+    "TRAILING_STOP_ACTIVATION_PCT": "MISTOCK_TRAILING_STOP_ACTIVATION_PCT",
+    "TRAILING_STOP_PCT": "MISTOCK_TRAILING_STOP_PCT",
+    "TRAILING_STOP_LOOKBACK": "MISTOCK_TRAILING_STOP_LOOKBACK",
     "STRATEGY_MODEL": "MISTOCK_STRATEGY_MODEL",
     "INDICATOR_MIN_SCORE": "MISTOCK_INDICATOR_MIN_SCORE",
     "INDICATOR_RSI_ENTRY_MIN": "MISTOCK_INDICATOR_RSI_ENTRY_MIN",
@@ -861,14 +867,19 @@ def mistock_indicator_strategy():
         "rsi_entry_min": mistock_config.indicator_rsi_entry_min,
         "rsi_entry_max": mistock_config.indicator_rsi_entry_max,
         "volume_ratio": mistock_config.indicator_volume_ratio,
+        "trailing_stop_activation_pct": mistock_config.trailing_stop_activation_pct,
+        "trailing_stop_pct": mistock_config.trailing_stop_pct,
+        "trailing_stop_lookback": mistock_config.trailing_stop_lookback,
         "take_profit": mistock_config.take_profit,
         "stop_loss_pct": mistock_config.stop_loss_pct,
         "rules": [
             "MACD bullish cross 또는 MACD histogram 양수",
             "RSI 50 상향 돌파 또는 RSI 50~70 모멘텀 구간",
             "현재가가 SMA60/SMA20 위에 있을수록 가점",
+            "SMA20/SMA60 골든크로스 가점, 데드크로스 감점 및 수익 보호",
             "거래량이 20일 평균보다 크면 신뢰도 가점",
             "RSI 과열은 재진입 조건이 아니면 감점",
+            "설정 수익률 도달 후 최근 고점 대비 하락 시 트레일링 청산",
         ],
     }
 
@@ -882,6 +893,15 @@ def mistock_update_indicator_strategy(payload: dict = Body(...)):
         "MISTOCK_INDICATOR_RSI_ENTRY_MIN": str(payload.get("rsi_entry_min", mistock_config.indicator_rsi_entry_min)),
         "MISTOCK_INDICATOR_RSI_ENTRY_MAX": str(payload.get("rsi_entry_max", mistock_config.indicator_rsi_entry_max)),
         "MISTOCK_INDICATOR_VOLUME_RATIO": str(payload.get("volume_ratio", mistock_config.indicator_volume_ratio)),
+        "MISTOCK_TRAILING_STOP_ACTIVATION_PCT": str(payload.get(
+            "trailing_stop_activation_pct", mistock_config.trailing_stop_activation_pct
+        )),
+        "MISTOCK_TRAILING_STOP_PCT": str(payload.get(
+            "trailing_stop_pct", mistock_config.trailing_stop_pct
+        )),
+        "MISTOCK_TRAILING_STOP_LOOKBACK": str(payload.get(
+            "trailing_stop_lookback", mistock_config.trailing_stop_lookback
+        )),
     }
     updates = {key: _validate_mistock_env_value(key, value) for key, value in values.items()}
     _core._write_env_values(updates, _core._public_value("ENV_PATH", _core.ENV_PATH))

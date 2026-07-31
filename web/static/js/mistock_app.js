@@ -855,11 +855,17 @@ function fillIndicatorStrategyForm(data) {
     const rsiMin = form.querySelector('[name="rsi_entry_min"]');
     const rsiMax = form.querySelector('[name="rsi_entry_max"]');
     const volumeRatio = form.querySelector('[name="volume_ratio"]');
+    const trailingActivation = form.querySelector('[name="trailing_stop_activation_pct"]');
+    const trailingPct = form.querySelector('[name="trailing_stop_pct"]');
+    const trailingLookback = form.querySelector('[name="trailing_stop_lookback"]');
     if (enabled) enabled.value = data.enabled ? 'true' : 'false';
     if (minScore) minScore.value = data.min_score ?? 4;
     if (rsiMin) rsiMin.value = data.rsi_entry_min ?? 50;
     if (rsiMax) rsiMax.value = data.rsi_entry_max ?? 70;
     if (volumeRatio) volumeRatio.value = data.volume_ratio ?? 1.3;
+    if (trailingActivation) trailingActivation.value = data.trailing_stop_activation_pct ?? 10;
+    if (trailingPct) trailingPct.value = data.trailing_stop_pct ?? 7;
+    if (trailingLookback) trailingLookback.value = data.trailing_stop_lookback ?? 20;
 }
 
 function renderIndicatorStrategySummary(data) {
@@ -869,6 +875,10 @@ function renderIndicatorStrategySummary(data) {
     setElementText('indicator-strategy-min-score', `${data.min_score ?? 4}점`);
     setElementText('indicator-strategy-rsi-range', `${data.rsi_entry_min ?? 50}~${data.rsi_entry_max ?? 70}`);
     setElementText('indicator-strategy-volume', `${formatNumber(data.volume_ratio ?? 1.3, 1)}x`);
+    setElementText(
+        'indicator-strategy-trailing',
+        `${formatNumber(data.trailing_stop_activation_pct ?? 10, 1)}% / ${formatNumber(data.trailing_stop_pct ?? 7, 1)}%`
+    );
     const rulesEl = document.getElementById('indicator-strategy-rules');
     if (rulesEl) {
         const rules = Array.isArray(data.rules) ? data.rules : [];
@@ -896,6 +906,9 @@ async function saveIndicatorStrategy() {
         rsi_entry_min: Number(form.querySelector('[name="rsi_entry_min"]')?.value || 50),
         rsi_entry_max: Number(form.querySelector('[name="rsi_entry_max"]')?.value || 70),
         volume_ratio: Number(form.querySelector('[name="volume_ratio"]')?.value || 1.3),
+        trailing_stop_activation_pct: Number(form.querySelector('[name="trailing_stop_activation_pct"]')?.value || 10),
+        trailing_stop_pct: Number(form.querySelector('[name="trailing_stop_pct"]')?.value || 7),
+        trailing_stop_lookback: Number(form.querySelector('[name="trailing_stop_lookback"]')?.value || 20),
     };
     setButtonBusy('btn-indicator-strategy-save', true);
     try {

@@ -12,6 +12,7 @@ from src.strategy.indicators import calc_rsi, calc_sma, calc_macd, calc_bollinge
 from src.strategy.features import build_strategy_features
 from src.strategy.predict import ModelPredictor
 from src.strategy.allocator import PortfolioAllocator
+from src.strategy.technical_signals import moving_average_cross, trailing_stop_signal
 
 WATCHLIST = []
 
@@ -212,6 +213,7 @@ def calc_strategy_profile(prices: list[float], highs: list[float] | None = None,
     sma120 = calc_sma(prices, 120)
     bb_lo, bb_mid, bb_hi = calc_bollinger(prices, 20)
     macd = calc_macd(prices)
+    ma_cross = moving_average_cross(prices)
 
     score = 0.0
     reasons = []
@@ -311,9 +313,15 @@ def calc_strategy_profile(prices: list[float], highs: list[float] | None = None,
                 score += 1.0
                 reasons.append("volume spike")
 
-        if sma20 > sma60 > 0:
+        if ma_cross["golden_cross"]:
+            score += 2.0
+            reasons.append("SMA20/SMA60 golden cross")
+        elif sma20 > sma60 > 0:
             score += 1.0
             reasons.append("SMA20>SMA60")
+        elif ma_cross["dead_cross"]:
+            score -= 2.0
+            reasons.append("SMA20/SMA60 dead cross")
 
     feature_payload = build_strategy_features(prices, highs, volumes, strategy_score=score)
     return {
@@ -332,6 +340,8 @@ def calc_strategy_profile(prices: list[float], highs: list[float] | None = None,
         "macd_hist": macd["hist"],
         "macd_bull_cross": macd["bull_cross"],
         "macd_bear_cross": macd["bear_cross"],
+        "sma_golden_cross": ma_cross["golden_cross"],
+        "sma_dead_cross": ma_cross["dead_cross"],
         "features": feature_payload,
     }
 
@@ -1237,6 +1247,34 @@ def generate_signal(stock: dict, daily_data: list, strategy_model: str = "") -> 
     rounded_rt = round(rt, 1)
     if rounded_rt <= config.stop_loss_pct:
         return {"action": "sell", "qty": qty, "price": 0, "reason": f"stop loss {rounded_rt:.1f}%", "indicators": indicators}
+    trailing = trailing_stop_signal(
+        current_price=current,
+        return_pct=rt,
+        recent_highs=highs,
+        activation_pct=config.trailing_stop_activation_pct,
+        trail_pct=config.trailing_stop_pct,
+        lookback=config.trailing_stop_lookback,
+    )
+    indicators["trailing_stop"] = trailing
+    if trailing["triggered"]:
+        return {
+            "action": "sell",
+            "qty": qty,
+            "price": 0,
+            "reason": (
+                f"trailing stop peak={trailing['peak_price']:.0f} "
+                f"drawdown={trailing['drawdown_pct']:.1f}%"
+            ),
+            "indicators": indicators,
+        }
+    if profile["sma_dead_cross"] and rt > 0:
+        return {
+            "action": "sell",
+            "qty": split_qty,
+            "price": int(current),
+            "reason": f"SMA20/SMA60 dead cross profit protect {rt:.1f}%",
+            "indicators": indicators,
+        }
     if rt >= 200 and rsi >= config.rsi_sell:
         return {"action": "sell", "qty": split_qty, "price": int(current), "reason": f"large profit split sell {rt:.1f}% RSI={rsi}", "indicators": indicators}
     if rt >= config.take_profit and rsi >= config.rsi_sell:

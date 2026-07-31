@@ -313,6 +313,11 @@
                             <strong id="indicator-strategy-volume">-</strong>
                             <small>20일 평균 대비</small>
                         </div>
+                        <div>
+                            <span>트레일링 스톱</span>
+                            <strong id="indicator-strategy-trailing">-</strong>
+                            <small>활성 수익률 / 고점 하락률</small>
+                        </div>
                     </div>
                     <form id="indicator-strategy-form" class="strategy-settings-form">
                         <div class="strategy-settings-grid">
@@ -349,6 +354,27 @@
                                 <div class="setting-input-row">
                                     <input type="number" name="volume_ratio" min="1" max="5" step="0.1" value="1.3">
                                     <span>x</span>
+                                </div>
+                            </label>
+                            <label class="strategy-setting-item">
+                                <span class="label">트레일링 활성 수익률</span>
+                                <div class="setting-input-row">
+                                    <input type="number" name="trailing_stop_activation_pct" min="1" max="100" step="0.5" value="10">
+                                    <span>%</span>
+                                </div>
+                            </label>
+                            <label class="strategy-setting-item">
+                                <span class="label">고점 대비 청산 하락률</span>
+                                <div class="setting-input-row">
+                                    <input type="number" name="trailing_stop_pct" min="0.5" max="30" step="0.5" value="7">
+                                    <span>%</span>
+                                </div>
+                            </label>
+                            <label class="strategy-setting-item">
+                                <span class="label">고점 탐색 기간</span>
+                                <div class="setting-input-row">
+                                    <input type="number" name="trailing_stop_lookback" min="2" max="120" step="1" value="20">
+                                    <span>거래일</span>
                                 </div>
                             </label>
                         </div>
