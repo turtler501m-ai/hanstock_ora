@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 KST = timezone(timedelta(hours=9))
-_REQUIRED_COMPLETION_STAGES = frozenset({"candidates", "signals", "execution_plan"})
+_TERMINAL_COMPLETION_STAGE = "execution_plan"
 _cycle_write_locks_guard = threading.Lock()
 _cycle_write_locks: dict[str, threading.Lock] = {}
 
@@ -57,6 +57,24 @@ def init_analysis_cycle_tables(conn=None) -> None:
             CREATE INDEX IF NOT EXISTS idx_analysis_cycles_strategy_created
             ON analysis_cycles(strategy_id, trading_env, created_at DESC)
             """
+        )
+        # Candidate and signal collection are alternative inputs depending on the
+        # selected strategy.  A completed execution plan is the common terminal
+        # stage, so repair cycles left running by the former all-stages rule.
+        db.execute(
+            """
+            UPDATE analysis_cycles
+            SET status = 'completed'
+            WHERE status = 'running'
+              AND EXISTS (
+                  SELECT 1
+                  FROM analysis_cycle_results
+                  WHERE analysis_cycle_results.cycle_id = analysis_cycles.id
+                    AND analysis_cycle_results.stage = ?
+                    AND analysis_cycle_results.status = 'completed'
+              )
+            """,
+            (_TERMINAL_COMPLETION_STAGE,),
         )
         if owns_connection:
             db.commit()
@@ -176,7 +194,7 @@ def record_analysis_cycle_stage(
             result_statuses = {str(row["stage"]): str(row["status"]) for row in result_rows}
             if current_status == "failed" or any(value == "failed" for value in result_statuses.values()):
                 next_status = "failed"
-            elif all(result_statuses.get(name) == "completed" for name in _REQUIRED_COMPLETION_STAGES):
+            elif result_statuses.get(_TERMINAL_COMPLETION_STAGE) == "completed":
                 next_status = "completed"
             else:
                 next_status = "running"

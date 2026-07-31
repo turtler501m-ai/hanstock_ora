@@ -73,6 +73,21 @@ class AnalysisCycleLifecycleTests(unittest.TestCase):
         still_failed = mark_common_analysis_stage(cycle["id"], "signals", payload={"signals": []})
         self.assertEqual(still_failed["status"], "failed")
 
+    def test_execution_plan_completes_cycle_without_optional_signals_stage(self):
+        cycle = start_common_analysis_cycle("news_ai_v1", "demo")
+        mark_common_analysis_stage(
+            cycle["id"],
+            "candidates",
+            payload={"candidates": []},
+        )
+        completed = mark_common_analysis_stage(
+            cycle["id"],
+            "execution_plan",
+            payload={"plan": []},
+        )
+
+        self.assertEqual(completed["status"], "completed")
+
     def test_account_snapshot_is_captured_once_per_cycle(self):
         cycle = start_common_analysis_cycle("news_ai_v1", "demo")
         captures = []
