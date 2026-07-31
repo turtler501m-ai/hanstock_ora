@@ -89,6 +89,18 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn('id="btn-refresh-holdings"', INDEX_HTML)
         self.assertIn("await renderBalance()", APP_JS)
 
+    def test_holdings_tab_exposes_strategy_value_loss_summary_and_filters(self):
+        self.assertIn('id="table-holding-strategies"', INDEX_HTML)
+        self.assertIn('id="holding-attribution-coverage"', INDEX_HTML)
+        self.assertIn('id="holding-loss-list"', INDEX_HTML)
+        self.assertIn('id="select-holding-strategy-filter"', INDEX_HTML)
+        self.assertIn('id="select-holding-pnl-filter"', INDEX_HTML)
+        self.assertIn("<th>손익 상태</th>", INDEX_HTML)
+        self.assertIn("function renderHoldingStrategySummary(balance)", APP_JS)
+        self.assertIn("balance.strategy_summary || []", APP_JS)
+        self.assertIn("holdingStrategyFilter === 'all'", APP_JS)
+        self.assertIn("holdingPnlFilter === 'all'", APP_JS)
+
     def test_scheduler_checklist_uses_persisted_schedule_registrations(self):
         scheduler_renderer = APP_JS.split(
             "async function renderSchedulerStrategyChecklist", 1

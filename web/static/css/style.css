@@ -1269,6 +1269,238 @@ tbody tr:hover {
     margin-bottom: 1rem;
 }
 
+.holding-page-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1.25rem;
+    margin-bottom: 0.9rem;
+    padding: 0 0.15rem;
+}
+
+.holding-page-heading h2,
+.holding-analysis-grid h2,
+.panel-holdings h2 {
+    margin: 0.18rem 0 0.25rem;
+}
+
+.holding-eyebrow,
+.holding-card-kicker {
+    color: #60a5fa;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+}
+
+.holding-page-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    flex-shrink: 0;
+}
+
+.holding-analysis-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.75fr) minmax(280px, 0.85fr);
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.holding-analysis-grid > .card,
+.panel-holdings {
+    min-width: 0;
+}
+
+.holding-count-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
+    padding: 0.22rem 0.65rem;
+    border: 1px solid rgba(96, 165, 250, 0.28);
+    border-radius: 999px;
+    background: rgba(59, 130, 246, 0.1);
+    color: #93c5fd;
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+#table-holding-strategies th,
+#table-holding-strategies td {
+    white-space: nowrap;
+}
+
+#table-holding-strategies td small {
+    display: block;
+    margin-top: 0.15rem;
+}
+
+.holding-health-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem;
+    margin-top: 0.85rem;
+}
+
+.holding-health-grid > div {
+    min-width: 0;
+    padding: 0.7rem 0.75rem;
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 9px;
+    background: rgba(15, 23, 42, 0.45);
+}
+
+.holding-health-grid span,
+.holding-health-grid strong {
+    display: block;
+}
+
+.holding-health-grid span {
+    color: var(--text-muted);
+    font-size: 0.72rem;
+}
+
+.holding-health-grid strong {
+    margin-top: 0.18rem;
+    color: var(--text-color);
+    font-size: 1.05rem;
+}
+
+.holding-health-grid .is-profit strong {
+    color: var(--success);
+}
+
+.holding-health-grid .is-loss strong {
+    color: var(--danger);
+}
+
+.holding-loss-list {
+    margin-top: 0.8rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.holding-loss-list-title {
+    margin-bottom: 0.35rem;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.holding-loss-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+.holding-loss-item:last-child {
+    border-bottom: 0;
+}
+
+.holding-loss-item > span:last-child {
+    text-align: right;
+}
+
+.holding-loss-item strong,
+.holding-loss-item small {
+    display: block;
+}
+
+.holding-loss-item strong {
+    font-size: 0.78rem;
+}
+
+.holding-loss-item small,
+.holding-loss-empty {
+    color: var(--text-muted);
+    font-size: 0.69rem;
+}
+
+.holding-table-filters {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.55rem;
+}
+
+.holding-table-filters label {
+    display: grid;
+    gap: 0.22rem;
+    min-width: 130px;
+}
+
+.holding-table-filters label > span {
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+
+.holding-table-filters select {
+    min-height: 34px;
+    padding: 0.35rem 1.8rem 0.35rem 0.55rem;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 7px;
+    background: rgba(15, 23, 42, 0.72);
+    color: var(--text-color);
+    font-size: 0.74rem;
+}
+
+.holding-pnl-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 42px;
+    padding: 0.18rem 0.45rem;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 800;
+}
+
+.holding-pnl-badge.is-profit {
+    border-color: rgba(16, 185, 129, 0.25);
+    background: rgba(16, 185, 129, 0.1);
+    color: #6ee7b7;
+}
+
+.holding-pnl-badge.is-loss {
+    border-color: rgba(239, 68, 68, 0.25);
+    background: rgba(239, 68, 68, 0.1);
+    color: #fca5a5;
+}
+
+.holding-pnl-badge.is-flat {
+    border-color: rgba(148, 163, 184, 0.22);
+    background: rgba(148, 163, 184, 0.09);
+    color: #cbd5e1;
+}
+
+.holding-strategy-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    min-width: 140px;
+}
+
+.holding-strategy-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.42rem;
+    border: 1px solid rgba(96, 165, 250, 0.2);
+    border-radius: 6px;
+    background: rgba(59, 130, 246, 0.08);
+    color: #bfdbfe;
+    font-size: 0.68rem;
+}
+
+.holding-strategy-chip small {
+    color: var(--text-muted);
+    font-size: 0.62rem;
+}
+
 #table-holdings thead th .sort-icon {
     color: var(--text-muted);
     font-size: 0.72rem;
@@ -3017,6 +3249,42 @@ tbody tr:hover {
 
     .watchlist-table-filters label {
         justify-content: space-between;
+    }
+}
+
+@media (max-width: 1000px) {
+    .holding-analysis-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    .holding-page-heading,
+    .panel-holdings .split-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .holding-page-actions {
+        width: 100%;
+    }
+
+    .holding-page-actions button {
+        flex: 1;
+    }
+
+    .holdings-account-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .holding-table-filters {
+        align-items: stretch;
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .holding-table-filters label {
+        width: 100%;
     }
 }
 

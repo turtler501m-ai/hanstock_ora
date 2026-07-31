@@ -8,6 +8,144 @@ globals().update({k: v for k, v in _core.__dict__.items() if not k.startswith('_
 router = APIRouter(tags=["account"])
 
 
+def _allocated_integer_amounts(total: int, weights: list[float]) -> list[int]:
+    if not weights:
+        return []
+    allocated = []
+    remaining = int(total)
+    for index, weight in enumerate(weights):
+        if index == len(weights) - 1:
+            amount = remaining
+        else:
+            amount = round(int(total) * max(0.0, float(weight)))
+            remaining -= amount
+        allocated.append(amount)
+    return allocated
+
+
+def _summarize_holding_strategies(parsed: dict) -> dict:
+    """Allocate broker holdings to recorded strategies without exceeding broker quantity."""
+    strategy_totals: dict[str, dict] = {}
+    total_value = 0
+    total_pnl = 0
+    attributed_value = 0
+
+    for holding in parsed.get("holdings", []):
+        broker_qty = max(0.0, float(holding.get("qty") or 0))
+        holding_value = int(holding.get("value") or 0)
+        holding_pnl = int(holding.get("pnl") or 0)
+        total_value += holding_value
+        total_pnl += holding_pnl
+
+        recorded = [
+            {
+                "id": str(item.get("id") or "").strip(),
+                "name": str(item.get("name") or item.get("id") or "").strip(),
+                "qty": max(0.0, float(item.get("qty") or 0)),
+            }
+            for item in holding.get("strategies", [])
+            if str(item.get("id") or "").strip() and float(item.get("qty") or 0) > 0
+        ]
+        recorded_qty = sum(item["qty"] for item in recorded)
+        scale = min(1.0, broker_qty / recorded_qty) if recorded_qty > 0 else 0.0
+        allocations = [
+            {
+                "strategy_id": item["id"],
+                "strategy_name": item["name"],
+                "allocated_qty": item["qty"] * scale,
+            }
+            for item in recorded
+        ]
+        allocated_qty = sum(item["allocated_qty"] for item in allocations)
+        unattributed_qty = max(0.0, broker_qty - allocated_qty)
+        if unattributed_qty > 0 or not allocations:
+            allocations.append({
+                "strategy_id": "unattributed",
+                "strategy_name": "귀속 미확인",
+                "allocated_qty": unattributed_qty if broker_qty > 0 else 0.0,
+            })
+
+        if broker_qty > 0:
+            weights = [item["allocated_qty"] / broker_qty for item in allocations]
+        else:
+            weights = [0.0 for _ in allocations]
+        allocated_values = _allocated_integer_amounts(holding_value, weights)
+        allocated_pnls = _allocated_integer_amounts(holding_pnl, weights)
+
+        for item, value, pnl in zip(allocations, allocated_values, allocated_pnls):
+            item["allocated_qty"] = round(item["allocated_qty"], 4)
+            item["evaluation_amount"] = value
+            item["pnl"] = pnl
+            item["is_loss"] = pnl < 0
+            item["return_rate"] = round(
+                pnl / (value - pnl) * 100,
+                2,
+            ) if value - pnl > 0 else 0.0
+
+            strategy_id = item["strategy_id"]
+            summary = strategy_totals.setdefault(strategy_id, {
+                "strategy_id": strategy_id,
+                "strategy_name": item["strategy_name"],
+                "evaluation_amount": 0,
+                "pnl": 0,
+                "holding_count": 0,
+                "loss_holding_count": 0,
+                "profit_holding_count": 0,
+                "_symbols": set(),
+            })
+            summary["evaluation_amount"] += value
+            summary["pnl"] += pnl
+            symbol = str(holding.get("symbol") or "")
+            if symbol not in summary["_symbols"]:
+                summary["_symbols"].add(symbol)
+                summary["holding_count"] += 1
+                if pnl < 0:
+                    summary["loss_holding_count"] += 1
+                elif pnl > 0:
+                    summary["profit_holding_count"] += 1
+            if strategy_id != "unattributed":
+                attributed_value += value
+
+        holding["strategy_allocations"] = allocations
+        holding["pnl_status"] = (
+            "loss" if holding_pnl < 0 else ("profit" if holding_pnl > 0 else "flat")
+        )
+
+    strategy_summary = []
+    for summary in strategy_totals.values():
+        summary.pop("_symbols", None)
+        cost = summary["evaluation_amount"] - summary["pnl"]
+        summary["return_rate"] = round(
+            summary["pnl"] / cost * 100,
+            2,
+        ) if cost > 0 else 0.0
+        summary["allocation_ratio"] = round(
+            summary["evaluation_amount"] / total_value * 100,
+            2,
+        ) if total_value > 0 else 0.0
+        summary["is_loss"] = summary["pnl"] < 0
+        strategy_summary.append(summary)
+
+    holdings = parsed.get("holdings", [])
+    parsed["strategy_summary"] = sorted(
+        strategy_summary,
+        key=lambda item: (-item["evaluation_amount"], item["strategy_name"]),
+    )
+    parsed["holding_summary"] = {
+        "total_count": len(holdings),
+        "profit_count": sum(1 for item in holdings if item.get("pnl_status") == "profit"),
+        "loss_count": sum(1 for item in holdings if item.get("pnl_status") == "loss"),
+        "flat_count": sum(1 for item in holdings if item.get("pnl_status") == "flat"),
+        "evaluation_amount": total_value,
+        "pnl": total_pnl,
+        "attribution_coverage": round(
+            attributed_value / total_value * 100,
+            2,
+        ) if total_value > 0 else 0.0,
+    }
+    return parsed
+
+
 def _attach_holding_strategies(parsed: dict) -> dict:
     """Attach best-effort strategy ownership reconstructed from successful trades."""
     from src.db.repository import load_ai_strategies
@@ -46,7 +184,7 @@ def _attach_holding_strategies(parsed: dict) -> dict:
         holding["strategies"] = strategies
         holding["strategy_ids"] = [item["id"] for item in strategies]
         holding["strategy_names"] = [item["name"] for item in strategies]
-    return parsed
+    return _summarize_holding_strategies(parsed)
 
 
 def _active_sell_approval_symbols() -> set[str]:
