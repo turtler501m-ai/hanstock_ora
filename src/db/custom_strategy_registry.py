@@ -78,6 +78,16 @@ def sync_custom_rules_to_db(conn) -> dict[str, int]:
                         "weight": 0.0,
                     }
                 )
+                profile_override = getattr(module, "STRATEGY_PROFILE", None)
+                if isinstance(profile_override, dict):
+                    profile = {
+                        **profile,
+                        **profile_override,
+                        "risk": {
+                            **(profile.get("risk") or {}),
+                            **(profile_override.get("risk") or {}),
+                        },
+                    }
                 profile_json = json.dumps(profile, ensure_ascii=False, sort_keys=True)
                 profile_hash = strategy_profile_hash(profile)
                 exists = conn.execute(

@@ -6,6 +6,39 @@ import os
 from statistics import mean
 
 
+STRATEGY_PROFILE = {
+    "strategy_type": "momentum",
+    "risk_level": "aggressive",
+    "provider": "volatility",
+    "model": "volatility_adaptive_momentum_strategy",
+    "ai_weight": 0.0,
+    "min_rule_score_for_ai": 2.0,
+    "market_regime_filter": ["high_volatility"],
+    "focus": [
+        "volatility_expansion",
+        "volume_confirmation",
+        "trend_continuation",
+        "oversold_reversal",
+    ],
+    "avoid": [
+        "extreme_gap_up",
+        "weak_liquidity",
+        "medium_term_breakdown",
+    ],
+    "risk": {
+        "max_ai_weight": 0.0,
+        "max_risk_per_trade_pct": 0.5,
+        "max_total_open_risk_pct": 2.0,
+        "max_sector_exposure_pct": 20.0,
+        "max_liquidity_participation_pct": 0.5,
+        "max_strategy_exposure_pct": 30.0,
+        "max_data_age_seconds": 60,
+        "min_cash_reserve_pct": 20.0,
+        "max_daily_ai_orders": 3,
+    },
+}
+
+
 class VolatilityAdaptiveMomentumStrategy:
     """사용자전략 고변동성 적응형 모멘텀 전략
 

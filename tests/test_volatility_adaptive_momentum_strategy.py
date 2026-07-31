@@ -1,11 +1,16 @@
 import unittest
 
 from src.strategy.custom_rules.volatility_adaptive_momentum_strategy import (
+    STRATEGY_PROFILE,
     VolatilityAdaptiveMomentumStrategy,
 )
 
 
 class VolatilityAdaptiveMomentumStrategyTests(unittest.TestCase):
+    def test_profile_is_explicitly_scoped_to_high_volatility(self):
+        self.assertEqual(STRATEGY_PROFILE["market_regime_filter"], ["high_volatility"])
+        self.assertEqual(STRATEGY_PROFILE["strategy_type"], "momentum")
+
     def test_scores_liquid_high_volatility_trend_with_volume(self):
         strategy = VolatilityAdaptiveMomentumStrategy()
         prices = [10_000 + index * 80 + (200 if index % 2 else -200) for index in range(60)]
