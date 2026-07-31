@@ -557,7 +557,7 @@ class DashboardCoreTests(unittest.TestCase):
             dashboard._get_api = original_get_api
             dashboard._get_balance_data = original_get_balance_data
 
-    def test_balance_hides_holdings_with_active_sell_approvals(self):
+    def test_balance_marks_only_unfinished_sell_approvals_as_pending(self):
         original_db_path = dashboard.trader.config.trade_db_path
         original_required_env_missing = dashboard._required_env_missing
         original_get_api = dashboard._get_api
@@ -597,16 +597,66 @@ class DashboardCoreTests(unittest.TestCase):
 
                 balance = dashboard.get_balance()
 
-                self.assertEqual([holding["symbol"] for holding in balance["holdings"]], ["000660"])
+                self.assertEqual(
+                    [holding["symbol"] for holding in balance["holdings"]],
+                    ["005930", "000660"],
+                )
                 self.assertEqual(balance["pending_sell_symbols"], ["005930"])
+                self.assertTrue(balance["holdings"][0]["sell_pending"])
+                self.assertFalse(balance["holdings"][1]["sell_pending"])
 
                 with dashboard.trader.connect_db() as conn:
                     conn.execute("UPDATE approvals SET status = 'executed' WHERE symbol = '005930'")
 
                 balance = dashboard.get_balance()
 
-                self.assertEqual([holding["symbol"] for holding in balance["holdings"]], ["000660"])
+                self.assertEqual(
+                    [holding["symbol"] for holding in balance["holdings"]],
+                    ["005930", "000660"],
+                )
+                self.assertEqual(balance["pending_sell_symbols"], [])
+                self.assertFalse(balance["holdings"][0]["sell_pending"])
+
+                with dashboard.trader.connect_db() as conn:
+                    approval_id = conn.execute(
+                        "SELECT id FROM approvals WHERE symbol = '005930'"
+                    ).fetchone()[0]
+                    conn.execute(
+                        """
+                        INSERT INTO trades (
+                            ts, symbol, name, action, qty, price, reason, ok, env,
+                            dry_run, order_status, filled_qty, source_approval_id
+                        )
+                        VALUES (?, ?, ?, 'sell', 2, 0, ?, 1, 'demo', 0, 'partial', 1, ?)
+                        """,
+                        (
+                            "2026-07-31 10:00:00",
+                            "005930",
+                            "Samsung",
+                            "test partial sell",
+                            approval_id,
+                        ),
+                    )
+
+                balance = dashboard.get_balance()
+
                 self.assertEqual(balance["pending_sell_symbols"], ["005930"])
+                self.assertTrue(balance["holdings"][0]["sell_pending"])
+
+                with dashboard.trader.connect_db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE trades
+                        SET order_status = 'filled', filled_qty = qty
+                        WHERE source_approval_id = ?
+                        """,
+                        (approval_id,),
+                    )
+
+                balance = dashboard.get_balance()
+
+                self.assertEqual(balance["pending_sell_symbols"], [])
+                self.assertFalse(balance["holdings"][0]["sell_pending"])
         finally:
             dashboard.trader.config.trade_db_path = original_db_path
             dashboard._required_env_missing = original_required_env_missing
@@ -1985,6 +2035,83 @@ class DashboardCoreTests(unittest.TestCase):
             stock_routes._auto_approval_enabled = original_auto_approval
             stock_routes._clear_balance_cache = original_clear_balance_cache
             stock_routes._required_env_missing = original_required_env_missing
+
+    def test_sell_all_holdings_skips_duplicate_active_sell_request(self):
+        import src.dashboard.routes.stock as stock_routes
+
+        original_db_path = dashboard.trader.config.trade_db_path
+        original_get_api = stock_routes._get_api
+        original_get_balance_data = stock_routes._get_balance_data
+        original_auto_approval = stock_routes._auto_approval_enabled
+        original_clear_balance_cache = stock_routes._clear_balance_cache
+        original_required_env_missing = stock_routes._required_env_missing
+
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                stock_routes._get_api = lambda: object()
+                stock_routes._get_balance_data = lambda api, allow_cache=True: {
+                    "output1": [{
+                        "pdno": "005930",
+                        "prdt_name": "Samsung",
+                        "hldg_qty": "2",
+                        "ord_psbl_qty": "2",
+                        "prpr": "70000",
+                    }],
+                    "output2": [{}],
+                }
+                stock_routes._auto_approval_enabled = lambda: False
+                stock_routes._clear_balance_cache = lambda: None
+                stock_routes._required_env_missing = lambda: []
+
+                first = stock_routes.sell_all_holdings({})
+                second = stock_routes.sell_all_holdings({})
+
+                self.assertEqual(first["created_count"], 1)
+                self.assertEqual(second["created_count"], 0)
+                self.assertEqual(second["skipped_count"], 1)
+                self.assertEqual(
+                    second["skipped"][0]["reason"],
+                    "active sell request already exists",
+                )
+                approvals = stock_routes.get_approvals()["approvals"]
+                self.assertEqual(len(approvals), 1)
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+            stock_routes._get_api = original_get_api
+            stock_routes._get_balance_data = original_get_balance_data
+            stock_routes._auto_approval_enabled = original_auto_approval
+            stock_routes._clear_balance_cache = original_clear_balance_cache
+            stock_routes._required_env_missing = original_required_env_missing
+
+    def test_holding_sell_rejects_duplicate_active_request(self):
+        import src.dashboard.routes.stock as stock_routes
+
+        original_db_path = dashboard.trader.config.trade_db_path
+        original_auto_approval = stock_routes._auto_approval_enabled
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                stock_routes._auto_approval_enabled = lambda: False
+                payload = {
+                    "symbol": "005930",
+                    "name": "Samsung",
+                    "action": "sell",
+                    "qty": 2,
+                    "price": 0,
+                    "reason": "dashboard sell current holding",
+                    "source": "dashboard_holding_sell",
+                }
+
+                first = stock_routes.create_approval(payload)
+
+                self.assertEqual(first["status"], "pending")
+                with self.assertRaises(Exception) as ctx:
+                    stock_routes.create_approval(payload)
+                self.assertEqual(getattr(ctx.exception, "status_code", None), 409)
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+            stock_routes._auto_approval_enabled = original_auto_approval
 
     def test_watchlist_inherits_shared_symbols_for_non_isolated_strategy(self):
         with patch("src.db.repository.load_watchlist_data", return_value={

@@ -23,6 +23,7 @@ _approval_batch_lock = threading.Lock()
 _approval_batch_state: dict = {}
 _trade_sync_lock = threading.Lock()
 _trade_sync_thread: threading.Thread | None = None
+_holding_sell_request_lock = threading.Lock()
 
 class NewStrategyPayload(BaseModel):
     name: str = Field(..., min_length=1)
@@ -1918,9 +1919,19 @@ def cancel_blocking_sell_and_retry_approval(approval_id: int):
 
 @router.post("/api/approvals")
 def create_approval(payload: dict = Body(...)):
-    approval_id = _create_approval_row(payload)
+    source = str(payload.get("source") or "")
+    if source == "dashboard_holding_sell":
+        symbol = str(payload.get("symbol") or "").strip()
+        with _holding_sell_request_lock:
+            if symbol and symbol in _active_dashboard_sell_symbols():
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"active sell request already exists for {symbol}",
+                )
+            approval_id = _create_approval_row(payload)
+    else:
+        approval_id = _create_approval_row(payload)
     if _auto_approval_enabled():
-        source = str(payload.get("source") or "")
         if source == "dashboard_holding_sell":
             _run_auto_approval_batch_async([approval_id])
             return {
@@ -1992,6 +2003,42 @@ def _run_auto_approval_batch_async(approval_ids: list[int]) -> None:
     thread.start()
 
 
+def _active_dashboard_sell_symbols() -> set[str]:
+    trader.init_db()
+    _init_approval_db()
+    with trader.connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT DISTINCT a.symbol
+            FROM approvals a
+            WHERE a.action = 'sell'
+              AND a.source IN ('dashboard_holding_sell', 'dashboard_sell_all')
+              AND COALESCE(a.symbol, '') <> ''
+              AND (
+                    a.status IN ('pending', 'executing')
+                    OR (
+                        a.status = 'executed'
+                        AND EXISTS (
+                            SELECT 1
+                            FROM trades t
+                            WHERE t.source_approval_id = a.id
+                              AND t.id = (
+                                  SELECT MAX(t2.id)
+                                  FROM trades t2
+                                  WHERE t2.source_approval_id = a.id
+                              )
+                              AND t.action = 'sell'
+                              AND t.order_status IN ('open', 'partial')
+                              AND t.qty > COALESCE(t.filled_qty, 0)
+                        )
+                    )
+              )
+            """
+        ).fetchall()
+    return {str(row["symbol"]) for row in rows}
+
+
 
 
 @router.post("/api/holdings/sell-all")
@@ -2008,33 +2055,46 @@ def sell_all_holdings(payload: dict | None = Body(default=None)):
 
     orders = []
     skipped = []
-    for holding in parsed.get("holdings", []):
-        symbol = str(holding.get("symbol", "")).strip()
-        holding_qty = _to_int(holding.get("qty"))
-        sellable_qty = _to_int(holding.get("sellable_qty", holding_qty))
-        qty = min(holding_qty, sellable_qty) if holding_qty > 0 else 0
-        if not symbol:
-            continue
-        if qty <= 0:
-            skipped.append({
+    with _holding_sell_request_lock:
+        active_symbols = _active_dashboard_sell_symbols()
+        for holding in parsed.get("holdings", []):
+            symbol = str(holding.get("symbol", "")).strip()
+            holding_qty = _to_int(holding.get("qty"))
+            sellable_qty = _to_int(holding.get("sellable_qty", holding_qty))
+            qty = min(holding_qty, sellable_qty) if holding_qty > 0 else 0
+            if not symbol:
+                continue
+            if symbol in active_symbols:
+                skipped.append({
+                    "symbol": symbol,
+                    "name": str(holding.get("name") or symbol),
+                    "qty": holding_qty,
+                    "sellable_qty": sellable_qty,
+                    "reason": "active sell request already exists",
+                })
+                continue
+            if qty <= 0:
+                skipped.append({
+                    "symbol": symbol,
+                    "name": str(holding.get("name") or symbol),
+                    "qty": holding_qty,
+                    "sellable_qty": sellable_qty,
+                    "reason": "sellable quantity is zero",
+                })
+                continue
+            orders.append({
                 "symbol": symbol,
                 "name": str(holding.get("name") or symbol),
-                "qty": holding_qty,
-                "sellable_qty": sellable_qty,
-                "reason": "sellable quantity is zero",
+                "action": "sell",
+                "qty": qty,
+                "price": 0,
+                "reason": "dashboard sell all holdings",
+                "source": "dashboard_sell_all",
             })
-            continue
-        orders.append({
-            "symbol": symbol,
-            "name": str(holding.get("name") or symbol),
-            "action": "sell",
-            "qty": qty,
-            "price": 0,
-            "reason": "dashboard sell all holdings",
-            "source": "dashboard_sell_all",
-        })
 
-    if not orders:
+        approval_ids = [_create_approval_row(order) for order in orders]
+
+    if not approval_ids:
         return {
             "status": "empty",
             "created_count": 0,
@@ -2043,7 +2103,6 @@ def sell_all_holdings(payload: dict | None = Body(default=None)):
             "orders": [],
         }
 
-    approval_ids = [_create_approval_row(order) for order in orders]
     created = [{"id": approval_id, "status": "pending"} for approval_id in approval_ids]
     auto_approval_queued = False
     if _auto_approval_enabled():

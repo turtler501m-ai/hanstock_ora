@@ -50,17 +50,36 @@ def _attach_holding_strategies(parsed: dict) -> dict:
 
 
 def _active_sell_approval_symbols() -> set[str]:
+    trader.init_db()
     _init_approval_db()
     with trader.connect_db() as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT DISTINCT symbol
-            FROM approvals
-            WHERE action = 'sell'
-              AND status IN ('pending', 'executing', 'executed')
-              AND source IN ('dashboard_holding_sell', 'dashboard_sell_all')
-              AND COALESCE(symbol, '') <> ''
+            SELECT DISTINCT a.symbol
+            FROM approvals a
+            WHERE a.action = 'sell'
+              AND a.source IN ('dashboard_holding_sell', 'dashboard_sell_all')
+              AND COALESCE(a.symbol, '') <> ''
+              AND (
+                    a.status IN ('pending', 'executing')
+                    OR (
+                        a.status = 'executed'
+                        AND EXISTS (
+                            SELECT 1
+                            FROM trades t
+                            WHERE t.source_approval_id = a.id
+                              AND t.id = (
+                                  SELECT MAX(t2.id)
+                                  FROM trades t2
+                                  WHERE t2.source_approval_id = a.id
+                              )
+                              AND t.action = 'sell'
+                              AND t.order_status IN ('open', 'partial')
+                              AND t.qty > COALESCE(t.filled_qty, 0)
+                        )
+                    )
+              )
             """
         ).fetchall()
     return {str(row["symbol"]) for row in rows}
@@ -68,13 +87,9 @@ def _active_sell_approval_symbols() -> set[str]:
 
 def _hide_active_sell_approval_holdings(parsed: dict) -> dict:
     active_symbols = _active_sell_approval_symbols()
-    if not active_symbols:
-        return parsed
     holdings = parsed.get("holdings") or []
-    parsed["holdings"] = [
-        holding for holding in holdings
-        if str(holding.get("symbol") or "") not in active_symbols
-    ]
+    for holding in holdings:
+        holding["sell_pending"] = str(holding.get("symbol") or "") in active_symbols
     parsed["pending_sell_symbols"] = sorted(active_symbols)
     return parsed
 

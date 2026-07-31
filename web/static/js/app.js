@@ -1062,10 +1062,14 @@ function renderHoldingRows() {
         const rtClass = Number(holding.rt || 0) >= 0 ? 'text-success' : 'text-danger';
         const qty = Number(holding.qty || 0);
         const sellableQty = Number(holding.sellable_qty ?? holding.qty ?? 0);
-        const canSell = sellableQty > 0;
-        const qtyText = sellableQty !== qty
+        const sellPending = Boolean(holding.sell_pending);
+        const canSell = sellableQty > 0 && !sellPending;
+        let qtyText = sellableQty !== qty
             ? `${qty.toLocaleString()} <small class="time-muted">매도가능 ${sellableQty.toLocaleString()}</small>`
             : qty.toLocaleString();
+        if (sellPending) {
+            qtyText += ' <small class="time-muted">매도 진행중</small>';
+        }
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td>
@@ -1090,8 +1094,8 @@ function renderHoldingRows() {
                     data-reason="dashboard sell current holding"
                     data-source="dashboard_holding_sell"
                     ${canSell ? '' : 'disabled'}
-                    title="${canSell ? '매도가능수량 전량 매도' : '매도가능수량 없음'}"
-                    style="padding:3px 8px;font-size:0.75rem;">전량</button>
+                    title="${sellPending ? '기존 매도 주문 처리 중' : (canSell ? '매도가능수량 전량 매도' : '매도가능수량 없음')}"
+                    style="padding:3px 8px;font-size:0.75rem;">${sellPending ? '진행중' : '전량'}</button>
             </td>
         `;
         tbodyHoldings.appendChild(tr);
@@ -1204,10 +1208,14 @@ async function renderBalance() {
             const rtClass = holding.rt >= 0 ? 'text-success' : 'text-danger';
             const qty = Number(holding.qty || 0);
             const sellableQty = Number(holding.sellable_qty ?? holding.qty ?? 0);
-            const canSell = sellableQty > 0;
-            const qtyText = sellableQty !== qty
+            const sellPending = Boolean(holding.sell_pending);
+            const canSell = sellableQty > 0 && !sellPending;
+            let qtyText = sellableQty !== qty
                 ? `${qty.toLocaleString()} <small class="time-muted">매도가능 ${sellableQty.toLocaleString()}</small>`
                 : qty.toLocaleString();
+            if (sellPending) {
+                qtyText += ' <small class="time-muted">매도 진행중</small>';
+            }
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>
@@ -1229,8 +1237,8 @@ async function renderBalance() {
                         data-reason="dashboard sell current holding"
                         data-source="dashboard_holding_sell"
                         ${canSell ? '' : 'disabled'}
-                        title="${canSell ? '매도가능수량 전량 매도' : '매도가능수량 없음'}"
-                        style="padding:3px 8px;font-size:0.75rem;">전량</button>
+                        title="${sellPending ? '기존 매도 주문 처리 중' : (canSell ? '매도가능수량 전량 매도' : '매도가능수량 없음')}"
+                        style="padding:3px 8px;font-size:0.75rem;">${sellPending ? '진행중' : '전량'}</button>
                 </td>
             `;
             tbodyHoldings.appendChild(tr);
@@ -2362,30 +2370,6 @@ function isHoldingSellPayload(payload) {
         && (payload.source === 'dashboard_holding_sell' || payload.source === 'mistock_holding_sell');
 }
 
-function removeQueuedHoldingRow(button, payload) {
-    if (!isHoldingSellPayload(payload)) {
-        return;
-    }
-    holdingsCache = holdingsCache.filter((holding) => String(holding.symbol) !== String(payload.symbol));
-    const row = button.closest('tr');
-    if (row) {
-        row.remove();
-    }
-    const tbody = document.querySelector('#table-holdings tbody');
-    if (tbody && !tbody.querySelector('tr')) {
-        setTableMessage('#table-holdings tbody', 8, 'Sell request is now tracked in the orders tab');
-    }
-}
-
-function removeSellableHoldingRows() {
-    holdingsCache = holdingsCache.filter((holding) => {
-        const qty = Number(holding.qty || 0);
-        const sellableQty = Number(holding.sellable_qty ?? holding.qty ?? 0);
-        return !(qty > 0 && sellableQty > 0);
-    });
-    renderHoldingRows();
-}
-
 function showOrdersTab() {
     const tabEl = document.querySelector('[data-dashboard-tab="orders"]');
     if (tabEl) {
@@ -2422,8 +2406,7 @@ async function createApprovalFromButton(button) {
     button.disabled = true;
     try {
         const result = await postJson('/api/approvals', payload);
-        removeQueuedHoldingRow(button, payload);
-        await renderApprovals();
+        await Promise.all([renderApprovals(), renderBalance()]);
         if (isHoldingSellPayload(payload)) {
             showOrdersTab();
             scheduleOrderProgressRefresh();
@@ -2468,10 +2451,9 @@ async function sellAllHoldings() {
             `전량 매도 요청 ${result.created_count || 0}건을 등록했습니다. ${details}. ${fillNote}`,
             (result.failed_count || 0) === 0
         );
-        removeSellableHoldingRows();
         showOrdersTab();
         scheduleOrderProgressRefresh();
-        await Promise.all([renderApprovals(), renderTrades()]);
+        await Promise.all([renderApprovals(), renderTrades(), renderBalance()]);
     } catch (err) {
         setStatus(`전량 매도 요청 실패: ${err.message}`);
     } finally {
