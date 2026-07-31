@@ -233,9 +233,15 @@ class OperationalSnapshotProvider:
             _parse_time(item["data_as_of"], "instrument data_as_of")
             for item in instruments.values()
         )
+        # ``now`` was captured before provider I/O. Quotes are stamped while
+        # that I/O runs, so the snapshot evaluation boundary must be captured
+        # after all constituent data has been collected.
+        evaluated_at = _aware(self.clock(), "market snapshot clock")
         return {
-            "snapshot_id": f"operational:{market}:{strategy_id}:{now.isoformat()}",
-            "evaluated_at": now.isoformat(),
+            "snapshot_id": (
+                f"operational:{market}:{strategy_id}:{evaluated_at.isoformat()}"
+            ),
+            "evaluated_at": evaluated_at.isoformat(),
             "data_as_of": data_as_of.isoformat(),
             "regime": regime,
             "candidates": tuple(dict(row) for row in candidates),

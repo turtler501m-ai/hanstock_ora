@@ -102,7 +102,11 @@ class OperationalContextTest(unittest.TestCase):
 
     def test_quote_fetched_after_snapshot_clock_is_not_false_stale(self):
         quote_time = self.now + timedelta(milliseconds=10)
-        clock_values = iter((self.now, self.now + timedelta(milliseconds=20)))
+        clock_values = iter((
+            self.now,
+            self.now + timedelta(milliseconds=20),
+            self.now + timedelta(milliseconds=30),
+        ))
         provider = OperationalSnapshotProvider(
             kr_broker=_KR(),
             market_data=_Market(quote_time),
@@ -114,6 +118,10 @@ class OperationalContextTest(unittest.TestCase):
         result = provider.snapshot("KR", "s1")
 
         self.assertEqual(quote_time.isoformat(), result.market["instruments"]["AAA"]["data_as_of"])
+        self.assertGreaterEqual(
+            datetime.fromisoformat(result.market["evaluated_at"]),
+            datetime.fromisoformat(result.market["data_as_of"]),
+        )
 
     def test_invalid_candidate_price_does_not_block_valid_candidates(self):
         repo = _Repo(self.now)
