@@ -3302,3 +3302,114 @@ th,
     -webkit-user-select: text !important;
     user-select: text !important;
 }
+.ai-strategy-editor-layout {
+    display: grid;
+    grid-template-columns: minmax(520px, 1fr) minmax(420px, 0.9fr);
+    gap: 1rem;
+    align-items: start;
+    margin-top: 1rem;
+}
+
+.ai-strategy-list-column tbody tr {
+    cursor: pointer;
+}
+
+.ai-strategy-list-column tbody tr.is-selected {
+    background: rgba(59, 130, 246, 0.14);
+    box-shadow: inset 3px 0 #3b82f6;
+}
+
+.ai-strategy-detail-panel {
+    margin: 0;
+    position: sticky;
+    top: 1rem;
+}
+
+.ai-strategy-detail-form,
+.ai-strategy-detail-form label {
+    display: grid;
+    gap: 0.45rem;
+}
+
+.ai-strategy-detail-form {
+    gap: 0.9rem;
+}
+
+.ai-strategy-detail-form label > span,
+.strategy-profile-advanced .section-help {
+    color: rgba(255, 255, 255, 0.64);
+    font-size: 0.78rem;
+}
+
+.ai-strategy-detail-form input,
+.ai-strategy-detail-form select,
+.ai-strategy-detail-form textarea {
+    width: 100%;
+    box-sizing: border-box;
+    color: #f8fafc;
+    background: rgba(15, 23, 42, 0.86);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 7px;
+    padding: 0.62rem 0.72rem;
+    font: inherit;
+}
+
+.ai-strategy-form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+}
+
+.ai-strategy-detail-form .check-field {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.ai-strategy-detail-form .check-field input {
+    width: auto;
+}
+
+.strategy-profile-advanced {
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 7px;
+    padding: 0.75rem;
+}
+
+.strategy-profile-advanced summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.strategy-profile-advanced textarea {
+    margin-top: 0.6rem;
+    font-family: "JetBrains Mono", Consolas, monospace;
+    font-size: 0.75rem;
+}
+
+.ai-strategy-detail-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+
+#btn-toggle-advanced-strategy,
+.panel-add-ai-strategy {
+    display: none !important;
+}
+
+@media (max-width: 1100px) {
+    .ai-strategy-editor-layout {
+        grid-template-columns: 1fr;
+    }
+    .ai-strategy-detail-panel {
+        position: static;
+    }
+}
+
+@media (max-width: 680px) {
+    .ai-strategy-form-grid {
+        grid-template-columns: 1fr;
+    }
+}

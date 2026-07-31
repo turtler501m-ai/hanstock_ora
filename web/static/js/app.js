@@ -1970,6 +1970,172 @@ async function renderAiStrategies() {
     }
 }
 
+async function patchStrategyJson(id, payload) {
+    const response = await fetch(`/api/ai-strategies/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || `전략 저장 실패: ${response.status}`);
+    return data;
+}
+
+function strategyProfileValue(strategy, key, fallback = '') {
+    const profile = strategy?.profile || {};
+    if (Object.prototype.hasOwnProperty.call(profile, key)) return profile[key];
+    return fallback;
+}
+
+function strategyRiskValue(strategy, key, fallback = '') {
+    const risk = strategy?.profile?.risk || {};
+    return Object.prototype.hasOwnProperty.call(risk, key) ? risk[key] : fallback;
+}
+
+function fillStrategyDetail(strategy) {
+    const form = document.getElementById('form-edit-ai-strategy');
+    if (!form || !strategy) return;
+    const profile = structuredClone(strategy.profile || {});
+    const setValue = (name, value) => {
+        const field = form.elements.namedItem(name);
+        if (field) field.value = value == null ? '' : value;
+    };
+    setValue('strategy_id', strategy.id);
+    setValue('name', strategy.name || strategyDisplayName(strategy));
+    setValue('description', strategy.description || '');
+    setValue('model', strategy.model || 'none');
+    setValue('ai_weight', strategyProfileValue(strategy, 'ai_weight', strategy.weight || 0));
+    setValue('strategy_type', strategyProfileValue(strategy, 'strategy_type', 'custom'));
+    setValue('risk_level', strategyProfileValue(strategy, 'risk_level', 'balanced'));
+    setValue('min_rule_score_for_ai', strategyProfileValue(strategy, 'min_rule_score_for_ai', 2));
+    setValue('min_ai_confidence', strategyProfileValue(strategy, 'min_ai_confidence', 0.6));
+    setValue('max_risk_per_trade_pct', strategyRiskValue(strategy, 'max_risk_per_trade_pct', 0.5));
+    setValue('max_strategy_exposure_pct', strategyRiskValue(strategy, 'max_strategy_exposure_pct', 30));
+    setValue('min_cash_reserve_pct', strategyRiskValue(strategy, 'min_cash_reserve_pct', 20));
+    setValue('max_daily_ai_orders', strategyRiskValue(strategy, 'max_daily_ai_orders', 3));
+    setValue('market_regime_filter', (strategyProfileValue(strategy, 'market_regime_filter', []) || []).join(', '));
+    setValue('profile_json', JSON.stringify(profile, null, 2));
+    form.elements.namedItem('allow_candidate_promotion').checked =
+        Boolean(strategyProfileValue(strategy, 'allow_candidate_promotion', false));
+    form.elements.namedItem('selected').checked = Boolean(strategy.selected);
+    setElementText('ai-strategy-detail-title', strategyDisplayName(strategy));
+    setElementText('ai-strategy-detail-help', strategy.description || '전략의 진입 기준과 위험 한도를 수정합니다.');
+    setElementText('ai-strategy-detail-version', `v${strategy.strategy_version || 1}`);
+}
+
+function bindStrategyDetailForm() {
+    const form = document.getElementById('form-edit-ai-strategy');
+    if (!form || form.dataset.bound === 'true') return;
+    form.dataset.bound = 'true';
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const id = form.elements.namedItem('strategy_id').value;
+        const submit = form.querySelector('button[type="submit"]');
+        setButtonBusy(submit, true);
+        try {
+            let profile;
+            try {
+                profile = JSON.parse(form.elements.namedItem('profile_json').value || '{}');
+            } catch (_error) {
+                throw new Error('전체 세부 프로필 JSON 형식을 확인해 주세요.');
+            }
+            profile.ai_weight = Number(form.elements.namedItem('ai_weight').value || 0);
+            profile.strategy_type = form.elements.namedItem('strategy_type').value;
+            profile.risk_level = form.elements.namedItem('risk_level').value;
+            profile.min_rule_score_for_ai = Number(form.elements.namedItem('min_rule_score_for_ai').value || 0);
+            profile.min_ai_confidence = Number(form.elements.namedItem('min_ai_confidence').value || 0);
+            profile.allow_candidate_promotion = form.elements.namedItem('allow_candidate_promotion').checked;
+            profile.market_regime_filter = form.elements.namedItem('market_regime_filter').value
+                .split(',').map((value) => value.trim()).filter(Boolean);
+            profile.risk = profile.risk || {};
+            ['max_risk_per_trade_pct', 'max_strategy_exposure_pct', 'min_cash_reserve_pct', 'max_daily_ai_orders']
+                .forEach((key) => {
+                    profile.risk[key] = Number(form.elements.namedItem(key).value || 0);
+                });
+            await patchStrategyJson(id, {
+                name: form.elements.namedItem('name').value.trim(),
+                description: form.elements.namedItem('description').value.trim(),
+                model: form.elements.namedItem('model').value,
+                weight: profile.ai_weight,
+                profile,
+            });
+            await postJson(`/api/ai-strategies/${encodeURIComponent(id)}/select`, {
+                selected: form.elements.namedItem('selected').checked,
+            });
+            window.aiStrategyEditorSelectedId = id;
+            await Promise.all([renderAiStrategies(), syncStrategiesToDropdown(), renderStrategyContext()]);
+            setStatus('전략 상세 기준을 저장했습니다.', true);
+        } catch (error) {
+            setStatus(`전략 저장 실패: ${error.message}`);
+        } finally {
+            setButtonBusy(submit, false);
+        }
+    });
+}
+
+async function renderAiStrategies() {
+    const tbody = document.querySelector('#table-ai-strategies tbody');
+    if (!tbody) return;
+    try {
+        const data = await fetchJson('/api/ai-strategies');
+        const strategies = data.strategies || [];
+        window.aiStrategyEditorStrategies = strategies;
+        const selectedId = window.aiStrategyEditorSelectedId ||
+            activeStrategyAuditId ||
+            strategies.find((strategy) => strategy.selected)?.id ||
+            strategies[0]?.id;
+        window.aiStrategyEditorSelectedId = selectedId;
+
+        const head = document.querySelector('#table-ai-strategies thead tr');
+        if (head) head.innerHTML = '<th>전략</th><th>상태</th><th>유형</th><th>위험도</th><th>사용</th>';
+        tbody.innerHTML = '';
+        if (!strategies.length) {
+            setTableMessage('#table-ai-strategies tbody', 5, '등록된 전략이 없습니다.');
+            return;
+        }
+        strategies.forEach((strategy) => {
+            const profile = strategy.profile || {};
+            const tr = document.createElement('tr');
+            tr.dataset.id = strategy.id;
+            tr.classList.toggle('is-selected', strategy.id === selectedId);
+            tr.innerHTML = `
+                <td><div class="symbol-name">${escapeHtml(strategyDisplayName(strategy))}</div>
+                    <div class="symbol-code">${escapeHtml(strategy.id)} · v${escapeHtml(strategy.strategy_version || 1)}</div></td>
+                <td>${pill(strategy.status_label || strategyStatusLabel(strategy.status), strategyStatusKind(strategy.status))}</td>
+                <td>${escapeHtml(profile.strategy_type || 'custom')}</td>
+                <td>${escapeHtml(profile.risk_level || 'balanced')}</td>
+                <td>${pill(strategy.selected ? '사용 중' : '대기', strategy.selected ? 'buy' : 'hold')}</td>`;
+            tr.addEventListener('click', () => {
+                window.aiStrategyEditorSelectedId = strategy.id;
+                tbody.querySelectorAll('tr').forEach((row) => row.classList.toggle('is-selected', row === tr));
+                fillStrategyDetail(strategy);
+            });
+            tbody.appendChild(tr);
+        });
+
+        const active = strategies.filter((strategy) => strategy.selected);
+        const usable = strategies.filter((strategy) =>
+            !['retired', 'suspended', 'review_required'].includes(String(strategy.status || '')));
+        const contextLabels = document.querySelectorAll('#strategy-context-summary > div > span');
+        if (contextLabels.length >= 3) {
+            contextLabels[0].textContent = '현재 사용';
+            contextLabels[1].textContent = '실행 가능';
+            contextLabels[2].textContent = '검증 상태';
+        }
+        setElementText('strategy-context-name', `${active.length}개 사용 중`);
+        setElementText('strategy-context-detail', active.map(strategyDisplayName).join(', ') || '선택된 전략 없음');
+        setElementText('strategy-context-status', `${usable.length}개 실행 가능`);
+        setElementText('strategy-context-version', `전체 ${strategies.length}개 전략`);
+        setElementText('strategy-context-safety', active.some((strategy) => strategy.approval_gate?.ok) ? '검증 완료' : '검증 확인 필요');
+        setElementText('strategy-context-approval', '전략을 클릭해 기준과 위험 한도를 확인하세요');
+
+        fillStrategyDetail(strategies.find((strategy) => strategy.id === selectedId) || strategies[0]);
+        bindStrategyDetailForm();
+    } catch (error) {
+        setTableMessage('#table-ai-strategies tbody', 5, error.message);
+    }
+}
+
 function renderWatchlistSummary(data) {
     const summary = data.summary || {};
     const policy = data.policy || {};

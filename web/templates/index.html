@@ -11,7 +11,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=34">
+    <link rel="stylesheet" href="/static/css/style.css?v=35">
 </head>
 
 <body>
@@ -1094,7 +1094,8 @@
                             </button>
                         </div>
                     </div>
-                    <div class="table-responsive">
+                    <div class="ai-strategy-editor-layout">
+                    <div class="table-responsive ai-strategy-list-column">
                         <table id="table-ai-strategies" style="width: 100%; border-collapse: collapse;">
                             <thead>
                                 <tr>
@@ -1111,7 +1112,45 @@
                             </tbody>
                         </table>
                     </div>
-                    <div class="panel-sub" id="strategy-audit-panel" style="margin-top: 1.5rem;">
+                    <aside class="panel-sub ai-strategy-detail-panel" id="ai-strategy-detail-panel">
+                        <div class="panel-header split-header">
+                            <div>
+                                <h3 id="ai-strategy-detail-title">전략 상세 기준</h3>
+                                <p class="section-help" id="ai-strategy-detail-help">전략을 클릭하면 모든 판단 기준을 확인하고 수정할 수 있습니다.</p>
+                            </div>
+                            <span id="ai-strategy-detail-version" class="status-badge">-</span>
+                        </div>
+                        <form id="form-edit-ai-strategy" class="ai-strategy-detail-form">
+                            <input type="hidden" name="strategy_id">
+                            <label><span>전략 이름</span><input name="name" required></label>
+                            <label><span>설명</span><textarea name="description" rows="3"></textarea></label>
+                            <div class="ai-strategy-form-grid">
+                                <label><span>모델</span><select name="model"><option value="none">규칙 기반</option><option value="gpt-5-mini">GPT-5 mini</option><option value="gpt-4o">GPT-4o</option></select></label>
+                                <label><span>AI 반영 비율</span><input name="ai_weight" type="number" min="0" max="1" step="0.05"></label>
+                                <label><span>전략 유형</span><select name="strategy_type"><option value="conservative">안정형</option><option value="balanced">균형형</option><option value="momentum">모멘텀</option><option value="aggressive">공격형</option><option value="custom">사용자 정의</option></select></label>
+                                <label><span>위험 수준</span><select name="risk_level"><option value="conservative">낮음</option><option value="balanced">보통</option><option value="aggressive">높음</option></select></label>
+                                <label><span>최소 규칙 점수</span><input name="min_rule_score_for_ai" type="number" min="0" max="5" step="0.1"></label>
+                                <label><span>최소 AI 신뢰도</span><input name="min_ai_confidence" type="number" min="0" max="1" step="0.05"></label>
+                                <label><span>종목당 위험 한도(%)</span><input name="max_risk_per_trade_pct" type="number" min="0.01" max="100" step="0.1"></label>
+                                <label><span>전략 총 노출 한도(%)</span><input name="max_strategy_exposure_pct" type="number" min="0.1" max="100" step="0.5"></label>
+                                <label><span>현금 보유 하한(%)</span><input name="min_cash_reserve_pct" type="number" min="0" max="99" step="1"></label>
+                                <label><span>일일 최대 주문</span><input name="max_daily_ai_orders" type="number" min="1" max="100" step="1"></label>
+                            </div>
+                            <label class="check-field"><input name="allow_candidate_promotion" type="checkbox"><span>AI 점수로 규칙 미달 후보 승격 허용</span></label>
+                            <label><span>허용 시장 국면 (쉼표 구분)</span><input name="market_regime_filter" placeholder="bull, neutral, high_volatility"></label>
+                            <details class="strategy-profile-advanced">
+                                <summary>전체 세부 프로필 JSON</summary>
+                                <p class="section-help">화면에 없는 focus, avoid, 데이터 신선도 등 모든 기준을 직접 편집할 수 있습니다.</p>
+                                <textarea name="profile_json" rows="14" spellcheck="false"></textarea>
+                            </details>
+                            <div class="ai-strategy-detail-actions">
+                                <label class="check-field"><input name="selected" type="checkbox"><span>현재 매매에 사용</span></label>
+                                <button type="submit" class="button-primary">변경사항 저장</button>
+                            </div>
+                        </form>
+                    </aside>
+                    </div>
+                    <div class="panel-sub" id="strategy-audit-panel" style="margin-top: 1.5rem;" hidden>
                         <div class="panel-header split-header">
                             <div>
                                 <h3>전략 운영 감사</h3>
