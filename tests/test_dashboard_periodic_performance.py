@@ -8,9 +8,16 @@ from src.dashboard import (
     _period_bucket,
     trader,
 )
+from src.dashboard.core import _INDEX_SYMBOL_ALIASES
 
 
 class DashboardPeriodicPerformanceTests(unittest.TestCase):
+    def test_market_indices_never_fall_back_to_etf_prices(self):
+        self.assertNotIn("069500", _INDEX_SYMBOL_ALIASES["KOSPI"])
+        self.assertNotIn("229200", _INDEX_SYMBOL_ALIASES["KOSDAQ"])
+        self.assertEqual(_INDEX_SYMBOL_ALIASES["KOSPI"][0], "^KS11")
+        self.assertEqual(_INDEX_SYMBOL_ALIASES["KOSDAQ"][0], "^KQ11")
+
     def setUp(self) -> None:
         self.original_dry_run = trader.DRY_RUN
         self.original_trading_env = trader.TRADING_ENV

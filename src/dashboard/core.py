@@ -3197,6 +3197,10 @@ def _strategy_validation(strategy_stats: dict[str, dict]) -> list[dict]:
 
 
 _INDEX_ROWS_CACHE: tuple[float, dict[str, list[dict]]] = (0.0, {})
+_INDEX_SYMBOL_ALIASES = {
+    "KOSPI": ("^KS11", "KOSPI", "0001"),
+    "KOSDAQ": ("^KQ11", "KOSDAQ", "1001"),
+}
 
 
 def _load_index_rows() -> dict[str, list[dict]]:
@@ -3205,17 +3209,13 @@ def _load_index_rows() -> dict[str, list[dict]]:
     cached_at, cached_rows = _INDEX_ROWS_CACHE
     if time.monotonic() - cached_at < 300:
         return cached_rows
-    aliases = {
-        "KOSPI": ("^KS11", "KOSPI", "0001", "069500"),
-        "KOSDAQ": ("^KQ11", "KOSDAQ", "1001", "229200"),
-    }
     series: dict[str, list[dict]] = {}
     try:
         from src.db.repository import connect_db
 
         with connect_db() as conn:
             conn.row_factory = sqlite3.Row
-            for name, symbols in aliases.items():
+            for name, symbols in _INDEX_SYMBOL_ALIASES.items():
                 for symbol in symbols:
                     rows = conn.execute(
                         "SELECT date, close FROM daily_charts WHERE symbol=? AND close>0 "
@@ -3231,7 +3231,7 @@ def _load_index_rows() -> dict[str, list[dict]]:
     except Exception:
         pass
 
-    missing = [name for name in aliases if name not in series]
+    missing = [name for name in _INDEX_SYMBOL_ALIASES if name not in series]
     if missing:
         try:
             from src.online_access import require_online_access
@@ -3239,7 +3239,7 @@ def _load_index_rows() -> dict[str, list[dict]]:
 
             require_online_access("성과 탭 시장지수 조회")
             for name in missing:
-                ticker = aliases[name][0]
+                ticker = _INDEX_SYMBOL_ALIASES[name][0]
                 data = yf.download(
                     ticker, period="6mo", interval="1d", auto_adjust=False,
                     progress=False, threads=False, timeout=5,
