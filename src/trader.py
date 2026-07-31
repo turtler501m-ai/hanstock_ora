@@ -898,6 +898,16 @@ def build_runtime_plan(
             active_strategy_id = "seven_split"
 
     stocks = balance_data.get("output1", [])
+    from src.strategy.position_tracker import clear_missing_positions
+
+    clear_missing_positions(
+        "KR",
+        {
+            str(stock.get("pdno") or "")
+            for stock in stocks
+            if _holding_qty(stock, "hldg_qty") > 0 and stock.get("pdno")
+        },
+    )
     summary = (balance_data.get("output2") or [{}])[0]
     cash = int(summary.get("prvs_rcdl_excc_amt", 0) or 0)
     if cash == 0:

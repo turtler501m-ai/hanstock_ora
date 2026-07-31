@@ -318,6 +318,11 @@
                             <strong id="indicator-strategy-trailing">-</strong>
                             <small>활성 수익률 / 고점 하락률</small>
                         </div>
+                        <div>
+                            <span>거래대금·눌림목</span>
+                            <strong id="indicator-strategy-pullback">-</strong>
+                            <small>급등 배수 / 파동·조정 범위</small>
+                        </div>
                     </div>
                     <form id="indicator-strategy-form" class="strategy-settings-form">
                         <div class="strategy-settings-grid">
@@ -375,6 +380,34 @@
                                 <div class="setting-input-row">
                                     <input type="number" name="trailing_stop_lookback" min="2" max="120" step="1" value="20">
                                     <span>거래일</span>
+                                </div>
+                            </label>
+                            <label class="strategy-setting-item">
+                                <span class="label">거래대금 급등 배수</span>
+                                <div class="setting-input-row">
+                                    <input type="number" name="trade_value_surge_ratio" min="1" max="10" step="0.1" value="1.5">
+                                    <span>x</span>
+                                </div>
+                            </label>
+                            <label class="strategy-setting-item">
+                                <span class="label">1차 파동 최소 상승률</span>
+                                <div class="setting-input-row">
+                                    <input type="number" name="first_wave_min_pct" min="1" max="100" step="0.5" value="12">
+                                    <span>%</span>
+                                </div>
+                            </label>
+                            <label class="strategy-setting-item">
+                                <span class="label">눌림목 최소 조정률</span>
+                                <div class="setting-input-row">
+                                    <input type="number" name="first_wave_pullback_min_pct" min="0" max="50" step="0.5" value="3">
+                                    <span>%</span>
+                                </div>
+                            </label>
+                            <label class="strategy-setting-item">
+                                <span class="label">눌림목 최대 조정률</span>
+                                <div class="setting-input-row">
+                                    <input type="number" name="first_wave_pullback_max_pct" min="0" max="50" step="0.5" value="12">
+                                    <span>%</span>
                                 </div>
                             </label>
                         </div>

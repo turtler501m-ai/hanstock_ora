@@ -523,6 +523,33 @@ class MistockDashboardTests(unittest.TestCase):
         self.assertEqual(written["MISTOCK_MAX_POSITIONS"], "3")
         self.assertEqual(written["MISTOCK_MAX_SINGLE_WEIGHT"], "0.4")
 
+    def test_mistock_update_env_applies_technical_strategy_aliases(self):
+        names = (
+            "trade_value_surge_ratio",
+            "first_wave_min_pct",
+            "first_wave_pullback_min_pct",
+            "first_wave_pullback_max_pct",
+        )
+        originals = {name: getattr(mistock_config, name) for name in names}
+        try:
+            with patch.dict("os.environ", {}, clear=False), \
+                    patch("src.dashboard.routes.mistock._core._write_env_values") as write_env:
+                result = mistock.mistock_update_env({"values": {
+                    "TRADE_VALUE_SURGE_RATIO": "1.9",
+                    "FIRST_WAVE_MIN_PCT": "15",
+                    "FIRST_WAVE_PULLBACK_MIN_PCT": "4",
+                    "FIRST_WAVE_PULLBACK_MAX_PCT": "11",
+                }})
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(mistock_config.trade_value_surge_ratio, 1.9)
+            self.assertEqual(mistock_config.first_wave_pullback_max_pct, 11.0)
+            written = write_env.call_args.args[0]
+            self.assertEqual(written["MISTOCK_FIRST_WAVE_MIN_PCT"], "15")
+        finally:
+            for name, value in originals.items():
+                setattr(mistock_config, name, value)
+
     def test_mistock_env_numeric_values_accept_thousands_separators(self):
         self.assertEqual(mistock._validate_mistock_env_value("MISTOCK_TOTAL_CAPITAL", "100,000,000"), "100000000")
         self.assertEqual(mistock._validate_mistock_env_value("USDKRW_FALLBACK_RATE", "1,516.78"), "1516.78")

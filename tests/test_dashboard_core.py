@@ -455,6 +455,40 @@ class DashboardCoreTests(unittest.TestCase):
             dashboard.trader.config.account_initial_capital = original_account_initial_capital
             dashboard.trader.config.max_single_weight = original_config_max_single_weight
 
+    def test_env_update_applies_technical_strategy_thresholds_without_restart(self):
+        original_env_path = dashboard.ENV_PATH
+        names = (
+            "trailing_stop_activation_pct",
+            "trailing_stop_pct",
+            "trailing_stop_lookback",
+            "trade_value_surge_ratio",
+            "first_wave_min_pct",
+            "first_wave_pullback_min_pct",
+            "first_wave_pullback_max_pct",
+        )
+        originals = {name: getattr(dashboard.trader.config, name) for name in names}
+        try:
+            path = MemoryTextPath("")
+            dashboard.ENV_PATH = path
+            result = dashboard.update_env_settings({"values": {
+                "TRAILING_STOP_ACTIVATION_PCT": "11",
+                "TRAILING_STOP_PCT": "6.5",
+                "TRAILING_STOP_LOOKBACK": "25",
+                "TRADE_VALUE_SURGE_RATIO": "1.8",
+                "FIRST_WAVE_MIN_PCT": "14",
+                "FIRST_WAVE_PULLBACK_MIN_PCT": "4",
+                "FIRST_WAVE_PULLBACK_MAX_PCT": "10",
+            }})
+
+            self.assertFalse(result["requires_restart"])
+            self.assertEqual(dashboard.trader.config.trade_value_surge_ratio, 1.8)
+            self.assertEqual(dashboard.trader.config.first_wave_min_pct, 14.0)
+            self.assertIn("FIRST_WAVE_PULLBACK_MAX_PCT=10", path.content)
+        finally:
+            dashboard.ENV_PATH = original_env_path
+            for name, value in originals.items():
+                setattr(dashboard.trader.config, name, value)
+
     def test_env_update_saves_openai_strategy_settings(self):
         original_env_path = dashboard.ENV_PATH
         original_ai_enabled = dashboard.trader.config.ai_strategy_enabled

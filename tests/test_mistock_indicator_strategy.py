@@ -80,6 +80,43 @@ class MistockIndicatorStrategyTests(unittest.TestCase):
         self.assertEqual(result, {"close": [], "high": [], "volume": []})
         self.assertEqual(download.call_args.args[0], "^KS11")
 
+    def test_signals_uses_persistent_peak_for_trailing_stop(self):
+        holding = {
+            "symbol": "AAPL",
+            "name": "Apple",
+            "qty": 2,
+            "price": 110,
+            "avg_price": 100,
+            "rt": 10,
+        }
+        profile = {
+            "score": 2,
+            "reasons": [],
+            "rsi": 55,
+            "rsi2": 50,
+            "macd_hist": 0.1,
+            "sma_dead_cross": False,
+        }
+        with (
+            patch("src.mistock.trader.get_balance", return_value={"holdings": [holding]}),
+            patch(
+                "src.mistock.trader.fetch_history",
+                return_value={"close": [100] * 80, "high": [100] * 80, "volume": [1000] * 80},
+            ),
+            patch("src.mistock.trader.strategy_profile", return_value=profile),
+            patch("src.mistock.trader.clear_missing_positions"),
+            patch(
+                "src.mistock.trader.update_position_peak",
+                return_value={"peak_price": 125},
+            ),
+            patch.object(config, "trailing_stop_activation_pct", 10),
+            patch.object(config, "trailing_stop_pct", 8),
+        ):
+            rows = trader.signals()
+
+        self.assertEqual(rows[0]["action"], "sell")
+        self.assertIn("trailing stop", rows[0]["reason"])
+
 
 class RsiDivergenceTests(unittest.TestCase):
     def test_calc_rsi_series_length(self):

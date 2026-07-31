@@ -80,3 +80,80 @@ def trailing_stop_signal(
         and current <= stop_price
     )
     return result
+
+
+def trade_value_surge(
+    prices: list[float],
+    volumes: list[float],
+    *,
+    window: int = 20,
+    minimum_ratio: float = 1.5,
+) -> dict:
+    """Measure latest traded value against the preceding window average."""
+    size = min(len(prices), len(volumes))
+    if size < window + 1:
+        return {"matched": False, "ratio": 0.0, "current": 0.0, "average": 0.0}
+    values = [
+        max(0.0, float(prices[index] or 0)) * max(0.0, float(volumes[index] or 0))
+        for index in range(size)
+    ]
+    average = sum(values[-(window + 1):-1]) / window
+    current = values[-1]
+    ratio = current / average if average > 0 else 0.0
+    return {
+        "matched": ratio >= max(1.0, float(minimum_ratio or 1.0)),
+        "ratio": round(ratio, 3),
+        "current": round(current, 2),
+        "average": round(average, 2),
+    }
+
+
+def first_wave_pullback(
+    prices: list[float],
+    volumes: list[float],
+    *,
+    lookback: int = 40,
+    minimum_wave_pct: float = 12.0,
+    minimum_pullback_pct: float = 3.0,
+    maximum_pullback_pct: float = 12.0,
+) -> dict:
+    """Detect a first impulse, controlled pullback, volume contraction and rebound."""
+    if len(prices) < lookback + 1:
+        return {"matched": False, "wave_pct": 0.0, "pullback_pct": 0.0, "volume_contraction": 0.0}
+    window_prices = [float(value or 0) for value in prices[-(lookback + 1):]]
+    if any(value <= 0 for value in window_prices):
+        return {"matched": False, "wave_pct": 0.0, "pullback_pct": 0.0, "volume_contraction": 0.0}
+
+    # Reserve the last two bars for pullback/rebound confirmation.
+    peak_index = max(range(5, len(window_prices) - 2), key=window_prices.__getitem__)
+    base = min(window_prices[:peak_index])
+    peak = window_prices[peak_index]
+    current = window_prices[-1]
+    previous = window_prices[-2]
+    wave_pct = (peak / base - 1) * 100 if base > 0 else 0.0
+    pullback_pct = (1 - current / peak) * 100 if peak > 0 else 0.0
+
+    volume_contraction = 0.0
+    if len(volumes) >= lookback + 1:
+        window_volumes = [max(0.0, float(value or 0)) for value in volumes[-(lookback + 1):]]
+        impulse_start = max(0, peak_index - 5)
+        impulse = window_volumes[impulse_start:peak_index + 1]
+        pullback = window_volumes[peak_index + 1:]
+        impulse_average = sum(impulse) / len(impulse) if impulse else 0.0
+        pullback_average = sum(pullback) / len(pullback) if pullback else 0.0
+        volume_contraction = pullback_average / impulse_average if impulse_average > 0 else 0.0
+
+    matched = (
+        wave_pct >= minimum_wave_pct
+        and minimum_pullback_pct <= pullback_pct <= maximum_pullback_pct
+        and current > previous
+        and 0 < volume_contraction <= 0.8
+    )
+    return {
+        "matched": matched,
+        "wave_pct": round(wave_pct, 2),
+        "pullback_pct": round(pullback_pct, 2),
+        "volume_contraction": round(volume_contraction, 3),
+        "base_price": round(base, 4),
+        "peak_price": round(peak, 4),
+    }

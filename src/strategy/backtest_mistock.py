@@ -135,6 +135,28 @@ def run_mistock_backtest(strategy_profile: dict, days: int = 250) -> dict:
         and profit_factor >= 1.05
     )
     
+    from src.strategy.technical_backtest import run_technical_walk_forward
+    from src.mistock.strategy import strategy_profile as mistock_profile
+
+    walk_forward = {}
+    for symbol in symbols[:10]:
+        if symbol not in data.columns.get_level_values(0):
+            continue
+        frame = data[symbol]
+        closes = frame["Close"].dropna().tolist()
+        highs = frame["High"].dropna().tolist()
+        volumes = frame["Volume"].dropna().tolist()
+        walk_forward[symbol] = run_technical_walk_forward(
+            closes,
+            highs,
+            volumes,
+            profile_builder=lambda p, h, v: mistock_profile(p, h, v),
+            min_score=float(strategy_profile.get("min_score", 4)),
+            stop_loss_pct=abs(float(strategy_profile.get("stop_loss_pct", 12))),
+            trailing_activation_pct=float(strategy_profile.get("trailing_stop_activation_pct", 10)),
+            trailing_stop_pct=float(strategy_profile.get("trailing_stop_pct", 7)),
+        )
+
     return {
         "success": True,
         "ok": True,
@@ -161,5 +183,6 @@ def run_mistock_backtest(strategy_profile: dict, days: int = 250) -> dict:
         },
         "equity_curve": equity_curve,
         "dates": [d.strftime("%Y-%m-%d") for d in backtest_dates],
+        "technical_walk_forward": walk_forward,
         "message": "Real US stock backtest completed using watchlist prices",
     }

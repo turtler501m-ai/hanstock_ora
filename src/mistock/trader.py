@@ -8,6 +8,7 @@ from src.mistock import db
 from src.mistock.strategy import NASDAQ_UNIVERSE, fetch_history, normalize_symbol, quote, strategy_profile, symbol_name
 from src.strategy.indicators import calc_bollinger
 from src.strategy.technical_signals import trailing_stop_signal
+from src.strategy.position_tracker import clear_missing_positions, update_position_peak
 from src.utils.exchange_rate import get_usd_krw_rate
 from src.utils.logger import logger
 
@@ -656,15 +657,23 @@ def annotate_candidates_with_order_plan(candidates: list[dict[str, Any]], cash: 
 def signals() -> list[dict[str, Any]]:
     balance = get_balance()
     rows = []
+    clear_missing_positions("US", {holding["symbol"] for holding in balance["holdings"]})
     for holding in balance["holdings"]:
         hist = fetch_history(holding["symbol"])
         profile = strategy_profile(hist["close"], hist["high"], hist["volume"])
         action = "hold"
         reason = ", ".join(profile["reasons"])
+        peak_state = update_position_peak(
+            "US",
+            holding["symbol"],
+            current_price=holding["price"],
+            entry_price=holding.get("avg_price") or 0,
+            quantity=holding["qty"],
+        )
         trailing = trailing_stop_signal(
             current_price=holding["price"],
             return_pct=holding["rt"],
-            recent_highs=hist["high"],
+            recent_highs=[peak_state.get("peak_price", holding["price"])],
             activation_pct=config.trailing_stop_activation_pct,
             trail_pct=config.trailing_stop_pct,
             lookback=config.trailing_stop_lookback,

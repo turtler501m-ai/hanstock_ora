@@ -49,4 +49,13 @@ else
     echo "[update] autonomy service is not installed (safe default)"
 fi
 
+echo "[update] syncing condition monitor service"
+sudo install -m 0644 \
+    "$ROOT_DIR/scripts/vm/hanstock-condition-monitor.service" \
+    /etc/systemd/system/hanstock-condition-monitor.service
+sudo systemctl daemon-reload
+sudo systemctl enable hanstock-condition-monitor.service
+sudo systemctl restart hanstock-condition-monitor.service
+systemctl status hanstock-condition-monitor.service --no-pager
+
 echo "[update] done"

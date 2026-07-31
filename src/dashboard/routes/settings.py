@@ -98,6 +98,13 @@ ENV_FIELD_TEXT = {
     "TAKE_PROFIT": {"label": "익절 기준 %"},
     "RSI_BUY": {"label": "RSI 매수 기준"},
     "RSI_SELL": {"label": "RSI 매도 기준"},
+    "TRAILING_STOP_ACTIVATION_PCT": {"label": "트레일링 활성 수익률 %"},
+    "TRAILING_STOP_PCT": {"label": "고점 대비 청산 하락률 %"},
+    "TRAILING_STOP_LOOKBACK": {"label": "트레일링 참고 기간"},
+    "TRADE_VALUE_SURGE_RATIO": {"label": "거래대금 급등 배수", "hint": "당일 거래대금이 직전 20일 평균의 몇 배 이상일 때 가점할지 설정합니다."},
+    "FIRST_WAVE_MIN_PCT": {"label": "1차 파동 최소 상승률 %"},
+    "FIRST_WAVE_PULLBACK_MIN_PCT": {"label": "눌림목 최소 조정률 %"},
+    "FIRST_WAVE_PULLBACK_MAX_PCT": {"label": "눌림목 최대 조정률 %"},
     "TOTAL_CAPITAL": {"label": "총 운용 자금"},
     "ACCOUNT_INITIAL_CAPITAL": {
         "label": "계좌 초기자산",
@@ -147,6 +154,13 @@ def _current_env_field_value(key: str, raw_values: dict[str, str]) -> str:
         "TAKE_PROFIT": getattr(trader.config, "take_profit", trader.TAKE_PROFIT),
         "RSI_BUY": getattr(trader.config, "rsi_buy", trader.RSI_BUY),
         "RSI_SELL": getattr(trader.config, "rsi_sell", trader.RSI_SELL),
+        "TRAILING_STOP_ACTIVATION_PCT": getattr(trader.config, "trailing_stop_activation_pct", 10),
+        "TRAILING_STOP_PCT": getattr(trader.config, "trailing_stop_pct", 6),
+        "TRAILING_STOP_LOOKBACK": getattr(trader.config, "trailing_stop_lookback", 20),
+        "TRADE_VALUE_SURGE_RATIO": getattr(trader.config, "trade_value_surge_ratio", 1.5),
+        "FIRST_WAVE_MIN_PCT": getattr(trader.config, "first_wave_min_pct", 12),
+        "FIRST_WAVE_PULLBACK_MIN_PCT": getattr(trader.config, "first_wave_pullback_min_pct", 3),
+        "FIRST_WAVE_PULLBACK_MAX_PCT": getattr(trader.config, "first_wave_pullback_max_pct", 12),
         "TOTAL_CAPITAL": getattr(trader.config, "total_capital", trader.TOTAL_CAPITAL),
         "ACCOUNT_INITIAL_CAPITAL": getattr(trader.config, "account_initial_capital", 0),
         "MAX_POSITIONS": getattr(trader.config, "max_positions", trader.MAX_POSITIONS),
@@ -186,6 +200,8 @@ def _current_env_field_value(key: str, raw_values: dict[str, str]) -> str:
 
 @router.get("/api/config")
 def get_config():
+    from src.strategy.technical_readiness import build_technical_strategy_readiness
+
     return {
         "trading_env": trader.TRADING_ENV,
         "dry_run": trader.DRY_RUN,
@@ -200,6 +216,13 @@ def get_config():
         "take_profit": trader.TAKE_PROFIT,
         "rsi_buy": trader.RSI_BUY,
         "rsi_sell": trader.RSI_SELL,
+        "trailing_stop_activation_pct": trader.config.trailing_stop_activation_pct,
+        "trailing_stop_pct": trader.config.trailing_stop_pct,
+        "trailing_stop_lookback": trader.config.trailing_stop_lookback,
+        "trade_value_surge_ratio": trader.config.trade_value_surge_ratio,
+        "first_wave_min_pct": trader.config.first_wave_min_pct,
+        "first_wave_pullback_min_pct": trader.config.first_wave_pullback_min_pct,
+        "first_wave_pullback_max_pct": trader.config.first_wave_pullback_max_pct,
         "total_capital": trader.TOTAL_CAPITAL,
         "account_initial_capital": getattr(trader.config, "account_initial_capital", 0),
         "max_positions": trader.MAX_POSITIONS,
@@ -217,7 +240,15 @@ def get_config():
             "FinRL-X inspired weight-centric allocation",
         ],
         "ai_analysis": _ai_analysis_config(),
+        "technical_strategy_readiness": build_technical_strategy_readiness(),
     }
+
+
+@router.get("/api/technical-strategy/readiness")
+def technical_strategy_readiness():
+    from src.strategy.technical_readiness import build_technical_strategy_readiness
+
+    return build_technical_strategy_readiness()
 
 
 

@@ -36,6 +36,10 @@ MISTOCK_ENV_FIELDS = [
     {"key": "MISTOCK_TRAILING_STOP_ACTIVATION_PCT", "attr": "trailing_stop_activation_pct", "type": "float", "default": "10"},
     {"key": "MISTOCK_TRAILING_STOP_PCT", "attr": "trailing_stop_pct", "type": "float", "default": "7"},
     {"key": "MISTOCK_TRAILING_STOP_LOOKBACK", "attr": "trailing_stop_lookback", "type": "int", "default": "20"},
+    {"key": "MISTOCK_TRADE_VALUE_SURGE_RATIO", "attr": "trade_value_surge_ratio", "type": "float", "default": "1.5"},
+    {"key": "MISTOCK_FIRST_WAVE_MIN_PCT", "attr": "first_wave_min_pct", "type": "float", "default": "12"},
+    {"key": "MISTOCK_FIRST_WAVE_PULLBACK_MIN_PCT", "attr": "first_wave_pullback_min_pct", "type": "float", "default": "3"},
+    {"key": "MISTOCK_FIRST_WAVE_PULLBACK_MAX_PCT", "attr": "first_wave_pullback_max_pct", "type": "float", "default": "12"},
     {"key": "MISTOCK_STRATEGY_MODEL", "attr": "strategy_model", "type": "select", "default": "default", "options": ["default", "macd_rsi_momentum"]},
     {"key": "MISTOCK_INDICATOR_MIN_SCORE", "attr": "indicator_min_score", "type": "int", "default": "4"},
     {"key": "MISTOCK_INDICATOR_RSI_ENTRY_MIN", "attr": "indicator_rsi_entry_min", "type": "int", "default": "50"},
@@ -69,6 +73,10 @@ MISTOCK_STRATEGY_ALIAS = {
     "TRAILING_STOP_ACTIVATION_PCT": "MISTOCK_TRAILING_STOP_ACTIVATION_PCT",
     "TRAILING_STOP_PCT": "MISTOCK_TRAILING_STOP_PCT",
     "TRAILING_STOP_LOOKBACK": "MISTOCK_TRAILING_STOP_LOOKBACK",
+    "TRADE_VALUE_SURGE_RATIO": "MISTOCK_TRADE_VALUE_SURGE_RATIO",
+    "FIRST_WAVE_MIN_PCT": "MISTOCK_FIRST_WAVE_MIN_PCT",
+    "FIRST_WAVE_PULLBACK_MIN_PCT": "MISTOCK_FIRST_WAVE_PULLBACK_MIN_PCT",
+    "FIRST_WAVE_PULLBACK_MAX_PCT": "MISTOCK_FIRST_WAVE_PULLBACK_MAX_PCT",
     "STRATEGY_MODEL": "MISTOCK_STRATEGY_MODEL",
     "INDICATOR_MIN_SCORE": "MISTOCK_INDICATOR_MIN_SCORE",
     "INDICATOR_RSI_ENTRY_MIN": "MISTOCK_INDICATOR_RSI_ENTRY_MIN",
@@ -216,6 +224,8 @@ from src.utils.exchange_rate import get_usd_krw_rate
 
 @router.get("/api/mistock/config")
 def mistock_config_api():
+    from src.strategy.technical_readiness import build_technical_strategy_readiness
+
     flags = mistock_trader.runtime_flags()
     watchlist = [item["symbol"] for item in mistock_trader.get_watchlist()]
     from src.config import config as main_config
@@ -234,6 +244,13 @@ def mistock_config_api():
         "take_profit": mistock_config.take_profit,
         "rsi_buy": mistock_config.rsi_buy,
         "rsi_sell": mistock_config.rsi_sell,
+        "trailing_stop_activation_pct": mistock_config.trailing_stop_activation_pct,
+        "trailing_stop_pct": mistock_config.trailing_stop_pct,
+        "trailing_stop_lookback": mistock_config.trailing_stop_lookback,
+        "trade_value_surge_ratio": mistock_config.trade_value_surge_ratio,
+        "first_wave_min_pct": mistock_config.first_wave_min_pct,
+        "first_wave_pullback_min_pct": mistock_config.first_wave_pullback_min_pct,
+        "first_wave_pullback_max_pct": mistock_config.first_wave_pullback_max_pct,
         "strategy_model": mistock_config.strategy_model,
         "indicator_strategy": {
             "model": mistock_config.strategy_model,
@@ -242,6 +259,10 @@ def mistock_config_api():
             "rsi_entry_min": mistock_config.indicator_rsi_entry_min,
             "rsi_entry_max": mistock_config.indicator_rsi_entry_max,
             "volume_ratio": mistock_config.indicator_volume_ratio,
+            "trade_value_surge_ratio": mistock_config.trade_value_surge_ratio,
+            "first_wave_min_pct": mistock_config.first_wave_min_pct,
+            "first_wave_pullback_min_pct": mistock_config.first_wave_pullback_min_pct,
+            "first_wave_pullback_max_pct": mistock_config.first_wave_pullback_max_pct,
             "strategy_id": "macd_rsi_momentum",
             "strategy_name": "MACD+RSI 모멘텀",
         },
@@ -265,6 +286,7 @@ def mistock_config_api():
             "20-day breakout with volume",
         ],
         "ai_analysis": _mistock_ai_analysis(),
+        "technical_strategy_readiness": build_technical_strategy_readiness(),
     }
 
 
@@ -870,6 +892,10 @@ def mistock_indicator_strategy():
         "trailing_stop_activation_pct": mistock_config.trailing_stop_activation_pct,
         "trailing_stop_pct": mistock_config.trailing_stop_pct,
         "trailing_stop_lookback": mistock_config.trailing_stop_lookback,
+        "trade_value_surge_ratio": mistock_config.trade_value_surge_ratio,
+        "first_wave_min_pct": mistock_config.first_wave_min_pct,
+        "first_wave_pullback_min_pct": mistock_config.first_wave_pullback_min_pct,
+        "first_wave_pullback_max_pct": mistock_config.first_wave_pullback_max_pct,
         "take_profit": mistock_config.take_profit,
         "stop_loss_pct": mistock_config.stop_loss_pct,
         "rules": [
@@ -878,6 +904,8 @@ def mistock_indicator_strategy():
             "현재가가 SMA60/SMA20 위에 있을수록 가점",
             "SMA20/SMA60 골든크로스 가점, 데드크로스 감점 및 수익 보호",
             "거래량이 20일 평균보다 크면 신뢰도 가점",
+            "거래대금이 20일 평균의 설정 배수 이상이면 가점",
+            "1차 상승 파동 후 설정 범위 눌림·거래량 수축·반등이면 가점",
             "RSI 과열은 재진입 조건이 아니면 감점",
             "설정 수익률 도달 후 최근 고점 대비 하락 시 트레일링 청산",
         ],
@@ -901,6 +929,18 @@ def mistock_update_indicator_strategy(payload: dict = Body(...)):
         )),
         "MISTOCK_TRAILING_STOP_LOOKBACK": str(payload.get(
             "trailing_stop_lookback", mistock_config.trailing_stop_lookback
+        )),
+        "MISTOCK_TRADE_VALUE_SURGE_RATIO": str(payload.get(
+            "trade_value_surge_ratio", mistock_config.trade_value_surge_ratio
+        )),
+        "MISTOCK_FIRST_WAVE_MIN_PCT": str(payload.get(
+            "first_wave_min_pct", mistock_config.first_wave_min_pct
+        )),
+        "MISTOCK_FIRST_WAVE_PULLBACK_MIN_PCT": str(payload.get(
+            "first_wave_pullback_min_pct", mistock_config.first_wave_pullback_min_pct
+        )),
+        "MISTOCK_FIRST_WAVE_PULLBACK_MAX_PCT": str(payload.get(
+            "first_wave_pullback_max_pct", mistock_config.first_wave_pullback_max_pct
         )),
     }
     updates = {key: _validate_mistock_env_value(key, value) for key, value in values.items()}

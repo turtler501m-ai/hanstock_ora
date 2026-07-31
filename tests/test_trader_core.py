@@ -126,6 +126,10 @@ class TraderCoreTests(unittest.TestCase):
             patch("src.strategy.seven_split.config.trailing_stop_activation_pct", 10.0),
             patch("src.strategy.seven_split.config.trailing_stop_pct", 8.0),
             patch("src.strategy.seven_split.config.trailing_stop_lookback", 20),
+            patch(
+                "src.strategy.seven_split.update_position_peak",
+                return_value={"peak_price": 125.0},
+            ),
         ):
             signal = generate_signal(
                 {"prpr": "110", "hldg_qty": "7", "evlu_pfls_rt": "10"},

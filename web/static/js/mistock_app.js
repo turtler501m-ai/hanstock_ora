@@ -587,6 +587,13 @@ function strategySettingFields(config) {
         { key: 'TAKE_PROFIT', label: '익절 기준', value: config.take_profit, type: 'float', step: '0.1', suffix: '%' },
         { key: 'RSI_BUY', label: 'RSI 매수선', value: config.rsi_buy, type: 'int', step: '1', min: '0', max: '100' },
         { key: 'RSI_SELL', label: 'RSI 매도선', value: config.rsi_sell, type: 'int', step: '1', min: '0', max: '100' },
+        { key: 'TRAILING_STOP_ACTIVATION_PCT', label: '트레일링 활성 수익률', value: config.trailing_stop_activation_pct, type: 'float', step: '0.5', min: '0', suffix: '%' },
+        { key: 'TRAILING_STOP_PCT', label: '고점 대비 청산 하락률', value: config.trailing_stop_pct, type: 'float', step: '0.5', min: '0.5', suffix: '%' },
+        { key: 'TRAILING_STOP_LOOKBACK', label: '트레일링 참고 기간', value: config.trailing_stop_lookback, type: 'int', step: '1', min: '2', suffix: '일' },
+        { key: 'TRADE_VALUE_SURGE_RATIO', label: '거래대금 급등 배수', value: config.trade_value_surge_ratio, type: 'float', step: '0.1', min: '1', suffix: 'x' },
+        { key: 'FIRST_WAVE_MIN_PCT', label: '1차 파동 최소 상승률', value: config.first_wave_min_pct, type: 'float', step: '0.5', min: '1', suffix: '%' },
+        { key: 'FIRST_WAVE_PULLBACK_MIN_PCT', label: '눌림목 최소 조정률', value: config.first_wave_pullback_min_pct, type: 'float', step: '0.5', min: '0', suffix: '%' },
+        { key: 'FIRST_WAVE_PULLBACK_MAX_PCT', label: '눌림목 최대 조정률', value: config.first_wave_pullback_max_pct, type: 'float', step: '0.5', min: '0', suffix: '%' },
         { key: 'TOTAL_CAPITAL', label: '기준 자본', value: config.total_capital, type: 'float', step: '100000', min: '0', suffix: '달러' },
         { key: 'MAX_POSITIONS', label: '최대 보유종목', value: config.max_positions, type: 'int', step: '1', min: '1', suffix: '개' },
         { key: 'MAX_SINGLE_WEIGHT', label: '종목당 최대비중', value: Number(config.max_single_weight || 0) * 100, type: 'float', step: '0.1', min: '0', max: '100', suffix: '%', percent: true },
@@ -605,6 +612,10 @@ function strategySettingFields(config) {
 
 function renderStrategySettingsForm(config) {
     const fields = strategySettingFields(config);
+    const readiness = config.technical_strategy_readiness || {};
+    const readinessItems = (readiness.items || []).map((item) => (
+        `<span>${escapeHtml(item.name)} ${escapeHtml(String(item.current_pct ?? 0))}/${escapeHtml(String(item.target_pct ?? 100))}%</span>`
+    )).join('');
     const fieldMarkup = fields.map((field) => `
         <label class="strategy-setting-item">
             <span class="label">${escapeHtml(field.label)}</span>
@@ -627,6 +638,14 @@ function renderStrategySettingsForm(config) {
     `).join('');
 
     return `
+        <div class="ai-strategy-summary">
+            <div>
+                <span>기술전략 현행화</span>
+                <strong>${escapeHtml(String(readiness.current_pct ?? 0))}%</strong>
+                <small>목표 ${escapeHtml(String(readiness.target_pct ?? 100))}%</small>
+            </div>
+        </div>
+        <div class="ai-flow-list indicator-rules">${readinessItems || '<span>현행화 상태를 확인 중입니다.</span>'}</div>
         <form id="strategy-settings-form" class="strategy-settings-form">
             <div class="strategy-settings-grid">${fieldMarkup}</div>
             <div class="strategy-settings-meta">
@@ -858,6 +877,10 @@ function fillIndicatorStrategyForm(data) {
     const trailingActivation = form.querySelector('[name="trailing_stop_activation_pct"]');
     const trailingPct = form.querySelector('[name="trailing_stop_pct"]');
     const trailingLookback = form.querySelector('[name="trailing_stop_lookback"]');
+    const tradeValueSurge = form.querySelector('[name="trade_value_surge_ratio"]');
+    const waveMin = form.querySelector('[name="first_wave_min_pct"]');
+    const pullbackMin = form.querySelector('[name="first_wave_pullback_min_pct"]');
+    const pullbackMax = form.querySelector('[name="first_wave_pullback_max_pct"]');
     if (enabled) enabled.value = data.enabled ? 'true' : 'false';
     if (minScore) minScore.value = data.min_score ?? 4;
     if (rsiMin) rsiMin.value = data.rsi_entry_min ?? 50;
@@ -866,6 +889,10 @@ function fillIndicatorStrategyForm(data) {
     if (trailingActivation) trailingActivation.value = data.trailing_stop_activation_pct ?? 10;
     if (trailingPct) trailingPct.value = data.trailing_stop_pct ?? 7;
     if (trailingLookback) trailingLookback.value = data.trailing_stop_lookback ?? 20;
+    if (tradeValueSurge) tradeValueSurge.value = data.trade_value_surge_ratio ?? 1.5;
+    if (waveMin) waveMin.value = data.first_wave_min_pct ?? 12;
+    if (pullbackMin) pullbackMin.value = data.first_wave_pullback_min_pct ?? 3;
+    if (pullbackMax) pullbackMax.value = data.first_wave_pullback_max_pct ?? 12;
 }
 
 function renderIndicatorStrategySummary(data) {
@@ -878,6 +905,10 @@ function renderIndicatorStrategySummary(data) {
     setElementText(
         'indicator-strategy-trailing',
         `${formatNumber(data.trailing_stop_activation_pct ?? 10, 1)}% / ${formatNumber(data.trailing_stop_pct ?? 7, 1)}%`
+    );
+    setElementText(
+        'indicator-strategy-pullback',
+        `${formatNumber(data.trade_value_surge_ratio ?? 1.5, 1)}x / ${formatNumber(data.first_wave_min_pct ?? 12, 1)}% · ${formatNumber(data.first_wave_pullback_min_pct ?? 3, 1)}~${formatNumber(data.first_wave_pullback_max_pct ?? 12, 1)}%`
     );
     const rulesEl = document.getElementById('indicator-strategy-rules');
     if (rulesEl) {
@@ -909,6 +940,10 @@ async function saveIndicatorStrategy() {
         trailing_stop_activation_pct: Number(form.querySelector('[name="trailing_stop_activation_pct"]')?.value || 10),
         trailing_stop_pct: Number(form.querySelector('[name="trailing_stop_pct"]')?.value || 7),
         trailing_stop_lookback: Number(form.querySelector('[name="trailing_stop_lookback"]')?.value || 20),
+        trade_value_surge_ratio: Number(form.querySelector('[name="trade_value_surge_ratio"]')?.value || 1.5),
+        first_wave_min_pct: Number(form.querySelector('[name="first_wave_min_pct"]')?.value || 12),
+        first_wave_pullback_min_pct: Number(form.querySelector('[name="first_wave_pullback_min_pct"]')?.value || 3),
+        first_wave_pullback_max_pct: Number(form.querySelector('[name="first_wave_pullback_max_pct"]')?.value || 12),
     };
     setButtonBusy('btn-indicator-strategy-save', true);
     try {

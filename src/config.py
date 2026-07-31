@@ -74,6 +74,10 @@ class Settings(BaseSettings):
     trailing_stop_activation_pct: float = 10.0
     trailing_stop_pct: float = 6.0
     trailing_stop_lookback: int = 20
+    trade_value_surge_ratio: float = 1.5
+    first_wave_min_pct: float = 12.0
+    first_wave_pullback_min_pct: float = 3.0
+    first_wave_pullback_max_pct: float = 12.0
     
     # Risk Management
     total_capital: float = 10000000.0

@@ -7,7 +7,7 @@ import yfinance as yf
 
 from src.mistock.config import config
 from src.strategy.indicators import calc_bollinger, calc_macd, calc_rsi, calc_sma
-from src.strategy.technical_signals import moving_average_cross
+from src.strategy.technical_signals import first_wave_pullback, moving_average_cross, trade_value_surge
 
 def fetch_wikipedia_universe() -> list[str]:
     import pandas as pd
@@ -76,6 +76,12 @@ def fetch_wikipedia_universe() -> list[str]:
 
 def build_scan_universe(api: Any = None) -> list[str]:
     from src.utils.logger import logger
+    from src.strategy.condition_monitor import get_fresh_condition_symbols
+
+    monitored = get_fresh_condition_symbols("US")
+    if monitored:
+        logger.info(f"[MISTOCK] 장중 조건 감시 {len(monitored)}종목 사용")
+        return monitored
 
     # 1순위: KIS API가 제공되면 해외주식 거래대금 상위 종목을 동적으로 가져온다.
     if api is not None:
@@ -233,6 +239,14 @@ def _macd_rsi_momentum_profile(
     sma60 = calc_sma(prices, 60)
     macd = calc_macd(prices)
     ma_cross = moving_average_cross(prices)
+    value_surge = trade_value_surge(prices, volumes, minimum_ratio=config.trade_value_surge_ratio)
+    wave_pullback = first_wave_pullback(
+        prices,
+        volumes,
+        minimum_wave_pct=config.first_wave_min_pct,
+        minimum_pullback_pct=config.first_wave_pullback_min_pct,
+        maximum_pullback_pct=config.first_wave_pullback_max_pct,
+    )
     prev_macd = calc_macd(prices[:-1]) if len(prices) >= 36 else {"hist": 0.0}
     hist = float(macd.get("hist", 0.0) or 0.0)
     prev_hist = float(prev_macd.get("hist", 0.0) or 0.0)
@@ -299,6 +313,15 @@ def _macd_rsi_momentum_profile(
     if volume_confirmed and not hist_turn_up and vol_avg > 0:
         score += 1
         reasons.append(f"volume confirmation {volumes[-1] / vol_avg:.1f}x")
+    if value_surge["matched"]:
+        score += 2
+        reasons.append(f"trade value surge {value_surge['ratio']:.1f}x")
+    if wave_pullback["matched"]:
+        score += 3
+        reasons.append(
+            f"first wave pullback wave={wave_pullback['wave_pct']:.1f}% "
+            f"pullback={wave_pullback['pullback_pct']:.1f}%"
+        )
 
     # --- RSI 과열 패널티 ---
     overheated_reason = f"RSI overheated {rsi14:.0f}"
@@ -334,6 +357,8 @@ def _macd_rsi_momentum_profile(
         "macd_bear_cross": bool(macd.get("bear_cross")),
         "sma_golden_cross": ma_cross["golden_cross"],
         "sma_dead_cross": ma_cross["dead_cross"],
+        "trade_value_surge": value_surge,
+        "first_wave_pullback": wave_pullback,
         "sma20": sma20,
         "sma60": sma60,
         "price": current,
@@ -364,6 +389,14 @@ def strategy_profile(
     bb_lo, _bb_mid, _bb_hi = calc_bollinger(prices, 20)
     macd = calc_macd(prices)
     ma_cross = moving_average_cross(prices)
+    value_surge = trade_value_surge(prices, volumes, minimum_ratio=config.trade_value_surge_ratio)
+    wave_pullback = first_wave_pullback(
+        prices,
+        volumes,
+        minimum_wave_pct=config.first_wave_min_pct,
+        minimum_pullback_pct=config.first_wave_pullback_min_pct,
+        maximum_pullback_pct=config.first_wave_pullback_max_pct,
+    )
     score = 0
     reasons: list[str] = []
 
@@ -418,6 +451,15 @@ def strategy_profile(
     elif ma_cross["dead_cross"]:
         score -= 2
         reasons.append("SMA20/SMA60 dead cross")
+    if value_surge["matched"]:
+        score += 2
+        reasons.append(f"trade value surge {value_surge['ratio']:.1f}x")
+    if wave_pullback["matched"]:
+        score += 3
+        reasons.append(
+            f"first wave pullback wave={wave_pullback['wave_pct']:.1f}% "
+            f"pullback={wave_pullback['pullback_pct']:.1f}%"
+        )
 
     return {
         "score": score,
@@ -429,6 +471,8 @@ def strategy_profile(
         "sma60": sma60,
         "sma_golden_cross": ma_cross["golden_cross"],
         "sma_dead_cross": ma_cross["dead_cross"],
+        "trade_value_surge": value_surge,
+        "first_wave_pullback": wave_pullback,
         "price": current,
         "strategy_model": "default",
     }

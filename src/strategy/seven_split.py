@@ -12,7 +12,13 @@ from src.strategy.indicators import calc_rsi, calc_sma, calc_macd, calc_bollinge
 from src.strategy.features import build_strategy_features
 from src.strategy.predict import ModelPredictor
 from src.strategy.allocator import PortfolioAllocator
-from src.strategy.technical_signals import moving_average_cross, trailing_stop_signal
+from src.strategy.technical_signals import (
+    first_wave_pullback,
+    moving_average_cross,
+    trade_value_surge,
+    trailing_stop_signal,
+)
+from src.strategy.position_tracker import update_position_peak
 
 WATCHLIST = []
 
@@ -214,6 +220,16 @@ def calc_strategy_profile(prices: list[float], highs: list[float] | None = None,
     bb_lo, bb_mid, bb_hi = calc_bollinger(prices, 20)
     macd = calc_macd(prices)
     ma_cross = moving_average_cross(prices)
+    value_surge = trade_value_surge(
+        prices, volumes, minimum_ratio=config.trade_value_surge_ratio
+    )
+    wave_pullback = first_wave_pullback(
+        prices,
+        volumes,
+        minimum_wave_pct=config.first_wave_min_pct,
+        minimum_pullback_pct=config.first_wave_pullback_min_pct,
+        maximum_pullback_pct=config.first_wave_pullback_max_pct,
+    )
 
     score = 0.0
     reasons = []
@@ -322,6 +338,15 @@ def calc_strategy_profile(prices: list[float], highs: list[float] | None = None,
         elif ma_cross["dead_cross"]:
             score -= 2.0
             reasons.append("SMA20/SMA60 dead cross")
+        if value_surge["matched"]:
+            score += 2.0
+            reasons.append(f"trade value surge {value_surge['ratio']:.1f}x")
+        if wave_pullback["matched"]:
+            score += 3.0
+            reasons.append(
+                f"first wave pullback wave={wave_pullback['wave_pct']:.1f}% "
+                f"pullback={wave_pullback['pullback_pct']:.1f}%"
+            )
 
     feature_payload = build_strategy_features(prices, highs, volumes, strategy_score=score)
     return {
@@ -342,6 +367,8 @@ def calc_strategy_profile(prices: list[float], highs: list[float] | None = None,
         "macd_bear_cross": macd["bear_cross"],
         "sma_golden_cross": ma_cross["golden_cross"],
         "sma_dead_cross": ma_cross["dead_cross"],
+        "trade_value_surge": value_surge,
+        "first_wave_pullback": wave_pullback,
         "features": feature_payload,
     }
 
@@ -644,7 +671,10 @@ def build_scan_universe(api: "KIStockAPI", held_symbols: set[str]) -> list[str]:
     3순위: KOSPI_UNIVERSE 정적 풀 (KIS API 실패 시 폴백)
     WATCHLIST는 항상 포함되며, 보유 중인 종목은 제외된다.
     """
-    condition_codes = _condition_search_universe(api)
+    from src.strategy.condition_monitor import get_fresh_condition_symbols
+
+    monitored_codes = get_fresh_condition_symbols("KR")
+    condition_codes = list(dict.fromkeys(monitored_codes + _condition_search_universe(api)))
     if condition_codes:
         logger.info(f"[SCAN] KIS 조건검색식 {len(condition_codes)}종목 수집 완료")
         base = condition_codes
@@ -1247,10 +1277,20 @@ def generate_signal(stock: dict, daily_data: list, strategy_model: str = "") -> 
     rounded_rt = round(rt, 1)
     if rounded_rt <= config.stop_loss_pct:
         return {"action": "sell", "qty": qty, "price": 0, "reason": f"stop loss {rounded_rt:.1f}%", "indicators": indicators}
+    avg_price = float(stock.get("pchs_avg_pric") or stock.get("avg_price") or 0)
+    if avg_price <= 0 and current > 0 and rt > -99.9:
+        avg_price = current / (1 + rt / 100)
+    peak_state = update_position_peak(
+        "KR",
+        stock.get("pdno", ""),
+        current_price=current,
+        entry_price=avg_price,
+        quantity=qty,
+    )
     trailing = trailing_stop_signal(
         current_price=current,
         return_pct=rt,
-        recent_highs=highs,
+        recent_highs=[peak_state.get("peak_price", current)],
         activation_pct=config.trailing_stop_activation_pct,
         trail_pct=config.trailing_stop_pct,
         lookback=config.trailing_stop_lookback,
