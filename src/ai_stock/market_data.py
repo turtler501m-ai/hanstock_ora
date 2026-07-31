@@ -125,7 +125,10 @@ class DefaultProvider:
             try:
                 from src.mistock.strategy import fetch_history
 
-                hist = fetch_history(idx[0], period="6mo")
+                # The autonomy regime classifier requires at least 200 market
+                # observations. Six calendar months cannot provide that many
+                # trading sessions, so request a full year.
+                hist = fetch_history(idx[0], period="1y")
                 closes = [float(c) for c in hist.get("close", []) if c is not None]
                 if len(closes) >= 21:
                     return {idx[1]: closes}

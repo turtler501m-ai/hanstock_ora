@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """AI스톡 핵심 로직 테스트 (DB 불필요): 점수·시장·신선도·유니버스 (§17)."""
 import unittest
+from unittest.mock import patch
 
-from src.ai_stock import scoring, markets, freshness, universe, ai_evaluator
+from src.ai_stock import scoring, markets, freshness, universe, ai_evaluator, market_data
 from src.ai_stock.markets import MarketError
 from src.ai_stock.scoring import ScoreProfile, score_candidate
 
@@ -116,6 +117,18 @@ class FreshnessTests(unittest.TestCase):
 
     def test_recent_not_stale(self):
         self.assertFalse(freshness.is_stale(freshness.now().isoformat(), "ai_eval"))
+
+
+class MarketDataTests(unittest.TestCase):
+    def test_index_history_covers_autonomy_regime_requirement(self):
+        with patch(
+            "src.mistock.strategy.fetch_history",
+            return_value={"close": [100.0] * 220},
+        ) as fetch:
+            result = market_data.DefaultProvider().index_series("KR")
+
+        self.assertEqual(len(result["KOSPI"]), 220)
+        fetch.assert_called_once_with("^KS11", period="1y")
 
 
 class UniverseTests(unittest.TestCase):
