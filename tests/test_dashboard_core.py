@@ -2177,6 +2177,70 @@ class DashboardCoreTests(unittest.TestCase):
             stock_routes._clear_balance_cache = original_clear_balance_cache
             stock_routes._required_env_missing = original_required_env_missing
 
+    def test_sell_all_holdings_can_cover_new_sellable_qty_after_submission(self):
+        import src.dashboard.routes.stock as stock_routes
+
+        original_db_path = dashboard.trader.config.trade_db_path
+        original_get_api = stock_routes._get_api
+        original_get_balance_data = stock_routes._get_balance_data
+        original_auto_approval = stock_routes._auto_approval_enabled
+        original_clear_balance_cache = stock_routes._clear_balance_cache
+        original_required_env_missing = stock_routes._required_env_missing
+        sellable_qty = [10]
+
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                stock_routes._get_api = lambda: object()
+                stock_routes._get_balance_data = lambda api, allow_cache=True: {
+                    "output1": [{
+                        "pdno": "005930",
+                        "prdt_name": "Samsung",
+                        "hldg_qty": "13",
+                        "ord_psbl_qty": str(sellable_qty[0]),
+                        "prpr": "70000",
+                    }],
+                    "output2": [{}],
+                }
+                stock_routes._auto_approval_enabled = lambda: False
+                stock_routes._clear_balance_cache = lambda: None
+                stock_routes._required_env_missing = lambda: []
+
+                first = stock_routes.sell_all_holdings({})
+                first_id = first["orders"][0]["id"]
+                dashboard.trader.init_db()
+                with dashboard.trader.connect_db() as conn:
+                    conn.execute(
+                        "UPDATE approvals SET status='executed' WHERE id=?",
+                        (first_id,),
+                    )
+                    conn.execute(
+                        """
+                        INSERT INTO trades (
+                            ts, symbol, name, action, qty, price, reason, ok, env,
+                            dry_run, broker_order_id, order_status, filled_qty,
+                            source_approval_id
+                        )
+                        VALUES (?, '005930', 'Samsung', 'sell', 10, 0, ?, 1,
+                                'demo', 0, 'S12345', 'submitted', 0, ?)
+                        """,
+                        ("2026-07-31 11:00:00", "first liquidation", first_id),
+                    )
+                sellable_qty[0] = 3
+
+                second = stock_routes.sell_all_holdings({})
+
+                self.assertEqual(second["created_count"], 1)
+                approvals = stock_routes.get_approvals()["approvals"]
+                self.assertEqual([item["qty"] for item in approvals], [3, 10])
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+            stock_routes._get_api = original_get_api
+            stock_routes._get_balance_data = original_get_balance_data
+            stock_routes._auto_approval_enabled = original_auto_approval
+            stock_routes._clear_balance_cache = original_clear_balance_cache
+            stock_routes._required_env_missing = original_required_env_missing
+
     def test_holding_sell_rejects_duplicate_active_request(self):
         import src.dashboard.routes.stock as stock_routes
 

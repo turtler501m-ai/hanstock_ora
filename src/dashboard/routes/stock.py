@@ -2039,6 +2039,23 @@ def _active_dashboard_sell_symbols() -> set[str]:
     return {str(row["symbol"]) for row in rows}
 
 
+def _unsubmitted_dashboard_sell_symbols() -> set[str]:
+    _init_approval_db()
+    with trader.connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT DISTINCT symbol
+            FROM approvals
+            WHERE action = 'sell'
+              AND source IN ('dashboard_holding_sell', 'dashboard_sell_all')
+              AND status IN ('pending', 'executing')
+              AND COALESCE(symbol, '') <> ''
+            """
+        ).fetchall()
+    return {str(row["symbol"]) for row in rows}
+
+
 def _cancel_open_buy_orders_before_liquidation(api) -> list[dict]:
     trader.init_db()
     with trader.connect_db() as conn:
@@ -2129,7 +2146,11 @@ def sell_all_holdings(payload: dict | None = Body(default=None)):
     orders = []
     skipped = []
     with _holding_sell_request_lock:
-        active_symbols = _active_dashboard_sell_symbols()
+        # Submitted broker orders already reserve their quantity at KIS and
+        # therefore reduce sellable_qty. Only approvals not yet submitted need
+        # a symbol-level duplicate guard here; otherwise newly filled buys could
+        # never be liquidated while an older sell remains open.
+        active_symbols = _unsubmitted_dashboard_sell_symbols()
         for holding in parsed.get("holdings", []):
             symbol = str(holding.get("symbol", "")).strip()
             holding_qty = _to_int(holding.get("qty"))
