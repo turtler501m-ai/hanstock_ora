@@ -40,6 +40,7 @@ _MAIN_SCHEDULE_IDS = frozenset({AI_STOCK_SCHEDULE_ID, *INDEPENDENT_STOCK_SCHEDUL
 _TRADER_DISPATCH_PRIORITY = {
     "ai_stock_default_v1": 10,
     "plunge_bounce_strategy": 20,
+    "volatility_adaptive_momentum_strategy": 30,
     "heikin_ashi_scalping_strategy": 40,
 }
 _last_dispatch_failures: list[str] = []

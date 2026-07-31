@@ -184,6 +184,8 @@ def _write_cycle_result(result: dict, *, mode: str, strategy_id: str | None = No
         path = Path(".runtime/plunge_bounce_last_result.json")
     elif strategy_id == "heikin_ashi_scalping_strategy":
         path = Path(".runtime/heikin_ashi_scalping_last_result.json")
+    elif strategy_id == "volatility_adaptive_momentum_strategy":
+        path = Path(".runtime/volatility_adaptive_momentum_last_result.json")
     else:
         path = Path(os.environ.get("HANSTOCK_SCHEDULER_RESULT_PATH", ".runtime/daily_auto_last_result.json"))
     path.parent.mkdir(parents=True, exist_ok=True)
