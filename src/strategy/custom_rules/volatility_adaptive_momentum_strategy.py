@@ -50,10 +50,12 @@ class VolatilityAdaptiveMomentumStrategy:
     def __init__(self) -> None:
         self.min_realized_vol = float(os.environ.get("VAM_MIN_REALIZED_VOL", "1.2"))
         self.max_realized_vol = float(os.environ.get("VAM_MAX_REALIZED_VOL", "12.0"))
-        self.min_trade_value = float(os.environ.get("VAM_MIN_TRADE_VALUE_KRW", "1000000000"))
+        self.min_trade_value = float(os.environ.get("VAM_MIN_TRADE_VALUE_KRW", "500000000"))
         self.max_one_day_return = float(os.environ.get("VAM_MAX_ONE_DAY_RETURN", "12.0"))
         self.max_five_day_return = float(os.environ.get("VAM_MAX_FIVE_DAY_RETURN", "28.0"))
-        self.min_volume_ratio = float(os.environ.get("VAM_MIN_VOLUME_RATIO", "0.9"))
+        # The latest daily candle is incomplete during market hours, so use a
+        # participation floor and reserve larger bonuses for real expansion.
+        self.min_volume_ratio = float(os.environ.get("VAM_MIN_VOLUME_RATIO", "0.05"))
 
     def calculate_score(self, prices: list[float], indicators: dict) -> float:
         closes = [float(value) for value in prices if value and float(value) > 0]
@@ -139,9 +141,12 @@ class VolatilityAdaptiveMomentumStrategy:
         if volume_ratio >= 1.5:
             score += 1.2
             reasons.append(f"거래량 확장({volume_ratio:.1f}배)")
-        elif volume_ratio >= self.min_volume_ratio:
+        elif volume_ratio >= 0.5:
             score += 0.6
             reasons.append(f"거래량 확인({volume_ratio:.1f}배)")
+        elif volume_ratio >= self.min_volume_ratio:
+            score += 0.2
+            reasons.append(f"장중 거래량 최소 확인({volume_ratio:.2f}배)")
         else:
             reasons.append(f"거래량 확인 부족({volume_ratio:.1f}배)")
             return 0.0

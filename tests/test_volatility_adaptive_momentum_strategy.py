@@ -42,6 +42,22 @@ class VolatilityAdaptiveMomentumStrategyTests(unittest.TestCase):
 
         self.assertEqual(strategy.calculate_score(prices, indicators), 0.0)
 
+    def test_accepts_partial_intraday_volume_without_full_day_comparison(self):
+        strategy = VolatilityAdaptiveMomentumStrategy()
+        prices = [10_000 + index * 80 + (200 if index % 2 else -200) for index in range(60)]
+        indicators = {
+            "sma20": sum(prices[-20:]) / 20,
+            "sma60": sum(prices) / 60,
+            "rsi": 58.0,
+            "macd_hist": 1.5,
+            "volumes": [1_000_000] * 59 + [100_000],
+        }
+
+        self.assertGreaterEqual(strategy.calculate_score(prices, indicators), 2.0)
+        self.assertTrue(
+            any("장중 거래량 최소 확인" in reason for reason in indicators["custom_reasons"])
+        )
+
     def test_rejects_extreme_one_day_chase(self):
         strategy = VolatilityAdaptiveMomentumStrategy()
         prices = [10_000 + index * 30 for index in range(59)]
