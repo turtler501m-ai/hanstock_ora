@@ -14,6 +14,11 @@ from src.online_access import require_online_access
 from urllib3.util import Retry
 from requests.adapters import HTTPAdapter
 
+try:
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - Windows uses the in-process lock below.
+    _fcntl = None
+
 HTTP = requests.Session()
 HTTP.trust_env = False
 
@@ -37,6 +42,7 @@ HISTORY_HTTP.mount("https://", HTTPAdapter(max_retries=0))
 # KIS API 전역 스로틀: 초당 최대 1회 요청 강제 (EGW00201 방지)
 _KIS_THROTTLE_LOCK = threading.Lock()
 _KIS_LAST_CALL: float = 0.0
+_KIS_THROTTLE_PATH = Path(".runtime") / "kis-api-throttle.lock"
 _KIS_MIN_INTERVAL: float = 0.5  # 초 단위 (EGW00201 방지)
 
 
@@ -44,6 +50,29 @@ def _kis_throttle() -> None:
     """KIS API 호출 전 최소 간격을 보장합니다."""
     global _KIS_LAST_CALL
     with _KIS_THROTTLE_LOCK:
+        if _fcntl is not None:
+            _KIS_THROTTLE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with _KIS_THROTTLE_PATH.open("a+", encoding="utf-8") as stream:
+                _fcntl.flock(stream.fileno(), _fcntl.LOCK_EX)
+                try:
+                    stream.seek(0)
+                    raw = stream.read().strip()
+                    try:
+                        previous = float(raw) if raw else 0.0
+                    except ValueError:
+                        previous = 0.0
+                    now = time.time()
+                    elapsed = now - previous
+                    if 0 <= elapsed < _KIS_MIN_INTERVAL:
+                        time.sleep(_KIS_MIN_INTERVAL - elapsed)
+                    stream.seek(0)
+                    stream.truncate()
+                    stream.write(str(time.time()))
+                    stream.flush()
+                finally:
+                    _fcntl.flock(stream.fileno(), _fcntl.LOCK_UN)
+            _KIS_LAST_CALL = time.monotonic()
+            return
         elapsed = time.monotonic() - _KIS_LAST_CALL
         if elapsed < _KIS_MIN_INTERVAL:
             time.sleep(_KIS_MIN_INTERVAL - elapsed)

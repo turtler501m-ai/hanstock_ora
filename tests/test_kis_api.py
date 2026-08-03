@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import src.api.kis_api as kis_api
@@ -6,6 +8,21 @@ from src.api.kis_api import KIStockAPI, KISAccountError, KISRateLimitError
 
 
 class KIStockAPITests(unittest.TestCase):
+    def test_throttle_uses_shared_file_lock_when_available(self):
+        fake_fcntl = Mock(LOCK_EX=1, LOCK_UN=2)
+        with tempfile.TemporaryDirectory() as temp_dir, patch.object(
+            kis_api, "_fcntl", fake_fcntl
+        ), patch.object(
+            kis_api, "_KIS_THROTTLE_PATH", Path(temp_dir) / "kis.lock"
+        ), patch.object(
+            kis_api, "_KIS_MIN_INTERVAL", 0
+        ):
+            kis_api._kis_throttle()
+
+        self.assertEqual(fake_fcntl.flock.call_count, 2)
+        self.assertEqual(fake_fcntl.flock.call_args_list[0].args[1], 1)
+        self.assertEqual(fake_fcntl.flock.call_args_list[1].args[1], 2)
+
     def test_balance_rate_limit_retries(self):
         api = KIStockAPI.__new__(KIStockAPI)
         api.base_url = "https://example.test"
