@@ -2870,7 +2870,9 @@ async function renderCandidates(options = {}) {
                     `${scanned}종목을 분석했으나 기준 점수(${data.min_score || 2}점) 이상인 종목이 없습니다.`;
                 if (bodyEl) bodyEl.innerHTML = buildNoCandidatesModalMarkup(data);
             }
-            setNoCandidatesModalOpen(true);
+            // 전략조회 탭은 전략별 결과 카드에 같은 내용을 표시하므로
+            // 완료 시 공용 "매수 후보 없음" 팝업을 중복으로 띄우지 않는다.
+            if (!previewStrategyIds.length) setNoCandidatesModalOpen(true);
             if (data._cache?.cached_at) {
                 setStatus(`최근 후보 검색 결과를 표시합니다. 기준 시각 ${data._cache.cached_at}`, true);
             } else {

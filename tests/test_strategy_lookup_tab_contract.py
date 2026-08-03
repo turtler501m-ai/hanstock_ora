@@ -44,6 +44,14 @@ class StrategyLookupTabContractTests(unittest.TestCase):
         self.assertIn("btnRefreshStrategyLookup.addEventListener('click', refreshStrategyLookup)", script)
         self.assertIn("DB 최신본 저장", script)
 
+    def test_lookup_completion_does_not_open_no_candidates_popup(self):
+        script = (ROOT / "web/static/js/app.js").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "if (!previewStrategyIds.length) setNoCandidatesModalOpen(true);",
+            script,
+        )
+
     def test_each_selected_strategy_has_its_own_result_card(self):
         script = (ROOT / "web/static/js/app.js").read_text(encoding="utf-8")
         stylesheet = (ROOT / "web/static/css/style.css").read_text(encoding="utf-8")
