@@ -2714,6 +2714,9 @@ function renderStrategyPreviewCards(results, strategies = []) {
         const data = result.data || {};
         const candidates = data.candidates || [];
         const error = result.error || data.scan_error;
+        const cache = data._cache || {};
+        const isUpdating = Boolean(result.updating);
+        const cachedAt = cache.cached_at ? String(cache.cached_at).replace('T', ' ').slice(0, 19) : '';
         const rows = candidates.length
             ? candidates.slice(0, 10).map((row) => {
                 const reasons = (row.reasons || []).map(strategyReasonLabel).join(' · ') || '-';
@@ -2727,7 +2730,9 @@ function renderStrategyPreviewCards(results, strategies = []) {
                 </tr>`;
             }).join('')
             : `<tr><td colspan="6" class="table-message">${
-                error
+                isUpdating && cache.missing
+                    ? '이전 결과가 없어 분석하고 있습니다...'
+                    : error
                     ? `조회 실패 — ${escapeHtml(String(error))}`
                     : `${Number(data.scanned || 0).toLocaleString()}종목 분석, 기준 충족 후보 없음`
             }</td></tr>`;
@@ -2740,7 +2745,9 @@ function renderStrategyPreviewCards(results, strategies = []) {
                 <div class="strategy-preview-metrics">
                     <span>분석 <strong>${Number(data.scanned || 0).toLocaleString()}</strong></span>
                     <span>후보 <strong>${candidates.length.toLocaleString()}</strong></span>
-                    ${error ? '<span class="is-error">오류</span>' : '<span class="is-complete">완료</span>'}
+                    ${isUpdating
+                        ? `<span class="is-complete">업데이트 중</span>${cachedAt ? `<span>이전 결과 · ${escapeHtml(cachedAt)}</span>` : ''}`
+                        : (error ? '<span class="is-error">오류</span>' : `<span class="is-complete">최신 결과</span>${cachedAt ? `<span>${escapeHtml(cachedAt)}</span>` : ''}`)}
                 </div>
             </header>
             <div class="table-responsive">
@@ -2751,6 +2758,31 @@ function renderStrategyPreviewCards(results, strategies = []) {
             </div>
         </article>`;
     }).join('');
+}
+
+async function renderCachedStrategyPreviews(strategyIds, strategies = []) {
+    const optimizer = document.getElementById('select-portfolio-optimizer')?.value || 'score_tilted_inverse_vol';
+    const results = await Promise.all(strategyIds.map(async (strategyId) => {
+        try {
+            const params = new URLSearchParams({
+                strategy_id: strategyId,
+                min_score: '2',
+                optimizer,
+                refresh: 'false',
+                cache_only: 'true',
+            });
+            const data = await fetchJson(`/api/candidates?${params.toString()}`, 30000);
+            return { strategyId, data, updating: true };
+        } catch (error) {
+            return {
+                strategyId,
+                data: { candidates: [], scanned: 0, _cache: { missing: true } },
+                error: error.message,
+                updating: true,
+            };
+        }
+    }));
+    renderStrategyPreviewCards(results, strategies);
 }
 
 async function renderCandidates(options = {}) {
@@ -2964,6 +2996,7 @@ async function previewSelectedStrategies() {
                 selected.map((strategy) => escapeHtml(strategyDisplayName(strategy))).join(' · ')
             }</span><small>분석 전용 · 주문/승인 생성 없음</small>`;
         }
+        await renderCachedStrategyPreviews(strategyIds, selected);
         await postJson('/api/scheduler/run', {
             mode: 'analysis_only',
             include_ai_rebalance: false,

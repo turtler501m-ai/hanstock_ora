@@ -803,6 +803,7 @@ def _load_candidate_cache(
     min_score: int,
     ranker: str = "gpt_5_mini",
     optimizer: str = "score_tilted_inverse_vol",
+    allow_stale: bool = False,
 ) -> dict | None:
     override = _public_override("_load_candidate_cache", _load_candidate_cache)
     if override is not None:
@@ -815,7 +816,11 @@ def _load_candidate_cache(
     try:
         if cache_path.exists():
             result = _candidate_envelope_to_result(
-                json.loads(cache_path.read_text(encoding="utf-8")), min_score, ranker, optimizer
+                json.loads(cache_path.read_text(encoding="utf-8")),
+                min_score,
+                ranker,
+                optimizer,
+                allow_stale=allow_stale,
             )
             if result is not None:
                 return result
@@ -830,7 +835,9 @@ def _load_candidate_cache(
             "_candidates_", trader.TRADING_ENV, _candidate_snapshot_kind(min_score, ranker, optimizer)
         )
         if snap is not None:
-            return _candidate_envelope_to_result(snap["payload"], min_score, ranker, optimizer)
+            return _candidate_envelope_to_result(
+                snap["payload"], min_score, ranker, optimizer, allow_stale=allow_stale
+            )
     except (sqlite3.DatabaseError, OSError, ValueError, TypeError) as exc:
         logger.warning(f"Failed to load candidate snapshot: {exc}")
     return None
@@ -841,7 +848,7 @@ def _candidate_snapshot_kind(min_score: int, ranker: str, optimizer: str) -> str
 
 
 def _candidate_envelope_to_result(
-    cached, min_score: int, ranker: str, optimizer: str
+    cached, min_score: int, ranker: str, optimizer: str, *, allow_stale: bool = False
 ) -> dict | None:
     """파일/DB 어느 쪽 envelope든 동일하게 검증해 후보 결과를 복원한다."""
     if not isinstance(cached, dict):
@@ -868,7 +875,8 @@ def _candidate_envelope_to_result(
         age = (trader.datetime.now(trader.KST) - trader.datetime.fromisoformat(cached_at)).total_seconds()
     except ValueError:
         return None
-    if age > CANDIDATE_CACHE_TTL_SECONDS:
+    is_stale = age > CANDIDATE_CACHE_TTL_SECONDS
+    if is_stale and not allow_stale:
         return None
     rows = cached.get("rows")
     if not isinstance(rows, list):
@@ -878,7 +886,7 @@ def _candidate_envelope_to_result(
         "scan_summary": cached.get("scan_summary", []),
         "scanned": cached.get("scanned", len(rows)),
         "min_score": min_score,
-        "_cache": {"stale": False, "cached_at": cached_at},
+        "_cache": {"stale": is_stale, "cached_at": cached_at},
     }
 
 
@@ -2505,6 +2513,7 @@ async def get_candidates(
     strategy_id: str | None = None,
     cycle_id: str | None = None,
     refresh: bool = False,
+    cache_only: bool = False,
 ):
     if min_score < 1:
         raise HTTPException(status_code=400, detail="min_score must be greater than 0")
@@ -2526,9 +2535,11 @@ async def get_candidates(
     cached = None
     if not refresh:
         if cache_ranker == "gpt_5_mini" and optimizer == "score_tilted_inverse_vol":
-            cached = _load_candidate_cache(min_score)
+            cached = _load_candidate_cache(min_score, allow_stale=cache_only)
         else:
-            cached = _load_candidate_cache(min_score, cache_ranker, optimizer)
+            cached = _load_candidate_cache(
+                min_score, cache_ranker, optimizer, allow_stale=cache_only
+            )
         
     if cached is not None:
         if cycle is not None:
@@ -2540,6 +2551,15 @@ async def get_candidates(
             )
             cached["_analysis_cycle"] = response_cycle if isinstance(response_cycle, dict) else cycle
         return cached
+
+    if cache_only:
+        return {
+            "candidates": [],
+            "scan_summary": [],
+            "scanned": 0,
+            "min_score": min_score,
+            "_cache": {"missing": True, "cached_at": None, "stale": False},
+        }
 
     try:
         api = _get_api()

@@ -22,7 +22,15 @@ class StrategyLookupTabContractTests(unittest.TestCase):
         self.assertIn("mode: 'analysis_only'", script)
         self.assertIn("auto_approve: false", script)
         self.assertIn("allowed_categories: ['candidate']", script)
+        self.assertIn("await renderCachedStrategyPreviews(strategyIds, selected);", script)
         self.assertIn("await renderCandidates({ strategyIds, strategies: selected });", script)
+
+    def test_cached_results_are_shown_while_selected_strategies_update(self):
+        script = (ROOT / "web/static/js/app.js").read_text(encoding="utf-8")
+        self.assertIn("async function renderCachedStrategyPreviews(strategyIds, strategies = [])", script)
+        self.assertIn("cache_only: 'true'", script)
+        self.assertIn("업데이트 중", script)
+        self.assertIn("이전 결과", script)
 
     def test_each_selected_strategy_has_its_own_result_card(self):
         script = (ROOT / "web/static/js/app.js").read_text(encoding="utf-8")
