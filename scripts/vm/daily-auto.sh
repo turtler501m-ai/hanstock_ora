@@ -33,7 +33,10 @@ find_python() {
 
 PYTHON_BIN="$(find_python)"
 LOG_FILE="$LOG_DIR/daily-auto.log"
-LOCK_FILE="$RUNTIME_DIR/daily-auto.lock"
+# daily-auto and strategy-dispatch both use the domestic KIS account.  A shared
+# lock prevents the hourly full cycle and the five-minute dispatcher from
+# issuing overlapping balance/order requests from separate processes.
+LOCK_FILE="$RUNTIME_DIR/domestic-scheduler.lock"
 
 should_run_now() {
     if [ "${HANSTOCK_SCHEDULE_FORCE:-0}" = "1" ] || [ "$FORCE_RUN" = "1" ]; then
@@ -50,14 +53,14 @@ acquire_lock() {
     if command -v flock >/dev/null 2>&1; then
         exec 9>"$LOCK_FILE"
         if ! flock -n 9; then
-            echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] daily_auto already running; skipped"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] domestic scheduler already running; daily_auto skipped"
             exit 0
         fi
         return 0
     fi
 
     if ! mkdir "$LOCK_FILE.dir" 2>/dev/null; then
-        echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] daily_auto already running; skipped"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] domestic scheduler already running; daily_auto skipped"
         exit 0
     fi
     trap 'rmdir "$LOCK_FILE.dir" 2>/dev/null || true' EXIT

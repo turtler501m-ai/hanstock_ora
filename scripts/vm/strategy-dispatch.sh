@@ -21,19 +21,21 @@ find_python() {
 
 PYTHON_BIN="$(find_python)"
 LOG_FILE="$LOG_DIR/strategy-dispatch.log"
-LOCK_FILE="$RUNTIME_DIR/strategy-dispatch.lock"
+# Coordinate with daily-auto.sh as both jobs use the same domestic KIS account.
+# The next five-minute cron tick will retry schedules that remain due.
+LOCK_FILE="$RUNTIME_DIR/domestic-scheduler.lock"
 
 acquire_lock() {
     if command -v flock >/dev/null 2>&1; then
         exec 9>"$LOCK_FILE"
         if ! flock -n 9; then
-            echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] strategy_dispatch already running; skipped"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] domestic scheduler already running; strategy_dispatch skipped"
             exit 0
         fi
         return 0
     fi
     if ! mkdir "$LOCK_FILE.dir" 2>/dev/null; then
-        echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] strategy_dispatch already running; skipped"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] domestic scheduler already running; strategy_dispatch skipped"
         exit 0
     fi
     trap 'rmdir "$LOCK_FILE.dir" 2>/dev/null || true' EXIT
