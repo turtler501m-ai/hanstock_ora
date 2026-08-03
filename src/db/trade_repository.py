@@ -147,6 +147,10 @@ def save_trade(
     strategy_version: int | None = None,
     profile_hash: str | None = None,
     source_approval_id: int | None = None,
+    account_key: str | None = None,
+    fee: float | None = None,
+    tax: float | None = None,
+    cost_source: str = "unavailable",
 ) -> None:
     ts = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
     broker_order_id = broker_order_id if broker_order_id is not None else _extract_broker_order_id(broker_result)
@@ -158,6 +162,9 @@ def save_trade(
     response_msg = response_msg or ""
     pre_order_qty = int(pre_order_qty or 0)
     broker_result_json = json.dumps(broker_result or {}, ensure_ascii=False)
+    if account_key is None:
+        from src.db.performance_repository import account_scope_key
+        account_key = account_scope_key()
     try:
         init_db()
         with connect_db() as conn:
@@ -166,9 +173,10 @@ def save_trade(
                 INSERT INTO trades (
                     ts, symbol, name, action, qty, price, reason, ok, env, dry_run,
                     broker_order_id, order_status, filled_qty, filled_price, pre_order_qty, response_msg, broker_result,
-                    strategy_id, strategy_version, profile_hash, source_approval_id
+                    strategy_id, strategy_version, profile_hash, source_approval_id,
+                    account_key, fee, tax, cost_source
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     ts,
@@ -192,6 +200,10 @@ def save_trade(
                     strategy_version,
                     profile_hash,
                     source_approval_id,
+                    account_key,
+                    fee,
+                    tax,
+                    str(cost_source or "unavailable"),
                 ),
             )
             
@@ -201,7 +213,8 @@ def save_trade(
                 """
                 SELECT ts, symbol, name, action, qty, price, reason, ok, env, dry_run,
                        broker_order_id, order_status, filled_qty, filled_price, pre_order_qty, response_msg, broker_result,
-                       strategy_id, strategy_version, profile_hash, source_approval_id
+                       strategy_id, strategy_version, profile_hash, source_approval_id,
+                       account_key, fee, tax, cost_source
                 FROM trades ORDER BY ts ASC
                 """
             ).fetchall()

@@ -110,6 +110,10 @@ def init_db() -> None:
         _ensure_column(conn, "trades", "strategy_version", "INTEGER")
         _ensure_column(conn, "trades", "profile_hash", "TEXT")
         _ensure_column(conn, "trades", "source_approval_id", "INTEGER")
+        _ensure_column(conn, "trades", "account_key", "TEXT")
+        _ensure_column(conn, "trades", "fee", "REAL")
+        _ensure_column(conn, "trades", "tax", "REAL")
+        _ensure_column(conn, "trades", "cost_source", "TEXT DEFAULT 'unavailable'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS decision_logs (
@@ -409,6 +413,16 @@ def init_db() -> None:
             raise RuntimeError(
                 f"Failed to initialize analysis-cycle tables: {cycle_err}"
             ) from cycle_err
+        try:
+            from src.db.performance_repository import init_performance_tables
+
+            init_performance_tables(conn)
+            conn.commit()
+        except (sqlite3.Error, OSError, ValueError, TypeError, ImportError) as performance_err:
+            conn.rollback()
+            raise RuntimeError(
+                f"Failed to initialize strategy-performance tables: {performance_err}"
+            ) from performance_err
 
 
 def _ensure_column(conn: DBWrapper, table: str, column: str, column_type: str) -> None:
@@ -429,6 +443,7 @@ from src.db.strategy_repository import *  # noqa: F401,F403,E402
 from src.db.scheduler_repository import *  # noqa: F401,F403,E402
 from src.db.market_repository import *  # noqa: F401,F403,E402
 from src.db.analysis_repository import *  # noqa: F401,F403,E402
+from src.db.performance_repository import *  # noqa: F401,F403,E402
 
 
 _COMPATIBILITY_REPOSITORIES = (
@@ -438,6 +453,7 @@ _COMPATIBILITY_REPOSITORIES = (
     "src.db.scheduler_repository",
     "src.db.market_repository",
     "src.db.analysis_repository",
+    "src.db.performance_repository",
 )
 
 

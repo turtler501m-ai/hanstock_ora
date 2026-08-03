@@ -4022,6 +4022,7 @@ async function renderTradeCleanup() {
 async function renderPeriodicPerformance() {
     try {
         const periodicData = await fetchJson(performancePath('/api/performance/periodic'), 30000);
+        periodicData.strategy_forward = [];
         periodicDataCache = periodicData;
         
         // Attach sub-tab event listeners once
@@ -4048,6 +4049,20 @@ async function renderPeriodicPerformance() {
         }
         
         updatePeriodicPerformanceUI();
+        try {
+            const forwardData = await fetchJson(performancePath('/api/performance/forward'), 30000);
+            periodicData.strategy_forward = [
+                ...(forwardData.account ? [forwardData.account] : []),
+                ...(forwardData.strategies || []),
+            ];
+            renderStrategyForwardPerformance(periodicData.strategy_forward);
+        } catch (forwardError) {
+            console.error('Forward performance render failed:', forwardError);
+            const tbody = document.querySelector('#table-strategy-validation tbody');
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="11">전략 모의성과 조회 실패: ${escapeHtml(forwardError.message)}</td></tr>`;
+            }
+        }
     } catch (err) {
         console.error('Periodic performance render failed:', err);
     }
@@ -4103,7 +4118,7 @@ function updatePeriodicPerformanceUI() {
         }
     }
 
-    renderStrategyValidation(periodicDataCache.strategy_validation || []);
+    renderStrategyForwardPerformance(periodicDataCache.strategy_forward || []);
     
     // 2. Render Chart.js with defense
     if (typeof Chart === 'undefined') {
@@ -4277,34 +4292,147 @@ function formatMarketIndex(value, changePct) {
     return `${Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}${change}`;
 }
 
-function renderStrategyValidation(items) {
+function renderStrategyForwardPerformance(items) {
     const tbody = document.querySelector('#table-strategy-validation tbody');
     if (!tbody) return;
+    bindPerformanceCashflowForm();
     if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="9">전략이 기록된 성과 데이터가 없습니다.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11">전략이 기록된 모의 체결 데이터가 없습니다.</td></tr>';
         return;
     }
-    const statusLabels = {
-        effective: '유효', monitor: '관찰', review: '재검토', insufficient: '표본 부족'
+    const decisionLabels = {
+        monitor: '관찰 유지', pause: '신규진입 중지 검토', reduce: '비중 축소 검토',
+        increase: '비중 확대 검토', retire: '폐기 검토'
     };
+    const qualityLabels = {
+        strategy_unattributed: '전략 미귀속', missing_market_close: '종가 누락',
+        strategy_ownership_mismatch: '전략 보유량과 매도 불일치',
+        shared_symbol_attribution: '여러 전략이 같은 종목 보유',
+        no_invested_capital: '투입금 없음', missing_kospi_benchmark: 'KOSPI 자료 없음',
+        missing_kosdaq_benchmark: 'KOSDAQ 자료 없음',
+        incomplete_kospi_contributions: '일부 KOSPI 비교시점 누락',
+        incomplete_kosdaq_contributions: '일부 KOSDAQ 비교시점 누락',
+        costs_not_included: '거래비용 미반영', account_identity_unavailable: '계좌 식별정보 없음',
+        benchmark_uses_previous_close: '장중 지수 대신 직전 확정 종가 사용',
+        synthetic_cashflow: '매수 부족분을 가상 투입금으로 처리',
+        nav_unavailable: 'NAV 계산 자료 부족',
+        unprocessed_trade_after_last_session: '마지막 확정 거래일 이후 체결 존재',
+        missing_kospi_nav_sessions: 'KOSPI 일별 비교자료 누락',
+        missing_kosdaq_nav_sessions: 'KOSDAQ 일별 비교자료 누락',
+    };
+    const optionalCurrency = (value) => value === null || typeof value === 'undefined' ? '-' : formatCurrency(value);
     tbody.innerHTML = items.map((item) => {
-        const pnl = Number(item.realized_pnl || 0);
-        const statusKind = item.validation_status === 'effective' ? 'buy'
-            : item.validation_status === 'review' ? 'sell' : 'hold';
+        const isAccount = item.scope === 'account';
+        const brokerAccountNav = item.broker_account_nav || {};
+        const strategyReturn = isAccount && brokerAccountNav.available
+            ? brokerAccountNav.twr_pct
+            : (item.returns?.twr_pct ?? item.return_pct);
+        const kospiReturn = isAccount && brokerAccountNav.available
+            ? brokerAccountNav.kospi_twr_pct
+            : (item.returns?.kospi_twr_pct ?? item.kospi_return_pct);
+        const kosdaqReturn = isAccount && brokerAccountNav.available
+            ? brokerAccountNav.kosdaq_twr_pct
+            : (item.returns?.kosdaq_twr_pct ?? item.kosdaq_return_pct);
+        const excess = isAccount && brokerAccountNav.available
+            ? brokerAccountNav.excess_twr_vs_kospi_pct
+            : (item.returns?.excess_twr_vs_kospi_pct ?? item.excess_vs_kospi_pct);
+        const quality = item.quality || {};
+        const qualityText = quality.status === 'blocked' ? '계산 차단' : '사용 가능(제약)';
+        const nav = isAccount && brokerAccountNav.available
+            ? { available: true, current_index: 100 + Number(brokerAccountNav.twr_pct), max_drawdown_pct: brokerAccountNav.max_drawdown_pct }
+            : (item.nav || {});
+        const navText = nav.available
+            ? `NAV ${Number(nav.current_index).toFixed(2)} · MDD ${formatOptionalPercent(nav.max_drawdown_pct)}`
+            : 'NAV 산출 불가';
+        const qualityIssues = [...new Set([
+            ...(quality.blocking_issues || []), ...(quality.warnings || []),
+            ...(item.quality_issues || []),
+        ])];
         return `
             <tr>
                 <td><strong>${escapeHtml(item.strategy_name || item.strategy_id)}</strong><div class="time-muted">${escapeHtml(item.strategy_id || '')}</div></td>
-                <td>${Number(item.order_count || 0).toLocaleString()}건</td>
-                <td>${Number(item.closed_count || 0).toLocaleString()}건</td>
-                <td>${formatOptionalPercent(item.win_rate)}</td>
-                <td>${item.profit_factor === null || typeof item.profit_factor === 'undefined' ? '-' : Number(item.profit_factor).toFixed(2)}</td>
-                <td>${item.expectancy === null || typeof item.expectancy === 'undefined' ? '-' : formatCurrency(item.expectancy)}</td>
-                <td class="${pnl > 0 ? 'text-success' : pnl < 0 ? 'text-danger' : ''}">${formatCurrency(pnl)}</td>
-                <td>${formatCurrency(item.max_drawdown || 0)}</td>
-                <td>${pill(statusLabels[item.validation_status] || item.validation_status, statusKind)}<small class="strategy-validation-reason">${escapeHtml(item.validation_reason || '')}</small></td>
+                <td>${escapeHtml(item.started_at || '-')}<div class="time-muted">~ ${escapeHtml(item.as_of || '-')}</div></td>
+                <td>${formatCurrency(item.net_contribution || 0)}<div class="time-muted">가상 현금흐름</div></td>
+                <td>${optionalCurrency(item.current_equity)}</td>
+                <td class="${Number(strategyReturn) > 0 ? 'text-success' : Number(strategyReturn) < 0 ? 'text-danger' : ''}">${formatOptionalPercent(strategyReturn)}<div class="time-muted">비용 미반영</div></td>
+                <td>${formatOptionalPercent(kospiReturn)}</td>
+                <td>${formatOptionalPercent(kosdaqReturn)}</td>
+                <td class="${Number(excess) > 0 ? 'text-success' : Number(excess) < 0 ? 'text-danger' : ''}">${formatOptionalPercent(excess)}<div class="time-muted">KOSPI 대비</div></td>
+                <td>${pill(qualityText, quality.status === 'blocked' ? 'sell' : 'hold')}<div class="time-muted">${escapeHtml(navText)}</div><small class="strategy-validation-reason">${escapeHtml(qualityIssues.map((code) => qualityLabels[code] || code).join(', '))}</small></td>
+                <td>${isAccount ? '<span class="time-muted">계좌 전체</span>' : `<select class="strategy-review-decision" data-id="${escapeHtml(item.strategy_id)}">
+                    ${Object.entries(decisionLabels).map(([value, label]) => `<option value="${value}" ${item.review_decision === value ? 'selected' : ''}>${label}</option>`).join('')}
+                </select>`}</td>
+                <td>${isAccount ? '-' : `<input type="text" class="strategy-review-note" data-id="${escapeHtml(item.strategy_id)}" value="${escapeHtml(item.review_note || '')}" maxlength="1000" placeholder="판단 근거"><button type="button" class="button-ghost compact-button save-strategy-review" data-id="${escapeHtml(item.strategy_id)}">저장</button>`}</td>
             </tr>
         `;
     }).join('');
+    tbody.querySelectorAll('.save-strategy-review').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const id = button.dataset.id;
+            const decision = tbody.querySelector(`.strategy-review-decision[data-id="${CSS.escape(id)}"]`)?.value || 'monitor';
+            const note = tbody.querySelector(`.strategy-review-note[data-id="${CSS.escape(id)}"]`)?.value || '';
+            try {
+                setButtonBusy(button, true);
+                const response = await fetch(`/api/performance/forward/${encodeURIComponent(id)}/review`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ decision, note }),
+                });
+                const payload = await response.json();
+                if (!response.ok) throw new Error(payload.detail || `저장 실패: ${response.status}`);
+                button.textContent = '저장됨';
+                button.dataset.savedAt = payload.review?.reviewed_at || '';
+                setStatus('전략 수동 검토 의견을 저장했습니다. 자동매매 상태는 변경되지 않았습니다.', true);
+            } catch (error) {
+                setStatus(`수동 검토 저장 실패: ${error.message}`);
+            } finally {
+                setButtonBusy(button, false);
+            }
+        });
+    });
+}
+
+function bindPerformanceCashflowForm() {
+    const button = document.getElementById('btn-save-performance-cashflow');
+    if (!button || button.dataset.bound === 'true') return;
+    button.dataset.bound = 'true';
+    button.addEventListener('click', async () => {
+        const occurredInput = document.getElementById('performance-cashflow-at');
+        const amountInput = document.getElementById('performance-cashflow-amount');
+        const kindInput = document.getElementById('performance-cashflow-kind');
+        const noteInput = document.getElementById('performance-cashflow-note');
+        const confirmedInput = document.getElementById('performance-cashflow-confirmed');
+        const amount = Number(amountInput?.value);
+        const occurredDate = occurredInput?.value ? new Date(occurredInput.value) : null;
+        if (!occurredDate || Number.isNaN(occurredDate.getTime()) || !Number.isFinite(amount) || amount === 0) {
+            setStatus('발생 시각과 0이 아닌 금액을 입력해 주세요.');
+            return;
+        }
+        try {
+            setButtonBusy(button, true);
+            const response = await fetch('/api/performance/account-cashflows', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    external_ref: `manual-${Date.now()}`,
+                    occurred_at: occurredDate.toISOString(),
+                    amount,
+                    kind: kindInput?.value || 'other',
+                    confirmed: Boolean(confirmedInput?.checked),
+                    note: noteInput?.value || '',
+                }),
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.detail || `저장 실패: ${response.status}`);
+            setStatus('계좌 현금흐름을 저장했습니다. 다음 성과 조회부터 반영됩니다.', true);
+            if (amountInput) amountInput.value = '';
+            if (noteInput) noteInput.value = '';
+        } catch (error) {
+            setStatus(`계좌 현금흐름 저장 실패: ${error.message}`);
+        } finally {
+            setButtonBusy(button, false);
+        }
+    });
 }
 
 async function renderExecutionPlan() {

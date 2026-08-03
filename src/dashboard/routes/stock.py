@@ -60,6 +60,20 @@ class PaperCompletePayload(BaseModel):
     notes: str | None = None
 
 
+class StrategyPerformanceReviewPayload(BaseModel):
+    decision: str = "monitor"
+    note: str = Field(default="", max_length=1000)
+
+
+class AccountCashflowPayload(BaseModel):
+    external_ref: str = Field(..., min_length=1, max_length=100)
+    occurred_at: str = Field(..., min_length=10, max_length=40)
+    amount: float
+    kind: str
+    confirmed: bool = False
+    note: str = Field(default="", max_length=1000)
+
+
 def _now_kst_text() -> str:
     return trader.datetime.now(trader.KST).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -3095,6 +3109,91 @@ def get_periodic_performance(response: Response, strategy_id: str | None = None)
         return _build_periodic_performance(trades)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/performance/forward")
+def get_forward_performance(response: Response, strategy_id: str | None = None):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    try:
+        trades = _load_merged_trades()
+        strategies = _build_forward_strategy_performance(
+            trades, strategy_id=strategy_id
+        )
+        account = _build_forward_account_performance(trades) if not strategy_id else None
+        for row in strategies:
+            row.pop("daily_nav", None)
+        if account:
+            account.pop("daily_nav", None)
+        return {
+            "schema_version": 2,
+            "strategies": strategies,
+            "account": account,
+            "method": "cash_flow_matched_forward_ledger",
+            "methodology": {
+                "capital_basis": "synthetic_buy_shortfall",
+                "return_method": "unitized_daily_nav",
+                "benchmark_price": "previous_finalized_session_close",
+                "costs": "excluded",
+            },
+            "manual_review_only": True,
+        }
+    except (sqlite3.Error, OSError, ValueError, TypeError) as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/api/performance/forward/{strategy_id}/nav")
+def get_forward_performance_nav(response: Response, strategy_id: str):
+    from src.db.performance_repository import list_daily_nav
+    response.headers["Cache-Control"] = "no-store"
+    scope_type = "account" if strategy_id == "__account__" else "strategy"
+    return {"strategy_id": strategy_id, "daily_nav": list_daily_nav(strategy_id, scope_type=scope_type)}
+
+
+@router.patch("/api/performance/forward/{strategy_id}/review")
+def update_forward_performance_review(
+    strategy_id: str,
+    payload: StrategyPerformanceReviewPayload,
+):
+    from src.db.performance_repository import save_strategy_performance_review
+    from src.db.strategy_repository import load_ai_strategies
+
+    try:
+        known_ids = {
+            str(item.get("id")) for item in load_ai_strategies() if item.get("id")
+        }
+        if strategy_id not in known_ids and strategy_id != "unattributed":
+            raise ValueError(f"strategy not found: {strategy_id}")
+        review = save_strategy_performance_review(
+            strategy_id, payload.decision, payload.note
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "review": review, "trading_state_changed": False}
+
+
+@router.get("/api/performance/account-cashflows")
+def get_performance_account_cashflows(response: Response):
+    from src.db.performance_repository import list_account_cashflows
+    response.headers["Cache-Control"] = "no-store"
+    return {"cashflows": list_account_cashflows(), "manual_confirmation_required": True}
+
+
+@router.post("/api/performance/account-cashflows")
+def save_performance_account_cashflow(payload: AccountCashflowPayload):
+    from src.db.performance_repository import record_account_cashflow
+    try:
+        row = record_account_cashflow(
+            external_ref=payload.external_ref,
+            occurred_at=payload.occurred_at,
+            amount=payload.amount,
+            kind=payload.kind,
+            confirmed=payload.confirmed,
+            note=payload.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "cashflow": row, "performance_recalculated": False}
 
 
 

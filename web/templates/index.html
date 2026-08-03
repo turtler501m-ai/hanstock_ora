@@ -963,21 +963,37 @@
                         </div>
                     </div>
 
-                    <h3 class="subsection-title">전략별 유효성 검증</h3>
-                    <p class="section-help">전략별 청산 거래의 표본 수, 승률, 손익비, 기대값과 최대 낙폭을 함께 확인합니다. 표본 5건 미만은 판단을 보류합니다.</p>
+                    <h3 class="subsection-title">전략별 모의성과 및 수동 검증</h3>
+                    <p class="section-help">모의 체결가로 재구성한 전략 자산을 동일 가상 현금흐름의 KOSPI·KOSDAQ과 비교합니다. NAV·MDD는 확정 거래일 종가로 계산합니다. 거래비용과 계좌 입출금이 확인되지 않은 결과는 추정치이며 실제 계좌 입출금은 확인 전까지 반영하지 않습니다. 수동 검토는 운용 상태를 자동 변경하지 않습니다.</p>
+                    <div class="button-row performance-cashflow-form" aria-label="계좌 현금흐름 수동 등록">
+                        <input type="datetime-local" id="performance-cashflow-at" aria-label="발생 시각">
+                        <select id="performance-cashflow-kind" aria-label="현금흐름 종류">
+                            <option value="deposit">입금</option>
+                            <option value="withdrawal">출금</option>
+                            <option value="dividend">배당</option>
+                            <option value="interest">이자</option>
+                            <option value="other">기타</option>
+                        </select>
+                        <input type="number" id="performance-cashflow-amount" step="1" placeholder="금액" aria-label="금액">
+                        <input type="text" id="performance-cashflow-note" maxlength="1000" placeholder="확인 근거" aria-label="확인 근거">
+                        <label><input type="checkbox" id="performance-cashflow-confirmed"> 확인 완료</label>
+                        <button type="button" id="btn-save-performance-cashflow">현금흐름 저장</button>
+                    </div>
                     <div class="table-responsive">
                         <table id="table-strategy-validation">
                             <thead>
                                 <tr>
                                     <th>전략</th>
-                                    <th>주문</th>
-                                    <th>청산 표본</th>
-                                    <th>승률</th>
-                                    <th>손익비</th>
-                                    <th>건당 기대값</th>
-                                    <th>누적 실현손익</th>
-                                    <th>최대 낙폭</th>
-                                    <th>검증 결과</th>
+                                    <th>관찰기간</th>
+                                    <th>가상 투입금<br><small>실제 입금 아님</small></th>
+                                    <th>현재자산</th>
+                                    <th>비용 전 TWR</th>
+                                    <th>KOSPI</th>
+                                    <th>KOSDAQ</th>
+                                    <th>초과수익</th>
+                                    <th>품질</th>
+                                    <th>수동 검토 의견<br><small>운용 미반영</small></th>
+                                    <th>메모</th>
                                 </tr>
                             </thead>
                             <tbody></tbody>
@@ -2089,7 +2105,7 @@
     </script>
     <script src="/static/js/environment_badge.js?v=1"></script>
     <script src="/static/js/common-analysis.js?v=1"></script>
-    <script src="/static/js/app.js?v=58"></script>
+    <script src="/static/js/app.js?v=61"></script>
 
     <!-- Plunge Bounce Strategy Scripts -->
     <script>

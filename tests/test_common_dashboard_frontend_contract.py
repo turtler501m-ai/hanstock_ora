@@ -59,6 +59,16 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("sortable-header", APP_JS)
         self.assertIn("data-sort-key", APP_JS)
 
+    def test_performance_tab_exposes_forward_returns_and_manual_review(self):
+        self.assertIn("전략별 모의성과 및 수동 검증", INDEX_HTML)
+        self.assertIn("/api/performance/forward", APP_JS)
+        self.assertIn("function renderStrategyForwardPerformance(items)", APP_JS)
+        self.assertIn("item.excess_vs_kospi_pct", APP_JS)
+        self.assertIn("strategy-review-decision", APP_JS)
+        self.assertIn("자동매매 상태는 변경되지 않았습니다", APP_JS)
+        self.assertIn("Forward performance render failed", APP_JS)
+        self.assertIn("거래비용과 계좌 입출금이 확인되지 않은 결과는 추정치", INDEX_HTML)
+
     def test_trade_sync_result_lists_every_processed_item(self):
         self.assertIn('id="table-trade-sync-items"', INDEX_HTML)
         self.assertIn('id="table-trade-sync-runs"', INDEX_HTML)

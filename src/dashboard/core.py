@@ -754,7 +754,7 @@ def _get_balance_data(api: KIStockAPI, allow_cache: bool = True) -> dict:
                     return cached
             raise
         try:
-            _parse_balance(balance_data)
+            parsed_balance = _parse_balance(balance_data)
         except DashboardOperationError:
             if allow_cache:
                 cached = _load_balance_cache()
@@ -767,6 +767,20 @@ def _get_balance_data(api: KIStockAPI, allow_cache: bool = True) -> dict:
                 if cached is not None:
                     return cached
             raise
+        try:
+            from src.db.performance_repository import record_account_equity_snapshot
+            summary_hash = hashlib.sha256(
+                json.dumps(balance_data.get("output2") or {}, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()
+            record_account_equity_snapshot(
+                total_equity=float(parsed_balance.get("total_eval") or 0),
+                cash=float(parsed_balance.get("cash") or 0),
+                stock_value=float(parsed_balance.get("stock_eval") or 0),
+                source="kis_balance",
+                raw_summary_hash=summary_hash,
+            )
+        except (sqlite3.Error, OSError, ValueError, TypeError) as exc:
+            logger.warning(f"Failed to persist account equity snapshot: {exc}")
         _save_balance_cache(balance_data)
         return balance_data
 
@@ -3106,8 +3120,22 @@ def _load_merged_trades() -> list[dict]:
         if not ts:
             continue
         ts_norm = str(ts).replace("T", " ").split(".")[0].strip()
-        key = f"{ts_norm}_{t.get('symbol')}_{t.get('action')}"
+        broker_order_id = str(t.get("broker_order_id") or "").strip()
+        source_approval_id = str(t.get("source_approval_id") or "").strip()
+        strategy_id = str(t.get("strategy_id") or "").strip()
+        trade_env = str(t.get("env") or "demo")
+        if broker_order_id:
+            key = f"broker:{trade_env}:{ts_norm[:10]}:{broker_order_id}:{t.get('action')}"
+        elif source_approval_id:
+            key = f"approval:{trade_env}:{source_approval_id}:{t.get('action')}"
+        else:
+            key = ":".join([
+                "fill", ts_norm, str(t.get("symbol") or ""), str(t.get("action") or ""),
+                str(t.get("qty") or ""), str(t.get("price") or ""), strategy_id,
+                trade_env,
+            ])
         merged_trades[key] = {
+            "id": t.get("id"),
             "ts": ts_norm,
             "symbol": t.get("symbol"),
             "name": t.get("name", t.get("symbol")),
@@ -3123,6 +3151,14 @@ def _load_merged_trades() -> list[dict]:
             "filled_qty": _to_int(t.get("filled_qty")),
             "filled_price": _to_int(t.get("filled_price")),
             "response_msg": t.get("response_msg", ""),
+            "strategy_id": t.get("strategy_id") or "",
+            "strategy_version": t.get("strategy_version"),
+            "profile_hash": t.get("profile_hash") or "",
+            "source_approval_id": t.get("source_approval_id"),
+            "account_key": t.get("account_key") or "",
+            "fee": t.get("fee"),
+            "tax": t.get("tax"),
+            "cost_source": t.get("cost_source") or "unavailable",
         }
     return sorted(merged_trades.values(), key=lambda x: x["ts"])
 
@@ -3379,6 +3415,172 @@ def _monthly_market_context(index_rows: dict[str, list[dict]]) -> dict[str, dict
     return context
 
 
+def _load_symbol_price_rows(symbols: set[str], *, limit: int = 1500) -> dict[str, list[dict]]:
+    """Load as-of closes for forward paper-performance reconstruction."""
+    if not symbols:
+        return {}
+    result: dict[str, list[dict]] = {}
+    from src.db.repository import connect_db
+
+    with connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        for symbol in sorted(symbols):
+            rows = conn.execute(
+                "SELECT date, close FROM daily_charts WHERE symbol=? AND close>0 "
+                "ORDER BY date DESC LIMIT ?",
+                (symbol, int(limit)),
+            ).fetchall()
+            if rows:
+                result[symbol] = [
+                    {"date": str(row["date"])[:10], "close": float(row["close"])}
+                    for row in reversed(rows)
+                ]
+    return result
+
+
+def _load_long_benchmark_rows() -> dict[str, list[dict]]:
+    aliases = {
+        code: _load_symbol_price_rows(set(symbols), limit=1500)
+        for code, symbols in _INDEX_SYMBOL_ALIASES.items()
+    }
+    result: dict[str, list[dict]] = {}
+    for code, symbols in _INDEX_SYMBOL_ALIASES.items():
+        by_symbol = aliases.get(code, {})
+        candidates = [by_symbol[symbol] for symbol in symbols if by_symbol.get(symbol)]
+        if candidates:
+            result[code] = max(candidates, key=lambda rows: len(rows))
+    fallback = _load_index_rows()
+    for code, rows in fallback.items():
+        result.setdefault(code, rows)
+    return result
+
+
+def _build_forward_strategy_performance(
+    trades: list[dict], *, strategy_id: str | None = None
+) -> list[dict]:
+    from src.db.performance_repository import (
+        account_scope_key,
+        list_strategy_performance_reviews,
+        replace_daily_nav,
+    )
+    from src.db.strategy_repository import load_ai_strategies
+    from src.strategy.forward_performance import build_strategy_forward_performance
+
+    account_trades = [
+        trade for trade in _account_trades(trades)
+        if str(trade.get("env") or trader.TRADING_ENV) == str(trader.TRADING_ENV)
+    ]
+    if strategy_id:
+        account_trades = [
+            trade for trade in account_trades
+            if str(trade.get("strategy_id") or "unattributed") == strategy_id
+        ]
+    symbols = {
+        str(trade.get("symbol") or "").strip()
+        for trade in account_trades
+        if str(trade.get("symbol") or "").strip()
+    }
+    price_rows = _load_symbol_price_rows(symbols)
+    benchmark_rows = _load_long_benchmark_rows()
+    names = {
+        str(item.get("id")): str(item.get("name") or item.get("id"))
+        for item in load_ai_strategies()
+        if item.get("id")
+    }
+    reviews = {
+        str(item.get("strategy_id")): item
+        for item in list_strategy_performance_reviews()
+    }
+    now_kst = trader.datetime.now(trader.KST)
+    as_of = now_kst.date()
+    if now_kst.hour < 16:
+        as_of -= trader.timedelta(days=1)
+    results = build_strategy_forward_performance(
+        account_trades,
+        price_rows,
+        benchmark_rows,
+        as_of=as_of.isoformat(),
+        strategy_names=names,
+        reviews=reviews,
+    )
+    current_account_key = account_scope_key()
+    for row in results:
+        issues = row.setdefault("quality_issues", [])
+        strategy_trade_rows = [
+            trade for trade in account_trades
+            if str(trade.get("strategy_id") or "unattributed") == row["strategy_id"]
+        ]
+        identity_available = bool(strategy_trade_rows) and all(
+            str(trade.get("account_key") or "") == current_account_key
+            for trade in strategy_trade_rows
+        )
+        if not identity_available and "account_identity_unavailable" not in issues:
+            issues.append("account_identity_unavailable")
+            row.setdefault("quality", {}).setdefault("warnings", []).append(
+                "account_identity_unavailable"
+            )
+        row["data_quality"] = "estimated"
+        row["attribution_reliable"] = bool(
+            row.get("quality", {}).get("status") != "blocked"
+            and identity_available
+        )
+        # Synthetic capital and excluded costs are suitable for monitoring,
+        # not for claiming broker-net performance accuracy.
+        row["reliable"] = False
+        replace_daily_nav(
+            row["strategy_id"],
+            row.get("daily_nav") or [],
+            scope_type="account" if row["strategy_id"] == "__account__" else "strategy",
+            input_hash=row["input_hash"],
+        )
+    return results
+
+
+def _build_forward_account_performance(trades: list[dict]) -> dict | None:
+    from src.db.performance_repository import build_account_equity_performance
+    account_rows = [
+        {**trade, "strategy_id": "__account__"}
+        for trade in trades
+    ]
+    rows = _build_forward_strategy_performance(account_rows, strategy_id="__account__")
+    if not rows:
+        return None
+    result = {
+        **rows[0],
+        "strategy_id": "__account__",
+        "strategy_name": "전체 모의계좌 체결 원장",
+        "scope": "account",
+    }
+    broker_nav = build_account_equity_performance()
+    if broker_nav.get("available"):
+        benchmark_rows = _load_long_benchmark_rows()
+        sessions = [row["session_date"] for row in broker_nav.get("daily", [])]
+        for code in ("KOSPI", "KOSDAQ"):
+            rows_by_date = {
+                str(item.get("date") or "")[:10]: float(item.get("close") or 0)
+                for item in benchmark_rows.get(code, [])
+                if float(item.get("close") or 0) > 0
+            }
+            index_value = 100.0
+            valid = True
+            ordered_dates = sorted(rows_by_date)
+            for session in sessions[1:]:
+                previous_dates = [day for day in ordered_dates if day < session]
+                current = rows_by_date.get(session)
+                previous = rows_by_date.get(previous_dates[-1]) if previous_dates else None
+                if not current or not previous:
+                    valid = False
+                    break
+                index_value *= current / previous
+            broker_nav[f"{code.lower()}_twr_pct"] = round(index_value - 100, 2) if valid else None
+        broker_nav["excess_twr_vs_kospi_pct"] = (
+            round(broker_nav["twr_pct"] - broker_nav["kospi_twr_pct"], 2)
+            if broker_nav.get("kospi_twr_pct") is not None else None
+        )
+    result["broker_account_nav"] = broker_nav
+    return result
+
+
 def _build_periodic_performance(trades: list[dict]) -> dict:
     daily: dict[str, dict] = {}
     monthly: dict[str, dict] = {}
@@ -3515,6 +3717,7 @@ def _sync_filled_trades_from_history(
     days: int = 90,
     history: list[dict] | None = None,
 ) -> dict:
+    from src.db.performance_repository import account_scope_key
     start_date, end_date = _order_history_window(days)
     if history is None:
         history = api.get_trade_history(start_date, end_date)
@@ -3522,10 +3725,30 @@ def _sync_filled_trades_from_history(
 
     merged_trades = _load_merged_trades()
     existing = {_history_trade_key(item): item for item in merged_trades}
+    def broker_history_key(item: dict) -> tuple[str, str, str, str, str]:
+        return (
+            str(item.get("env") or trader.TRADING_ENV),
+            str(item.get("ts") or "")[:10],
+            str(item.get("broker_order_id") or "").strip(),
+            str(item.get("symbol") or ""),
+            str(item.get("action") or ""),
+        )
+
     existing_by_broker_order_id = {
-        str(item.get("broker_order_id") or "").strip(): item
+        broker_history_key(item): item
         for item in merged_trades
         if str(item.get("broker_order_id") or "").strip()
+    }
+    active_by_broker_order_id = {
+        (
+            str(item.get("env") or trader.TRADING_ENV),
+            str(item.get("broker_order_id") or "").strip(),
+            str(item.get("symbol") or ""),
+            str(item.get("action") or ""),
+        ): item
+        for item in merged_trades
+        if str(item.get("broker_order_id") or "").strip()
+        and str(item.get("order_status") or "") in {"submitted", "open", "partial"}
     }
     imported_count = 0
     skipped_count = 0
@@ -3554,7 +3777,16 @@ def _sync_filled_trades_from_history(
 
             key = _history_trade_key(trade)
             broker_order_id = str(trade.get("broker_order_id") or "").strip()
-            stored = existing.get(key) or existing_by_broker_order_id.get(broker_order_id)
+            stored = existing.get(key) or existing_by_broker_order_id.get(
+                broker_history_key(trade)
+            )
+            if stored is None:
+                stored = active_by_broker_order_id.get((
+                    str(trade.get("env") or trader.TRADING_ENV),
+                    broker_order_id,
+                    str(trade.get("symbol") or ""),
+                    str(trade.get("action") or ""),
+                ))
             if stored is not None:
                 item_result = "skipped"
                 item_message = "이미 저장된 체결 기록"
@@ -3583,12 +3815,13 @@ def _sync_filled_trades_from_history(
                     filled_qty,
                     _to_int(trade.get("filled_price")),
                 )
-                if trade["broker_order_id"] and stored_state != incoming_state:
+                needs_account_key = not str(stored.get("account_key") or "").strip()
+                if trade["broker_order_id"] and (stored_state != incoming_state or needs_account_key):
                     stored_id = _to_int(stored.get("id"))
                     where_sql = (
                         "id = ?"
                         if stored_id > 0
-                        else "broker_order_id = ? AND symbol = ? AND action = ?"
+                        else "broker_order_id = ? AND symbol = ? AND action = ? AND env = ? AND substr(ts, 1, 10) = ?"
                     )
                     where_values = (
                         (stored_id,)
@@ -3597,6 +3830,8 @@ def _sync_filled_trades_from_history(
                             trade["broker_order_id"],
                             trade["symbol"],
                             trade["action"],
+                            trade["env"],
+                            str(trade["ts"])[:10],
                         )
                     )
                     cursor = conn.execute(
@@ -3606,7 +3841,8 @@ def _sync_filled_trades_from_history(
                             filled_qty = ?,
                             filled_price = ?,
                             response_msg = ?,
-                            broker_result = ?
+                            broker_result = ?,
+                            account_key = COALESCE(NULLIF(account_key, ''), ?)
                         WHERE {where_sql}
                         """,
                         (
@@ -3615,6 +3851,7 @@ def _sync_filled_trades_from_history(
                             trade["filled_price"],
                             trade["response_msg"],
                             trade["broker_result"],
+                            account_scope_key(),
                             *where_values,
                         ),
                     )
@@ -3649,9 +3886,10 @@ def _sync_filled_trades_from_history(
                 """
                 INSERT INTO trades (
                     ts, symbol, name, action, qty, price, reason, ok, env, dry_run,
-                    broker_order_id, order_status, filled_qty, filled_price, pre_order_qty, response_msg, broker_result
+                    broker_order_id, order_status, filled_qty, filled_price, pre_order_qty, response_msg, broker_result,
+                    account_key, fee, tax, cost_source
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     trade["ts"],
@@ -3671,6 +3909,10 @@ def _sync_filled_trades_from_history(
                     0,
                     trade["response_msg"],
                     trade["broker_result"],
+                    account_scope_key(),
+                    None,
+                    None,
+                    "unavailable",
                 ),
             )
             logger.info(
