@@ -745,6 +745,39 @@ class DashboardCoreTests(unittest.TestCase):
         finally:
             dashboard.CANDIDATE_CACHE = original_cache
 
+    def test_candidate_cache_updates_strategy_snapshot_in_db(self):
+        original_cache = dashboard_core.CANDIDATE_CACHE
+        try:
+            dashboard_core.CANDIDATE_CACHE = MemoryCachePath()
+            strategy = {
+                "id": "strategy_a",
+                "strategy_version": 1,
+                "profile_hash": "hash-a",
+            }
+            with (
+                patch("src.db.repository.load_ai_strategies", return_value=[strategy]),
+                patch("src.db.repository.save_account_snapshot") as save_snapshot,
+            ):
+                cached_at = dashboard._save_candidate_cache(
+                    2, [{"ticker": "005930"}], [], 1, "strategy_a", "opt"
+                )
+                dashboard._save_candidate_cache(
+                    2, [{"ticker": "000660"}], [], 1, "strategy_a", "opt"
+                )
+
+            self.assertIsInstance(cached_at, str)
+            self.assertEqual(save_snapshot.call_count, 2)
+            latest_call = save_snapshot.call_args
+            self.assertEqual(latest_call.args[0], "_candidates_")
+            self.assertEqual(latest_call.args[2], "candidates:strategy_a:opt:2")
+            self.assertEqual(latest_call.args[3]["rows"], [{"ticker": "000660"}])
+            self.assertEqual(
+                json.loads(dashboard_core.CANDIDATE_CACHE.content)["rows"],
+                [{"ticker": "000660"}],
+            )
+        finally:
+            dashboard_core.CANDIDATE_CACHE = original_cache
+
     def test_enabling_auto_approval_processes_pending_orders(self):
         original_state = dashboard.AUTO_APPROVAL_STATE
         original_db_path = dashboard.trader.config.trade_db_path

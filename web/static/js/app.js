@@ -2802,7 +2802,7 @@ async function renderCandidates(options = {}) {
                         strategy_id: strategyId,
                         min_score: '2',
                         optimizer,
-                        refresh: 'false',
+                        refresh: String(Boolean(options.refresh)),
                     });
                     const response = await fetchJson(`/api/candidates?${params.toString()}`, 90000);
                     return {
@@ -3007,11 +3007,35 @@ async function previewSelectedStrategies() {
         setStatus(`선택 전략 ${strategyIds.length}개를 분석 전용으로 실행 중입니다. 주문은 생성되지 않습니다.`, true);
         await waitForStrategyPreviewCompletion();
         await renderCandidates({ strategyIds, strategies: selected });
+        const refreshButton = document.getElementById('btn-refresh-strategy-lookup');
+        if (refreshButton) refreshButton.hidden = false;
         setStatus(`전략 조회 완료 · ${strategyIds.length}개 전략 · 주문 없음`, true);
     } catch (error) {
         setTableMessage('#table-candidates tbody', 9, error.message);
         setStatus(`전략 조회 실패: ${error.message}`);
     } finally {
+        setButtonBusy(button, false);
+    }
+}
+
+async function refreshStrategyLookup() {
+    const button = document.getElementById('btn-refresh-strategy-lookup');
+    setButtonBusy(button, true);
+    if (button) button.textContent = '새로고침 중...';
+    try {
+        const envelope = await fetchJson('/api/ai-strategies', 30000);
+        const selected = (envelope.strategies || []).filter((strategy) =>
+            strategy.selected && strategy.status === 'approved');
+        const strategyIds = selected.map((strategy) => String(strategy.id));
+        if (!strategyIds.length) throw new Error('AI 전략 탭에서 조회할 전략을 먼저 선택해 주세요.');
+
+        setStatus(`선택 전략 ${strategyIds.length}개의 최신 데이터를 조회하고 있습니다.`, true);
+        await renderCandidates({ strategyIds, strategies: selected, refresh: true });
+        setStatus(`전략 새로고침 완료 · ${strategyIds.length}개 전략 · DB 최신본 저장`, true);
+    } catch (error) {
+        setStatus(`전략 새로고침 실패: ${error.message}`);
+    } finally {
+        if (button) button.textContent = '새로고침';
         setButtonBusy(button, false);
     }
 }
@@ -4699,6 +4723,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnCandidates = document.getElementById('btn-candidates');
     if (btnCandidates) {
         btnCandidates.addEventListener('click', previewSelectedStrategies);
+    }
+    const btnRefreshStrategyLookup = document.getElementById('btn-refresh-strategy-lookup');
+    if (btnRefreshStrategyLookup) {
+        btnRefreshStrategyLookup.addEventListener('click', refreshStrategyLookup);
     }
     const btnExecutionPlan = document.getElementById('btn-execution-plan');
     if (btnExecutionPlan) {

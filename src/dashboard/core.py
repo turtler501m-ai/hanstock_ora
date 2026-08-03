@@ -897,7 +897,7 @@ def _save_candidate_cache(
     scanned: int,
     ranker: str = "gpt_5_mini",
     optimizer: str = "score_tilted_inverse_vol",
-) -> None:
+) -> str | None:
     override = _public_override("_save_candidate_cache", _save_candidate_cache)
     if override is not None:
         if ranker == "gpt_5_mini" and optimizer == "score_tilted_inverse_vol":
@@ -936,6 +936,7 @@ def _save_candidate_cache(
         )
     except (sqlite3.DatabaseError, OSError, ValueError, TypeError) as exc:
         logger.warning(f"Failed to persist candidate snapshot: {exc}")
+    return envelope["cached_at"]
 
 
 def _resolve_dashboard_strategy(strategy_id: str | None = None) -> dict | None:
@@ -2622,14 +2623,6 @@ async def get_candidates(
                 cand["profile_hash"] = selected_strat.get("profile_hash")
         
         if payload["scanned"] > 0:
-            if cache_ranker == "gpt_5_mini" and optimizer == "score_tilted_inverse_vol":
-                _save_candidate_cache(
-                    min_score, payload["candidates"], payload["scan_summary"], payload["scanned"]
-                )
-            else:
-                _save_candidate_cache(
-                    min_score, payload["candidates"], payload["scan_summary"], payload["scanned"], cache_ranker, optimizer
-                )
             # Automatically save scan results to DB for history tracking
             from src.db.repository import save_scanned_candidate
             for cand in payload["candidates"]:
@@ -2680,6 +2673,28 @@ async def get_candidates(
                     },
                     selected_strat.get("strategy_version"),
                 )
+
+            # 후보 이력의 DB id까지 결과에 반영한 뒤 전략별 최신본을 저장한다.
+            # 동일 전략/옵티마이저/점수 조합은 DB에서 항상 한 행으로 갱신된다.
+            if cache_ranker == "gpt_5_mini" and optimizer == "score_tilted_inverse_vol":
+                cached_at = _save_candidate_cache(
+                    min_score, payload["candidates"], payload["scan_summary"], payload["scanned"]
+                )
+            else:
+                cached_at = _save_candidate_cache(
+                    min_score,
+                    payload["candidates"],
+                    payload["scan_summary"],
+                    payload["scanned"],
+                    cache_ranker,
+                    optimizer,
+                )
+            if isinstance(cached_at, str):
+                payload["_cache"] = {
+                    "stale": False,
+                    "cached_at": cached_at,
+                    "persisted": True,
+                }
             
             # AI 자동 추가적용 로직
             from src.db.repository import load_watchlist_data, save_watchlist_data

@@ -3577,6 +3577,17 @@ th,
     background: rgba(59, 130, 246, 0.08);
 }
 
+.strategy-lookup-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+}
+
+.strategy-lookup-actions [hidden] {
+    display: none;
+}
+
 .strategy-preview-selection strong {
     color: #93c5fd;
 }
@@ -3649,6 +3660,13 @@ th,
 }
 
 @media (max-width: 760px) {
+    .strategy-lookup-actions {
+        width: 100%;
+        justify-content: stretch;
+    }
+    .strategy-lookup-actions button {
+        flex: 1 1 auto;
+    }
     .strategy-preview-selection {
         grid-template-columns: 1fr;
     }
