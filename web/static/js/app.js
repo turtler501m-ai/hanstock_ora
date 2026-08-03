@@ -3007,8 +3007,6 @@ async function previewSelectedStrategies() {
         setStatus(`선택 전략 ${strategyIds.length}개를 분석 전용으로 실행 중입니다. 주문은 생성되지 않습니다.`, true);
         await waitForStrategyPreviewCompletion();
         await renderCandidates({ strategyIds, strategies: selected });
-        const refreshButton = document.getElementById('btn-refresh-strategy-lookup');
-        if (refreshButton) refreshButton.hidden = false;
         setStatus(`전략 조회 완료 · ${strategyIds.length}개 전략 · 주문 없음`, true);
     } catch (error) {
         setTableMessage('#table-candidates tbody', 9, error.message);

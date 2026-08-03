@@ -32,15 +32,15 @@ class StrategyLookupTabContractTests(unittest.TestCase):
         self.assertIn("업데이트 중", script)
         self.assertIn("이전 결과", script)
 
-    def test_refresh_is_available_after_lookup_and_bypasses_cache(self):
+    def test_refresh_is_always_available_and_bypasses_cache(self):
         html = (ROOT / "web/templates/index.html").read_text(encoding="utf-8")
         script = (ROOT / "web/static/js/app.js").read_text(encoding="utf-8")
 
-        self.assertIn('id="btn-refresh-strategy-lookup" class="button-ghost" hidden', html)
+        self.assertIn('id="btn-refresh-strategy-lookup" class="button-ghost">새로고침</button>', html)
         self.assertIn("async function refreshStrategyLookup()", script)
         self.assertIn("await renderCandidates({ strategyIds, strategies: selected, refresh: true });", script)
         self.assertIn("refresh: String(Boolean(options.refresh))", script)
-        self.assertIn("refreshButton.hidden = false", script)
+        self.assertNotIn("refreshButton.hidden = false", script)
         self.assertIn("btnRefreshStrategyLookup.addEventListener('click', refreshStrategyLookup)", script)
         self.assertIn("DB 최신본 저장", script)
 

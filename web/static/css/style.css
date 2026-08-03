@@ -3584,10 +3584,6 @@ th,
     gap: 0.5rem;
 }
 
-.strategy-lookup-actions [hidden] {
-    display: none;
-}
-
 .strategy-preview-selection strong {
     color: #93c5fd;
 }
