@@ -3485,9 +3485,12 @@ def _sync_filled_trades_from_history(
         history = api.get_trade_history(start_date, end_date)
     trader.init_db()
 
-    existing = {
-        _history_trade_key(item): item
-        for item in _load_merged_trades()
+    merged_trades = _load_merged_trades()
+    existing = {_history_trade_key(item): item for item in merged_trades}
+    existing_by_broker_order_id = {
+        str(item.get("broker_order_id") or "").strip(): item
+        for item in merged_trades
+        if str(item.get("broker_order_id") or "").strip()
     }
     imported_count = 0
     skipped_count = 0
@@ -3515,10 +3518,11 @@ def _sync_filled_trades_from_history(
                 continue
 
             key = _history_trade_key(trade)
-            if key in existing:
+            broker_order_id = str(trade.get("broker_order_id") or "").strip()
+            stored = existing.get(key) or existing_by_broker_order_id.get(broker_order_id)
+            if stored is not None:
                 item_result = "skipped"
                 item_message = "이미 저장된 체결 기록"
-                stored = existing[key]
                 stored_state = (
                     str(stored.get("order_status") or ""),
                     _to_int(stored.get("filled_qty")),
@@ -3545,18 +3549,30 @@ def _sync_filled_trades_from_history(
                     _to_int(trade.get("filled_price")),
                 )
                 if trade["broker_order_id"] and stored_state != incoming_state:
+                    stored_id = _to_int(stored.get("id"))
+                    where_sql = (
+                        "id = ?"
+                        if stored_id > 0
+                        else "broker_order_id = ? AND symbol = ? AND action = ?"
+                    )
+                    where_values = (
+                        (stored_id,)
+                        if stored_id > 0
+                        else (
+                            trade["broker_order_id"],
+                            trade["symbol"],
+                            trade["action"],
+                        )
+                    )
                     cursor = conn.execute(
-                        """
+                        f"""
                         UPDATE trades
                         SET order_status = ?,
                             filled_qty = ?,
                             filled_price = ?,
                             response_msg = ?,
                             broker_result = ?
-                        WHERE broker_order_id = ?
-                          AND substr(ts, 1, 10) = ?
-                          AND symbol = ?
-                          AND action = ?
+                        WHERE {where_sql}
                         """,
                         (
                             incoming_status,
@@ -3564,10 +3580,7 @@ def _sync_filled_trades_from_history(
                             trade["filled_price"],
                             trade["response_msg"],
                             trade["broker_result"],
-                            trade["broker_order_id"],
-                            trade["ts"][:10],
-                            trade["symbol"],
-                            trade["action"],
+                            *where_values,
                         ),
                     )
                     updated_count += int(cursor.rowcount)

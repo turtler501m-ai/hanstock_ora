@@ -12,6 +12,26 @@ from src.utils.logger import logger
 from src.db import repository as _root
 
 KST = timezone(timedelta(hours=9))
+SCHEDULER_STATUSES = frozenset({"success", "partial", "blocked", "failed", "skipped"})
+
+
+def normalize_scheduler_status(result: dict) -> str:
+    explicit = str(result.get("execution_status") or result.get("status") or "").lower()
+    if explicit in SCHEDULER_STATUSES:
+        return explicit
+    if explicit in {"completed", "done", "ok"}:
+        return "success"
+    if result.get("ok") is False:
+        return "failed"
+    if result.get("blocked"):
+        return "blocked"
+    errors = result.get("errors") or result.get("run_errors") or result.get("auto_approval_errors")
+    if errors:
+        useful_output = result.get("results") or result.get("ran") or result.get("auto_approved")
+        return "partial" if useful_output else "failed"
+    if result.get("skipped") or explicit.startswith("skip"):
+        return "skipped"
+    return "success"
 
 def connect_db():
     return _root.connect_db()
@@ -37,6 +57,7 @@ def save_scheduler_result(mode: str, recorded_at: str, result: dict) -> None:
             return obj
 
         cleaned_result = convert_unserializable(result)
+        cleaned_result["execution_status"] = normalize_scheduler_status(cleaned_result)
         strategy_id = cleaned_result.get("strategy_id") or cleaned_result.get("force_strategy_id") or "seven_split"
         
         with connect_db() as conn:
@@ -549,4 +570,4 @@ def reconstruct_strategy_positions(strategy_id: str, env: str | None = None) -> 
                 pos["qty"] = 0
                 pos["avg_cost"] = 0.0
     return [p for p in positions.values() if p["qty"] > 0 or p["realized_pnl"]]
-__all__ = ['KST', 'save_scheduler_result', 'load_latest_scheduler_result', 'load_recent_scheduler_results', 'load_today_scheduler_results', 'load_auto_approval_state', 'save_auto_approval_state', 'save_account_snapshot', 'load_account_snapshot', 'delete_account_snapshot', '_SCHEDULE_DEFAULTS', '_schedule_row_to_dict', 'load_strategy_schedule', 'list_strategy_schedules', 'save_strategy_schedule', 'mark_strategy_schedule_run', '_weekday_matches', 'is_schedule_due', 'load_strategy_universe', 'load_strategy_universe_symbols', 'add_strategy_universe_symbol', 'remove_strategy_universe_symbol', 'reconstruct_strategy_positions']
+__all__ = ['KST', 'SCHEDULER_STATUSES', 'normalize_scheduler_status', 'save_scheduler_result', 'load_latest_scheduler_result', 'load_recent_scheduler_results', 'load_today_scheduler_results', 'load_auto_approval_state', 'save_auto_approval_state', 'save_account_snapshot', 'load_account_snapshot', 'delete_account_snapshot', '_SCHEDULE_DEFAULTS', '_schedule_row_to_dict', 'load_strategy_schedule', 'list_strategy_schedules', 'save_strategy_schedule', 'mark_strategy_schedule_run', '_weekday_matches', 'is_schedule_due', 'load_strategy_universe', 'load_strategy_universe_symbols', 'add_strategy_universe_symbol', 'remove_strategy_universe_symbol', 'reconstruct_strategy_positions']

@@ -133,6 +133,7 @@ class DbMigrationTests(unittest.TestCase):
         self.assertEqual(loaded["mode"], "daily_auto")
         self.assertEqual(loaded["recorded_at"], recorded_at)
         self.assertEqual(loaded["result"]["results"][0]["symbol"], "005930")
+        self.assertEqual(loaded["result"]["execution_status"], "success")
 
     def test_auto_approval_db_persistence(self):
         save_auto_approval_state(True)

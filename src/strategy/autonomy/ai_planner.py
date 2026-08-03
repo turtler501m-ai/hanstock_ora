@@ -237,11 +237,14 @@ class OpenAIResponsesPlanner:
         self.session = session
 
     def plan(self, *, instructions, context, schema) -> PlannerResponse:
+        from src.utils.openai_guard import record_rate_limit, require_available
+
         if not self.api_key:
             raise PlannerError("OPENAI_API_KEY is not configured")
         if not self.model:
             raise PlannerError("OpenAI model is not configured")
         require_online_access("autonomous AI trade planning")
+        require_available()
         response = self.session.post(
             self.endpoint,
             headers={
@@ -264,6 +267,8 @@ class OpenAIResponsesPlanner:
             },
             timeout=self.timeout_seconds,
         )
+        if response.status_code == 429:
+            record_rate_limit(response.headers.get("Retry-After"))
         response.raise_for_status()
         body = response.json()
         if body.get("status") != "completed":

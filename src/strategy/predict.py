@@ -7,6 +7,7 @@ import requests
 from src.config import config
 from src.strategy.features import FEATURE_VERSION, feature_contributions
 from src.utils.logger import logger
+from src.utils.openai_guard import record_rate_limit, require_available
 
 
 def _as_float(value, default: float) -> float:
@@ -188,6 +189,7 @@ class ModelPredictor:
         from src.online_access import require_online_access
 
         require_online_access("OpenAI prediction")
+        require_available()
         response = requests.post(
             "https://api.openai.com/v1/responses",
             headers={
@@ -197,6 +199,8 @@ class ModelPredictor:
             json=payload,
             timeout=self.timeout_seconds,
         )
+        if response.status_code == 429:
+            record_rate_limit(response.headers.get("Retry-After"))
         response.raise_for_status()
         body = response.json()
         
