@@ -778,6 +778,37 @@ class DashboardCoreTests(unittest.TestCase):
         finally:
             dashboard_core.CANDIDATE_CACHE = original_cache
 
+    def test_background_strategy_lookup_persists_latest_candidate_snapshot(self):
+        strategy = {
+            "id": "heikin_ashi_scalping_strategy",
+            "strategy_version": 4,
+            "profile_hash": "hash-ha",
+        }
+        result = {
+            "candidate_scan": {
+                "candidates": [{"ticker": "005930", "score": 3}],
+                "scan_summary": [{"ticker": "005930", "score": 3}],
+                "scanned": 25,
+                "min_score": 2,
+            }
+        }
+        with patch.object(
+            dashboard_core,
+            "_save_candidate_cache",
+            return_value="2026-08-03T17:30:00+09:00",
+        ) as save_cache:
+            cached_at = dashboard_core._persist_strategy_lookup_candidate_snapshot(
+                strategy["id"], result, [strategy]
+            )
+
+        self.assertEqual(cached_at, "2026-08-03T17:30:00+09:00")
+        rows = save_cache.call_args.args[1]
+        self.assertEqual(rows[0]["strategy_id"], strategy["id"])
+        self.assertEqual(rows[0]["strategy_version"], 4)
+        self.assertEqual(rows[0]["profile_hash"], "hash-ha")
+        self.assertEqual(save_cache.call_args.args[4], strategy["id"])
+        self.assertEqual(save_cache.call_args.args[5], "score_tilted_inverse_vol")
+
     def test_enabling_auto_approval_processes_pending_orders(self):
         original_state = dashboard.AUTO_APPROVAL_STATE
         original_db_path = dashboard.trader.config.trade_db_path

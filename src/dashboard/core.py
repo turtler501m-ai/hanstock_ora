@@ -4409,6 +4409,43 @@ def _bg_run_scheduled_cycle(
     )
 
 
+def _persist_strategy_lookup_candidate_snapshot(
+    strategy_id: str,
+    result: dict,
+    registered_strategies: list[dict],
+    optimizer: str = "score_tilted_inverse_vol",
+) -> str | None:
+    """백그라운드 분석 결과를 전략조회용 최신 스냅샷으로 저장한다."""
+    if not isinstance(result, dict):
+        return None
+    scan = result.get("candidate_scan")
+    if not isinstance(scan, dict) or int(scan.get("scanned") or 0) <= 0:
+        return None
+
+    strategy = next(
+        (item for item in registered_strategies if str(item.get("id")) == str(strategy_id)),
+        None,
+    )
+    rows = []
+    for candidate in scan.get("candidates") or []:
+        row = dict(candidate)
+        row["strategy_id"] = str(strategy_id)
+        if strategy:
+            row["strategy_version"] = strategy.get("strategy_version")
+            row["profile_hash"] = strategy.get("profile_hash")
+        rows.append(row)
+
+    min_score = int(scan.get("min_score") or 2)
+    return _save_candidate_cache(
+        min_score,
+        rows,
+        list(scan.get("scan_summary") or []),
+        int(scan.get("scanned") or 0),
+        str(strategy_id),
+        optimizer,
+    )
+
+
 def _run_scheduled_cycles_for_strategies(
     mode: str,
     include_ai_rebalance: bool,
@@ -4451,6 +4488,10 @@ def _run_scheduled_cycles_for_strategies(
                     force_strategy_id=strategy_id,
                     allowed_categories={"candidate"},
                 )
+                if mode == "analysis_only":
+                    _persist_strategy_lookup_candidate_snapshot(
+                        strategy_id, result, registered_strategies
+                    )
                 runs.append({
                     "strategy_id": strategy_id,
                     "cycle_id": None,
@@ -4491,6 +4532,10 @@ def _run_scheduled_cycles_for_strategies(
                     auto_approve=auto_approve,
                     force_strategy_id=strategy_id,
                     allowed_categories=allowed_categories,
+                )
+            if mode == "analysis_only" and allowed_categories == {"candidate"}:
+                _persist_strategy_lookup_candidate_snapshot(
+                    strategy_id, result, registered_strategies
                 )
             mark_common_analysis_stage(
                 cycle["id"],

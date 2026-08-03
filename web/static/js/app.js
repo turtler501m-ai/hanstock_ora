@@ -3029,8 +3029,17 @@ async function refreshStrategyLookup() {
         const strategyIds = selected.map((strategy) => String(strategy.id));
         if (!strategyIds.length) throw new Error('AI 전략 탭에서 조회할 전략을 먼저 선택해 주세요.');
 
-        setStatus(`선택 전략 ${strategyIds.length}개의 최신 데이터를 조회하고 있습니다.`, true);
-        await renderCandidates({ strategyIds, strategies: selected, refresh: true });
+        await renderCachedStrategyPreviews(strategyIds, selected);
+        await postJson('/api/scheduler/run', {
+            mode: 'analysis_only',
+            include_ai_rebalance: false,
+            auto_approve: false,
+            strategy_ids: strategyIds,
+            allowed_categories: ['candidate'],
+        });
+        setStatus(`선택 전략 ${strategyIds.length}개를 백그라운드에서 새로고침하고 있습니다. 최대 10분까지 기다립니다.`, true);
+        await waitForStrategyPreviewCompletion();
+        await renderCandidates({ strategyIds, strategies: selected });
         setStatus(`전략 새로고침 완료 · ${strategyIds.length}개 전략 · DB 최신본 저장`, true);
     } catch (error) {
         setStatus(`전략 새로고침 실패: ${error.message}`);
