@@ -283,6 +283,31 @@ class KISClientTests(unittest.TestCase):
             log_error.call_args.args[0],
         )
 
+    def test_get_index_daily_uses_index_endpoint_and_normalizes_rows(self):
+        session = Mock()
+        session.get.return_value = _FakeResponse({
+            "rt_cd": "0",
+            "output2": [{
+                "stck_bsop_date": "20260803",
+                "bstp_nmix_prpr": "3210.25",
+                "bstp_nmix_oprc": "3200.10",
+                "bstp_nmix_hgpr": "3220.00",
+                "bstp_nmix_lwpr": "3190.00",
+                "acml_vol": "123456",
+            }],
+        })
+        client = KISClient(self.make_config(), session=session, access_token="token")
+
+        result = client.get_index_daily("0001", n=5)
+
+        self.assertEqual(result[0]["date"], "20260803")
+        self.assertEqual(result[0]["close"], "3210.25")
+        call = session.get.call_args
+        self.assertTrue(call.args[0].endswith("/inquire-daily-indexchartprice"))
+        self.assertEqual(call.kwargs["headers"]["tr_id"], "FHKUP03500100")
+        self.assertEqual(call.kwargs["params"]["FID_COND_MRKT_DIV_CODE"], "U")
+        self.assertEqual(call.kwargs["params"]["FID_INPUT_ISCD"], "0001")
+
     def test_place_order_uses_live_tr_id_for_live_environment(self):
         session = Mock()
         session.post.side_effect = [

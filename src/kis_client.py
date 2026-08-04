@@ -469,6 +469,58 @@ class KISClient:
             self.mark_failure(f"Daily chart exception symbol={symbol}: {exc}")
             return []
 
+    def get_index_daily(self, index_code: str, n: int = 90) -> list[dict[str, Any]]:
+        """Return normalized KOSPI/KOSDAQ daily index candles."""
+        self.check_circuit()
+        now = self.now()
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "U",
+            "FID_INPUT_ISCD": index_code,
+            "FID_INPUT_DATE_1": (now - timedelta(days=365)).strftime("%Y%m%d"),
+            "FID_INPUT_DATE_2": now.strftime("%Y%m%d"),
+            "FID_PERIOD_DIV_CODE": "D",
+        }
+        try:
+            response = self.session.get(
+                f"{self.config.base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice",
+                headers=self.headers("FHKUP03500100"),
+                params=params,
+                timeout=self.config.request_timeout_seconds,
+            )
+            if response.status_code != 200:
+                self.mark_failure(
+                    f"Daily index chart HTTP {response.status_code} index={index_code}: "
+                    f"{self._response_text(response)}"
+                )
+                return []
+            data = response.json()
+            if data.get("rt_cd") != "0":
+                self.mark_failure(
+                    "Daily index chart KIS "
+                    f"index={index_code} rt_cd={data.get('rt_cd', '')} "
+                    f"msg_cd={data.get('msg_cd', '')} msg1={data.get('msg1', '')}"
+                )
+                return []
+            rows = []
+            for item in data.get("output2", [])[:n]:
+                date = str(item.get("stck_bsop_date") or "")
+                close = item.get("bstp_nmix_prpr") or item.get("stck_clpr")
+                if not date or not close:
+                    continue
+                rows.append({
+                    "date": date,
+                    "open": item.get("bstp_nmix_oprc") or 0,
+                    "high": item.get("bstp_nmix_hgpr") or 0,
+                    "low": item.get("bstp_nmix_lwpr") or 0,
+                    "close": close,
+                    "volume": item.get("acml_vol") or 0,
+                })
+            self.mark_success()
+            return rows
+        except Exception as exc:
+            self.mark_failure(f"Daily index chart exception index={index_code}: {exc}")
+            return []
+
     def place_order(self, symbol: str, order_type: str, price: int, qty: int, exchange_id: str = "KRX") -> dict[str, Any]:
         if self.config.is_demo:
             tr_id = "VTTC0802U" if order_type == "buy" else "VTTC0801U"

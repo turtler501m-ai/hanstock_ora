@@ -3319,21 +3319,58 @@ _INDEX_SYMBOL_ALIASES = {
     "KOSPI": ("^KS11", "KOSPI", "0001"),
     "KOSDAQ": ("^KQ11", "KOSDAQ", "1001"),
 }
+_KIS_INDEX_CODES = {"KOSPI": "0001", "KOSDAQ": "1001"}
+
+
+def _safe_index_rows(rows: list[dict], max_daily_change_pct: float = 12.0) -> list[dict]:
+    """Discard invalid or implausible benchmark observations."""
+    result: list[dict] = []
+    previous = None
+    for row in sorted(rows, key=lambda item: str(item.get("date") or "")):
+        try:
+            close = float(row.get("close") or 0)
+        except (TypeError, ValueError):
+            continue
+        date = str(row.get("date") or "")[:10]
+        if len(date) != 10 or close <= 0:
+            continue
+        if previous and abs(close / previous - 1) * 100 > max_daily_change_pct:
+            logger.warning(f"Rejected abnormal benchmark close date={date} close={close}")
+            continue
+        result.append({"date": date, "close": close})
+        previous = close
+    return result
 
 
 def _load_index_rows() -> dict[str, list[dict]]:
-    """Load benchmark closes from local charts first, then best-effort Yahoo data."""
+    """Refresh benchmark closes from KIS, then use local DB and guarded Yahoo fallback."""
     global _INDEX_ROWS_CACHE
     cached_at, cached_rows = _INDEX_ROWS_CACHE
     if time.monotonic() - cached_at < 300:
         return cached_rows
     series: dict[str, list[dict]] = {}
     try:
+        from src.db.repository import save_daily_charts
+
+        api = _get_api()
+        for name, code in _KIS_INDEX_CODES.items():
+            rows = api.get_index_daily(code, n=120)
+            if rows:
+                save_daily_charts(code, rows)
+                normalized = _safe_index_rows(rows)
+                if normalized:
+                    series[name] = normalized
+    except Exception as exc:
+        logger.info(f"KIS performance benchmark refresh unavailable: {exc}")
+
+    try:
         from src.db.repository import connect_db
 
         with connect_db() as conn:
             conn.row_factory = sqlite3.Row
             for name, symbols in _INDEX_SYMBOL_ALIASES.items():
+                if name in series:
+                    continue
                 for symbol in symbols:
                     rows = conn.execute(
                         "SELECT date, close FROM daily_charts WHERE symbol=? AND close>0 "
@@ -3341,11 +3378,13 @@ def _load_index_rows() -> dict[str, list[dict]]:
                         (symbol,),
                     ).fetchall()
                     if rows:
-                        series[name] = [
+                        normalized = _safe_index_rows([
                             {"date": str(row["date"])[:10], "close": float(row["close"])}
                             for row in reversed(rows)
-                        ]
-                        break
+                        ])
+                        if normalized:
+                            series[name] = normalized
+                            break
     except Exception:
         pass
 
@@ -3367,10 +3406,12 @@ def _load_index_rows() -> dict[str, list[dict]]:
                 close = data["Close"]
                 if getattr(close, "ndim", 1) > 1:
                     close = close.iloc[:, 0]
-                series[name] = [
+                normalized = _safe_index_rows([
                     {"date": str(index)[:10], "close": float(value)}
                     for index, value in close.dropna().items()
-                ]
+                ])
+                if normalized:
+                    series[name] = normalized
         except Exception as exc:
             logger.info(f"Performance benchmark data unavailable: {exc}")
     _INDEX_ROWS_CACHE = (time.monotonic(), series)

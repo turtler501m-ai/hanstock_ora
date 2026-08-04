@@ -475,6 +475,12 @@ class KIStockAPI:
         self._sync_circuit_from_client()
         return result
 
+    def get_index_daily(self, index_code: str, n: int = 90) -> list:
+        self._sync_circuit_to_client()
+        result = self._client.get_index_daily(index_code, n=n)
+        self._sync_circuit_from_client()
+        return result
+
     def place_order(self, symbol: str, order_type: str, price: int, qty: int) -> dict:
         require_online_access("KIS order submission")
         flags = trading_flags(get_settings())

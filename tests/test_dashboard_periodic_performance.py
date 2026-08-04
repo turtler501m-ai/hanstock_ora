@@ -8,7 +8,7 @@ from src.dashboard import (
     _period_bucket,
     trader,
 )
-from src.dashboard.core import _INDEX_SYMBOL_ALIASES
+from src.dashboard.core import _INDEX_SYMBOL_ALIASES, _safe_index_rows
 
 
 class DashboardPeriodicPerformanceTests(unittest.TestCase):
@@ -17,6 +17,14 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
         self.assertNotIn("229200", _INDEX_SYMBOL_ALIASES["KOSDAQ"])
         self.assertEqual(_INDEX_SYMBOL_ALIASES["KOSPI"][0], "^KS11")
         self.assertEqual(_INDEX_SYMBOL_ALIASES["KOSDAQ"][0], "^KQ11")
+
+    def test_abnormal_benchmark_move_is_rejected(self):
+        rows = _safe_index_rows([
+            {"date": "2026-07-30", "close": 5593.56},
+            {"date": "2026-07-31", "close": 6595.45},
+        ])
+
+        self.assertEqual(rows, [{"date": "2026-07-30", "close": 5593.56}])
 
     def setUp(self) -> None:
         self.original_dry_run = trader.DRY_RUN
