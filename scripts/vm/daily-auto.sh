@@ -34,7 +34,7 @@ find_python() {
 PYTHON_BIN="$(find_python)"
 LOG_FILE="$LOG_DIR/daily-auto.log"
 # daily-auto and strategy-dispatch both use the domestic KIS account.  A shared
-# lock prevents the hourly full cycle and the five-minute dispatcher from
+# lock prevents the twice-daily full cycle and the ten-minute dispatcher from
 # issuing overlapping balance/order requests from separate processes.
 LOCK_FILE="$RUNTIME_DIR/domestic-scheduler.lock"
 
@@ -67,6 +67,7 @@ acquire_lock() {
 }
 
 {
+    started_epoch="$(date +%s)"
     echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] daily_auto start"
     acquire_lock
     if ! should_run_now; then
@@ -78,8 +79,10 @@ acquire_lock() {
     status=$?
     set -e
     if [ "$status" -ne 0 ]; then
-        echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] daily_auto failed status=$status"
+        elapsed_seconds=$(( $(date +%s) - started_epoch ))
+        echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] daily_auto failed status=$status duration_seconds=$elapsed_seconds"
         exit "$status"
     fi
-    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] daily_auto done"
+    elapsed_seconds=$(( $(date +%s) - started_epoch ))
+    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] daily_auto done duration_seconds=$elapsed_seconds"
 } >> "$LOG_FILE" 2>&1

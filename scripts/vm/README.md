@@ -49,7 +49,7 @@ Run one cycle manually:
 ./scripts/vm/daily-auto.sh
 ```
 
-Install the weekday cron schedule. The default is hourly during Korea stock processing hours, 09:00 through 15:20 KST, Monday-Friday:
+Install the weekday cron schedule. The default runs a full reconciliation at 09:00 and 15:00 KST, Monday-Friday. Strategy dispatch runs separately every ten minutes from 09:07 through 15:57, so the long-running jobs do not start together:
 
 ```bash
 ./scripts/vm/install-daily-auto-cron.sh
@@ -64,3 +64,5 @@ Use a custom cron time by passing the first five cron fields:
 The installer writes `CRON_TZ=Asia/Seoul`. Override it with `HANSTOCK_CRON_TZ` if the VM cron does not support that timezone.
 
 Logs are written to `logs/daily-auto.log`.
+
+Each completed or failed job writes `duration_seconds` to its log. Strategy results also store start/completion timestamps and elapsed seconds in the scheduler result table.

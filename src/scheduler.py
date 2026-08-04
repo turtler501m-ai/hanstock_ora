@@ -270,6 +270,7 @@ def run_scheduled_cycle(
     auto_approve: bool = False,
     force_strategy_id: str | None = None,
     allowed_categories: set[str] | None = None,
+    persist_result: bool = True,
 ) -> dict:
     # force_strategy_id가 명시되지 않은 경우(cron 등) 현재 선택된 전략을 사용해
     # trader 실행과 결과 기록의 strategy_id가 일치하도록 한다.
@@ -340,7 +341,7 @@ def run_scheduled_cycle(
         result["pre_order_status_sync"] = pre_order_status_sync
     result["strategy_id"] = force_strategy_id or "seven_split"
     result = _sync_order_status_after_cycle(result)
-    if mode == "daily_auto" or force_strategy_id:
+    if persist_result and (mode == "daily_auto" or force_strategy_id):
         _write_cycle_result(result, mode=mode, strategy_id=force_strategy_id)
         if mode == "daily_auto":
             _slack_cycle_result(result, mode=mode)

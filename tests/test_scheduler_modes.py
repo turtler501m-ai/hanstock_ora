@@ -65,6 +65,7 @@ class SchedulerModeTests(unittest.TestCase):
             auto_approve=True,
             force_strategy_id="plunge_bounce_strategy",
             allowed_categories={"candidate"},
+            persist_result=False,
         )
         mark_mock.assert_called_once_with("plunge_bounce_strategy")
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-TIME_SPEC="${1:-0 9-15 * * 1-5}"
+TIME_SPEC="${1:-0 9,15 * * 1-5}"
 CRON_TZ_VALUE="${HANSTOCK_CRON_TZ:-Asia/Seoul}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"

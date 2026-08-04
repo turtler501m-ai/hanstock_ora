@@ -22,7 +22,7 @@ find_python() {
 PYTHON_BIN="$(find_python)"
 LOG_FILE="$LOG_DIR/strategy-dispatch.log"
 # Coordinate with daily-auto.sh as both jobs use the same domestic KIS account.
-# The next five-minute cron tick will retry schedules that remain due.
+# The next ten-minute cron tick will retry schedules that remain due.
 LOCK_FILE="$RUNTIME_DIR/domestic-scheduler.lock"
 
 acquire_lock() {
@@ -42,12 +42,14 @@ acquire_lock() {
 }
 
 {
+    started_epoch="$(date +%s)"
     echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] strategy_dispatch start"
     acquire_lock
     set +e
     "$PYTHON_BIN" -m src.strategy_scheduler
     status=$?
     set -e
-    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] strategy_dispatch done status=$status"
+    elapsed_seconds=$(( $(date +%s) - started_epoch ))
+    echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] strategy_dispatch done status=$status duration_seconds=$elapsed_seconds"
     exit "$status"
 } >> "$LOG_FILE" 2>&1

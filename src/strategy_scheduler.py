@@ -8,6 +8,7 @@ strategy_schedules 테이블에서 enabled 스케쥴을 읽어 실행 윈도우/
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -113,6 +114,8 @@ def dispatch_due_schedules() -> list[str]:
         )
         mode = str(sched.get("mode") or "execute")
         auto_approve = bool(sched.get("auto_approve"))
+        started_at = datetime.now(KST)
+        started_monotonic = time.monotonic()
         try:
             logger.info(
                 f"[dispatch] running {strategy_id} (mode={mode}, auto_approve={auto_approve})"
@@ -122,7 +125,6 @@ def dispatch_due_schedules() -> list[str]:
                     save_candidates=(mode != "analysis_only"),
                     auto_collect=True,
                 )
-                save_scheduler_result(mode, datetime.now(KST).isoformat(), result)
             elif (
                 strategy_id not in _TRADER_SCHEDULE_STRATEGY_IDS
                 and strategy_id not in _ISOLATED_STRATEGY_IDS
@@ -167,31 +169,65 @@ def dispatch_due_schedules() -> list[str]:
                 else:
                     result["status"] = "completed"
                     result["ok"] = True
-                save_scheduler_result(mode, datetime.now(KST).isoformat(), result)
             else:
                 result = run_scheduled_cycle(
                     mode,
                     auto_approve=auto_approve,
                     force_strategy_id=strategy_id,
                     allowed_categories=_allowed_categories_for_strategy(strategy_id),
+                    persist_result=False,
                 )
+            completed_at = datetime.now(KST)
+            duration_seconds = round(time.monotonic() - started_monotonic, 3)
+            if not isinstance(result, dict):
+                result = {"result": result}
+            result.update({
+                "scheduler_started_at": started_at.isoformat(),
+                "scheduler_completed_at": completed_at.isoformat(),
+                "duration_seconds": duration_seconds,
+                "schedule_strategy_id": schedule_strategy_id,
+            })
             if isinstance(result, dict) and (
                 result.get("status") == "failed" or result.get("ok") is False
             ):
                 raise RuntimeError(
                     f"scheduler result reported failure: {result.get('errors') or result}"
                 )
+            save_scheduler_result(mode, completed_at.isoformat(), result)
             mark_strategy_schedule_run(schedule_strategy_id)
             ran.append(strategy_id)
             if isinstance(result, dict) and result.get("status") == "blocked":
                 logger.warning(
-                    f"[dispatch] blocked {strategy_id}: {result.get('blocked')}"
+                    f"[dispatch] blocked {strategy_id} duration_seconds={duration_seconds}: "
+                    f"{result.get('blocked')}"
                 )
             else:
-                logger.info(f"[dispatch] done {strategy_id}")
+                logger.info(
+                    f"[dispatch] done {strategy_id} duration_seconds={duration_seconds}"
+                )
         except Exception as exc:  # noqa: BLE001
+            completed_at = datetime.now(KST)
+            duration_seconds = round(time.monotonic() - started_monotonic, 3)
+            failure_result = {
+                "strategy_id": strategy_id,
+                "schedule_strategy_id": schedule_strategy_id,
+                "status": "failed",
+                "ok": False,
+                "errors": [str(exc)],
+                "scheduler_started_at": started_at.isoformat(),
+                "scheduler_completed_at": completed_at.isoformat(),
+                "duration_seconds": duration_seconds,
+            }
+            try:
+                save_scheduler_result(mode, completed_at.isoformat(), failure_result)
+            except Exception as save_exc:  # noqa: BLE001
+                logger.error(
+                    f"[dispatch] failed to save error result for {strategy_id}: {save_exc}"
+                )
             failures.append(f"{strategy_id}: {exc}")
-            logger.error(f"[dispatch] {strategy_id} failed: {exc}")
+            logger.error(
+                f"[dispatch] {strategy_id} failed duration_seconds={duration_seconds}: {exc}"
+            )
     _last_dispatch_failures = failures
     return ran
 

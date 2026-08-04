@@ -7,7 +7,7 @@
 # 정각(0 9-15)에 돌므로, 겹쳐서 KIS API가 경합/중복 주문되지 않게 분리한다.
 set -euo pipefail
 
-TIME_SPEC="${1:-2-57/5 9-15 * * 1-5}"
+TIME_SPEC="${1:-7-57/10 9-15 * * 1-5}"
 CRON_TZ_VALUE="${HANSTOCK_CRON_TZ:-Asia/Seoul}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
