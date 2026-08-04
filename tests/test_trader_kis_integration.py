@@ -48,7 +48,7 @@ class TraderKISIntegrationTests(unittest.TestCase):
             )
 
             with (
-                patch.object(trader, "TRADING_ENV", "demo"),
+                patch.object(trader.config, "trading_env", "demo"),
                 patch.object(trader, "BASE_URL", "https://example.test"),
                 patch.object(trader, "KISTOCK_APP_KEY", "app-key-12345678"),
                 patch.object(trader.KIStockAPI, "TOKEN_CACHE", cache_path),
@@ -171,7 +171,7 @@ class TraderKISIntegrationTests(unittest.TestCase):
         }
 
         with (
-            patch.object(trader, "TRADING_ENV", "demo"),
+            patch.object(trader.config, "trading_env", "demo"),
             patch.object(trader, "BASE_URL", "https://example.test"),
             patch.object(trader, "KISTOCK_APP_KEY", "app-key-12345678"),
             patch.object(trader, "KISTOCK_APP_SECRET", "secret-value"),
@@ -198,7 +198,7 @@ class TraderKISIntegrationTests(unittest.TestCase):
         payload = {"rt_cd": "0", "output1": [], "output2": [{}]}
 
         with (
-            patch.object(trader, "TRADING_ENV", "real"),
+            patch.object(trader.config, "trading_env", "real"),
             patch.object(trader, "BASE_URL", "https://example.test"),
             patch.object(trader, "KISTOCK_ACCOUNT", "1234567801"),
             patch.object(trader.KIStockAPI, "_load_or_fetch_token", return_value="token-abc"),
@@ -217,7 +217,7 @@ class TraderKISIntegrationTests(unittest.TestCase):
         response.text = "Internal Server Error"
 
         with (
-            patch.object(trader, "TRADING_ENV", "real"),
+            patch.object(trader.config, "trading_env", "real"),
             patch.object(trader, "BASE_URL", "https://example.test"),
             patch.object(trader, "KISTOCK_ACCOUNT", "1234567801"),
             patch.object(trader.KIStockAPI, "_load_or_fetch_token", return_value="token-abc"),
@@ -335,8 +335,9 @@ class TraderKISIntegrationTests(unittest.TestCase):
 
     def test_place_order_uses_live_sell_tr_id_and_hashkey(self):
         with (
-            patch.object(trader, "ORDER_SUBMISSION_ENABLED", True),
-            patch.object(trader, "TRADING_ENV", "real"),
+            patch.object(trader.config, "dry_run", False),
+            patch.object(trader.config, "trading_env", "real"),
+            patch.object(trader.config, "enable_live_trading", True),
             patch.object(trader, "BASE_URL", "https://example.test"),
             patch.object(trader, "KISTOCK_APP_KEY", "app-key-12345678"),
             patch.object(trader, "KISTOCK_APP_SECRET", "secret-value"),
@@ -368,8 +369,8 @@ class TraderKISIntegrationTests(unittest.TestCase):
         delegated_headers = {"authorization": "Bearer token-abc", "tr_id": "VTTC0802U"}
 
         with (
-            patch.object(trader, "ORDER_SUBMISSION_ENABLED", True),
-            patch.object(trader, "TRADING_ENV", "demo"),
+            patch.object(trader.config, "dry_run", False),
+            patch.object(trader.config, "trading_env", "demo"),
             patch.object(trader, "BASE_URL", "https://example.test"),
             patch.object(trader, "KISTOCK_ACCOUNT", "1234567801"),
             patch.object(trader, "_KIS_ORDER_MIN_INTERVAL_SECONDS", 0),
@@ -400,7 +401,7 @@ class TraderKISIntegrationTests(unittest.TestCase):
 
     def test_trade_history_uses_current_demo_tr_id_and_exchange_param(self):
         with (
-            patch.object(trader, "TRADING_ENV", "demo"),
+            patch.object(trader.config, "trading_env", "demo"),
             patch.object(trader, "BASE_URL", "https://example.test"),
             patch.object(trader, "KISTOCK_ACCOUNT", "1234567801"),
             patch.object(trader.KIStockAPI, "_load_or_fetch_token", return_value="token-abc"),
@@ -429,7 +430,7 @@ class TraderKISIntegrationTests(unittest.TestCase):
             _FakeResponse({"output1": [{"odno": "D67890"}]}, headers={"tr_cont": ""}),
         ]
         with (
-            patch.object(trader, "TRADING_ENV", "demo"),
+            patch.object(trader.config, "trading_env", "demo"),
             patch.object(trader, "BASE_URL", "https://example.test"),
             patch.object(trader, "KISTOCK_ACCOUNT", "1234567801"),
             patch.object(trader.KIStockAPI, "_load_or_fetch_token", return_value="token-abc"),

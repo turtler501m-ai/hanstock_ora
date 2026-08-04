@@ -1,10 +1,8 @@
 import json
 import hashlib
 import concurrent.futures
-import math
 import os
 import re
-import socket
 import sqlite3
 import subprocess
 import sys
@@ -79,31 +77,24 @@ from src.dashboard.services.auth_service import (  # noqa: E402
     require_dashboard_auth,
 )
 from src.dashboard.services.env_service import (  # noqa: E402
+    account_format_warning,
     env_bool_value,
     env_value_without_inline_comment,
     expand_virtual_env_updates,
+    mask_env_value,
     read_env_values,
     serialize_env_value,
+    validate_env_value,
     virtual_env_value,
     write_env_values,
 )
+from src.dashboard.services.response_service import (  # noqa: E402
+    SafeJSONResponse,
+    json_safe_value as _json_safe_value,
+)
+from src.dashboard.services.runtime_status_service import dashboard_runtime_info  # noqa: E402
 from src.strategy.seven_split import adjust_tick_size  # noqa: E402
 from src.utils.logger import logger  # noqa: E402
-
-
-def _json_safe_value(value):
-    if isinstance(value, float):
-        return value if math.isfinite(value) else None
-    if isinstance(value, dict):
-        return {key: _json_safe_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe_value(item) for item in value]
-    return value
-
-
-class SafeJSONResponse(JSONResponse):
-    def render(self, content) -> bytes:
-        return super().render(_json_safe_value(content))
 
 
 app = FastAPI(
@@ -164,84 +155,13 @@ BALANCE_FETCH_TIMEOUT_SECONDS = float(os.environ.get("BALANCE_FETCH_TIMEOUT_SECO
 GIT_FETCH_TIMEOUT_SECONDS = float(os.environ.get("GIT_FETCH_TIMEOUT_SECONDS", "3"))
 MIN_ORDER_HISTORY_SYNC_DAYS = 30
 _balance_fetch_lock = threading.Lock()
-ENV_FIELDS = [
-    {"key": "KIS_REAL_CHECK_ENABLED", "label": "KIS real_check Enabled", "type": "bool", "hint": "Use real KIS API for market-data checks only; balance and orders keep using the execution account."},
-    {"key": "KIS_REAL_CHECK_APP_KEY", "label": "KIS real_check App Key", "type": "secret"},
-    {"key": "KIS_REAL_CHECK_APP_SECRET", "label": "KIS real_check App Secret", "type": "secret"},
-    {"key": "KIS_REAL_CHECK_ACCOUNT", "label": "KIS real_check Account", "type": "text"},
-    {"key": "KIS_REAL_CHECK_HTS_ID", "label": "KIS real_check HTS ID", "type": "text"},
-    {"key": "KIS_REAL_CHECK_CONDITION_SEARCH_ENABLED", "label": "KIS real_check Condition Enabled", "type": "bool"},
-    {"key": "KIS_REAL_CHECK_CONDITION_USER_ID", "label": "KIS real_check Condition User ID", "type": "text"},
-    {"key": "KIS_REAL_CHECK_CONDITION_SEQ", "label": "KIS real_check Condition Seq", "type": "text"},
-    {"key": "KIS_REAL_CHECK_CONDITION_NAME", "label": "KIS real_check Condition Name", "type": "text"},
-    {"key": "KISTOCK_APP_KEY", "label": "KIS App Key", "type": "secret"},
-    {"key": "KISTOCK_APP_SECRET", "label": "KIS App Secret", "type": "secret"},
-    {"key": "KISTOCK_ACCOUNT", "label": "KIS Account", "type": "text", "hint": "계좌번호 8자리 또는 계좌번호 8자리 + 상품코드 2자리. 예: 12345678 또는 1234567801"},
-    {"key": "KISTOCK_HTS_ID", "label": "KIS HTS ID", "type": "text", "hint": "실시간 주문체결 통보와 조건검색식 조회에 사용할 HTS ID입니다."},
-    {"key": "KIS_WEBSOCKET_ENABLED", "label": "KIS WebSocket Enabled", "type": "bool", "hint": "true이면 서버에서 KIS 실시간 주문체결 통보 웹소켓을 시작할 수 있습니다."},
-    {"key": "KIS_CONDITION_SEARCH_ENABLED", "label": "KIS Condition Search Enabled", "type": "bool", "hint": "true이면 매수 후보 스캔 유니버스에 KIS 조건검색식 결과를 우선 반영합니다."},
-    {"key": "KIS_CONDITION_USER_ID", "label": "KIS Condition User ID", "type": "text", "hint": "조건검색식 API 조회용 사용자 ID입니다. 비워두면 KISTOCK_HTS_ID를 사용합니다."},
-    {"key": "KIS_CONDITION_SEQ", "label": "KIS Condition Seq", "type": "text", "hint": "HTS에 저장된 조건검색식 일련번호입니다."},
-    {"key": "KIS_CONDITION_NAME", "label": "KIS Condition Name", "type": "text", "hint": "HTS에 저장된 조건검색식 이름입니다."},
-    {"key": "TRADING_ENV", "label": "거래 환경", "type": "select", "options": ["demo", "real"], "hint": "demo=모의투자, real=실전투자"},
-    {"key": "DRY_RUN", "label": "주문 차단", "type": "bool", "hint": "true이면 KIS 주문 API 전송을 막고 계획과 기록만 생성합니다."},
-    {"key": "ENABLE_LIVE_TRADING", "label": "실전매매 최종 허용", "type": "bool", "hint": "실전 주문을 허용하는 최종 안전 스위치입니다."},
-    {"key": "REQUIRE_APPROVAL", "label": "주문 승인 필요", "type": "bool"},
-    {"key": "ONLINE_ACCESS_BLOCKED", "label": "Online Access Blocked", "type": "bool", "hint": "true이면 외부 API, 웹소켓, 주문 실행을 차단하고 DB에 저장된 정보만 표시합니다."},
-    {"key": "SPLIT_N", "label": "Split N", "type": "int"},
-    {"key": "STOP_LOSS_PCT", "label": "Stop Loss %", "type": "float"},
-    {"key": "TAKE_PROFIT", "label": "Take Profit %", "type": "float"},
-    {"key": "RSI_BUY", "label": "RSI Buy", "type": "int"},
-    {"key": "RSI_SELL", "label": "RSI Sell", "type": "int"},
-    {"key": "TRAILING_STOP_ACTIVATION_PCT", "label": "Trailing Stop Activation %", "type": "float"},
-    {"key": "TRAILING_STOP_PCT", "label": "Trailing Stop Drawdown %", "type": "float"},
-    {"key": "TRAILING_STOP_LOOKBACK", "label": "Trailing Stop Lookback", "type": "int"},
-    {"key": "TRADE_VALUE_SURGE_RATIO", "label": "Trade Value Surge Ratio", "type": "float"},
-    {"key": "FIRST_WAVE_MIN_PCT", "label": "First Wave Minimum %", "type": "float"},
-    {"key": "FIRST_WAVE_PULLBACK_MIN_PCT", "label": "First Wave Pullback Minimum %", "type": "float"},
-    {"key": "FIRST_WAVE_PULLBACK_MAX_PCT", "label": "First Wave Pullback Maximum %", "type": "float"},
-    {"key": "TOTAL_CAPITAL", "label": "Total Capital", "type": "float"},
-    {"key": "ACCOUNT_INITIAL_CAPITAL", "label": "Account Initial Capital", "type": "float", "hint": "계좌 전체 손익 표시 기준입니다. 주문 규모에는 영향을 주지 않습니다."},
-    {"key": "MAX_POSITIONS", "label": "Max Positions", "type": "int"},
-    {"key": "MAX_SINGLE_WEIGHT", "label": "Max Single Weight", "type": "float"},
-    {"key": "CASH_BUFFER", "label": "Cash Buffer", "type": "float"},
-    {"key": "MAX_DAILY_LOSS_PCT", "label": "Max Daily Loss %", "type": "float"},
-    {"key": "HANSTOCK_EXCLUDED_SYMBOLS", "label": "Hanstock Excluded Symbols", "type": "text", "hint": "Comma-separated domestic stock codes excluded from automated scans and orders."},
-    {"key": "KIS_ORDER_MIN_INTERVAL_SECONDS", "label": "KIS Order Min Interval Seconds", "type": "float", "hint": "Minimum wait between broker order submissions."},
-    {"key": "SCAN_UNIVERSE_SIZE", "label": "Scan Universe Size", "type": "int"},
-    {"key": "KIS_CIRCUIT_COOLDOWN_SECONDS", "label": "KIS API 차단 대기시간", "type": "int", "hint": "KIS API 오류 후 재시도까지 기다리는 시간(초)입니다. 대시보드 재시작 후 적용됩니다."},
-    {"key": "TRADE_DB_PATH", "label": "Trade DB Path", "type": "text"},
-    {"key": "ACTIVE_MODEL_VERSION", "label": "Active Model Version", "type": "text"},
-    {"key": "AI_STRATEGY_ENABLED", "label": "AI Strategy Enabled", "type": "bool"},
-    {"key": "AI_SCORE_WEIGHT", "label": "AI Score Weight", "type": "float"},
-    {"key": "AI_MIN_MODEL_CONFIDENCE", "label": "AI Min Confidence", "type": "float"},
-    {"key": "AI_REQUIRE_BACKTEST_PASS", "label": "AI Require Backtest Pass", "type": "bool"},
-    {"key": "AI_AUTO_APPROVE", "label": "AI Auto Approve", "type": "bool"},
-    {"key": "AI_MIN_RULE_SCORE", "label": "AI Min Rule Score", "type": "float"},
-    {"key": "AI_ALLOW_CANDIDATE_PROMOTION", "label": "AI Allow Candidate Promotion", "type": "bool"},
-    {"key": "OPENAI_API_KEY", "label": "OpenAI API Key", "type": "secret"},
-    {"key": "OPENAI_MODEL", "label": "OpenAI Model", "type": "text"},
-    {"key": "OPENAI_TIMEOUT_SECONDS", "label": "OpenAI Timeout Seconds", "type": "float"},
-    {"key": "AI_CANDIDATE_LIMIT", "label": "AI Candidate Limit", "type": "int"},
-    {"key": "SLACK_WEBHOOK_URL", "label": "Slack Webhook URL", "type": "secret"},
-    {"key": "MISTOCK_SLACK_WEBHOOK_URL", "label": "Mistock Slack Webhook URL", "type": "secret"},
-    {"key": "TELEGRAM_API_ID", "label": "Telegram API ID", "type": "secret"},
-    {"key": "TELEGRAM_API_HASH", "label": "Telegram API Hash", "type": "secret"},
-    {"key": "TELEGRAM_SESSION_NAME", "label": "Telegram Session Name", "type": "text", "hint": "Local Telethon session path. Keep it out of git."},
-    {"key": "TELEGRAM_TARGET_CHANNELS", "label": "Telegram Target Channels", "type": "text", "hint": "Comma-separated channel usernames, IDs, or invite targets."},
-    {"key": "MISTOCK_EXCHANGE_MAP", "label": "Mistock Exchange Map", "type": "text", "hint": "미국주식 거래소 매핑입니다. 예: BRK.B=NYSE,TSLA=NASD"},
-    {"key": "MISTOCK_CURRENCY", "label": "Mistock Currency", "type": "text", "hint": "미스톡 대시보드 표기 통화입니다. 예: USD, KRW"},
-    {"key": "MISTOCK_MARKET", "label": "Mistock Market", "type": "text", "hint": "미국주식 타겟 시장입니다. 예: NASDAQ"},
-    {"key": "MISTOCK_TRADING_ENV", "label": "Mistock Trading Env", "type": "select", "options": ["paper", "demo", "real"], "hint": "paper=가상모의, demo=실제모의, real=실전매매"},
-    {"key": "MISTOCK_DRY_RUN", "label": "Mistock Dry Run (주문차단)", "type": "bool", "hint": "true이면 실제 KIS 미국주식 주문 API를 호출하지 않습니다."},
-    {"key": "MISTOCK_ENABLE_LIVE_TRADING", "label": "Mistock Enable Live Trading", "type": "bool", "hint": "미국주식 실전매매 최종허용 안전스위치입니다."},
-    {"key": "MISTOCK_REQUIRE_APPROVAL", "label": "Mistock Require Approval", "type": "bool", "hint": "true이면 미국주식 주문 시 승인 대기를 거칩니다."},
-    {"key": "MISTOCK_TOTAL_CAPITAL", "label": "Mistock Total Capital", "type": "float", "hint": "미국주식 총 운용 자금입니다. 단위는 MISTOCK_CURRENCY 값을 따릅니다."},
-    {"key": "MISTOCK_TRADE_DB_PATH", "label": "Mistock Trade DB Path", "type": "text", "hint": "미국주식 거래 기록용 SQLite DB 경로입니다."},
-    {"key": "USDKRW_FALLBACK_RATE", "label": "USD/KRW Fallback Rate", "type": "float", "hint": "yfinance 환율 수집 실패 시 사용할 고정/기본 환율입니다. 기본값: 1380.0"},
-    {"key": "MISTOCK_UNIVERSE", "label": "미스톡 기본 스캔 유니버스", "type": "text", "hint": "미국주식 스캔 시 사용할 기본 관심종목 목록(쉼표 구분)입니다. 기본값: 60종목"},
-]
-ENV_FIELD_MAP = {field["key"]: field for field in ENV_FIELDS}
+from src.dashboard.settings_schema import (
+    AI_ENV_BINDINGS,
+    ENV_FIELD_MAP,
+    ENV_FIELDS,
+    KIS_ENV_BINDINGS,
+    STRATEGY_ENV_BINDINGS,
+)
 VENDOR_PROJECTS = {
     "finrl": {
         "name": "FinRL",
@@ -366,12 +286,7 @@ def _required_env_missing() -> list[str]:
 
 
 def _account_format_warning(account: str) -> str:
-    digits = "".join(char for char in str(account or "") if char.isdigit())
-    if not digits:
-        return "KISTOCK_ACCOUNT is required"
-    if len(digits) not in {8, 10}:
-        return "KISTOCK_ACCOUNT must be 8 digits, or 10 digits including 2-digit product code"
-    return ""
+    return account_format_warning(account)
 
 
 def _to_int(value, default: int = 0) -> int:
@@ -413,7 +328,7 @@ def _get_api() -> KIStockAPI:
 
 
 def _account_cache_key() -> str:
-    source = f"{trader.TRADING_ENV}:{trader.config.kistock_account}"
+    source = f"{trader.runtime_flags().trading_env}:{trader.config.kistock_account}"
     return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
@@ -434,7 +349,7 @@ _BALANCE_DERIVED_SNAPSHOT_KINDS = (
 _dashboard_cache_service = DashboardCacheService(
     BALANCE_CACHE,
     account_key_fn=_account_cache_key,
-    trading_env_fn=lambda: trader.TRADING_ENV,
+    trading_env_fn=lambda: trader.runtime_flags().trading_env,
     captured_at_fn=lambda: trader.datetime.now(trader.KST).isoformat(),
     derived_kinds=_BALANCE_DERIVED_SNAPSHOT_KINDS,
 )
@@ -471,78 +386,23 @@ def snapshot_read_through(
     account_scoped: bool = True,
     env: str | None = None,
 ):
-    """대시보드 탭 데이터의 DB-우선 read-through.
-
-    1) DB 스냅샷이 TTL 안이면 API 없이 그대로 반환(_snapshot.stale=False)
-    2) 만료/부재면 builder()(=API 호출)로 재생성하고 DB에 write-back
-    3) builder 실패 시 마지막 DB 스냅샷을 stale 표시로 반환, 없으면 예외 전파
-
-    builder()는 dict payload를 반환해야 한다. 반환값에는 `_snapshot` 메타를 덧붙인다.
-    """
-    from src.db.repository import load_account_snapshot, save_account_snapshot
-
-    ttl = DASHBOARD_SNAPSHOT_TTL_SECONDS if ttl is None else ttl
-    env = env or trader.TRADING_ENV
-    account_key = _account_cache_key() if account_scoped else "_global_"
-
-    snap = None
-    try:
-        snap = load_account_snapshot(account_key, env, kind)
-    except DashboardOperationError:
-        snap = None
-
-    if snap is not None:
-        age = _snapshot_age_seconds(snap.get("captured_at", ""))
-        from src.online_access import is_online_access_blocked
-
-        if is_online_access_blocked():
-            payload = dict(snap["payload"])
-            payload["_snapshot"] = {
-                "stale": True,
-                "captured_at": snap.get("captured_at", ""),
-                "source": "db",
-                "offline": True,
-            }
-            return payload
-        if age is not None and age < ttl:
-            payload = dict(snap["payload"])
-            payload["_snapshot"] = {"stale": False, "captured_at": snap.get("captured_at", ""), "source": "db"}
-            return payload
-
-    from src.online_access import require_online_access
-
-    require_online_access(f"{kind} refresh")
-    try:
-        payload = builder()
-        if not isinstance(payload, dict):
-            return payload
-        captured_at = trader.datetime.now(trader.KST).isoformat()
-        try:
-            save_account_snapshot(account_key, env, kind, payload, captured_at)
-        except (sqlite3.DatabaseError, OSError, ValueError, TypeError) as exc:
-            logger.warning(f"Failed to persist {kind} snapshot: {exc}")
-        result = dict(payload)
-        result["_snapshot"] = {"stale": False, "captured_at": captured_at, "source": "live"}
-        return result
-    except DashboardOperationError as exc:
-        if snap is not None:
-            payload = dict(snap["payload"])
-            payload["_snapshot"] = {
-                "stale": True,
-                "captured_at": snap.get("captured_at", ""),
-                "source": "db",
-                "error": f"{type(exc).__name__}: {exc}",
-            }
-            return payload
-        raise
-
+    from src.dashboard.services.cache_service import snapshot_read_through as read
+    return read(
+        kind,
+        builder,
+        ttl=DASHBOARD_SNAPSHOT_TTL_SECONDS if ttl is None else ttl,
+        env=env or trader.runtime_flags().trading_env,
+        account_key=_account_cache_key() if account_scoped else "_global_",
+        now_fn=lambda: trader.datetime.now(trader.KST),
+        recoverable_errors=DashboardOperationError,
+    )
 
 def invalidate_snapshot(kind: str, *, account_scoped: bool = True, env: str | None = None) -> None:
     """주문/승인 등 상태 변경 후 해당 탭 스냅샷을 지워 다음 read에서 즉시 재생성되게 한다."""
     try:
         from src.db.repository import delete_account_snapshot
 
-        env = env or trader.TRADING_ENV
+        env = env or trader.runtime_flags().trading_env
         account_key = _account_cache_key() if account_scoped else "_global_"
         delete_account_snapshot(account_key, env, kind)
     except (sqlite3.DatabaseError, OSError, ValueError, TypeError) as exc:
@@ -785,172 +645,17 @@ def _get_balance_data(api: KIStockAPI, allow_cache: bool = True) -> dict:
         return balance_data
 
 
-def _candidate_strategy_cache_signature(ranker: str) -> dict | None:
-    try:
-        from src.db.repository import load_ai_strategies
+def _candidate_cache_service_call(name: str, *args, **kwargs):
+    from src.dashboard.services import cache_service
+    cache_service._refresh_candidate_dependencies()
+    return getattr(cache_service, name)(*args, **kwargs)
 
-        strategy = next((item for item in load_ai_strategies() if item.get("id") == ranker), None)
-    except DashboardOperationError:
-        strategy = None
-    if not strategy:
-        return None
-    return {
-        "strategy_id": strategy.get("id"),
-        "strategy_version": int(strategy.get("strategy_version") or 1),
-        "profile_hash": strategy.get("profile_hash") or "",
-    }
-
-
-def _get_candidate_cache_path(ranker: str, optimizer: str):
-    """전략·옵티마이저 조합별로 독립된 캐시 파일 경로를 반환한다.
-
-    CANDIDATE_CACHE가 테스트용 MemoryCachePath로 교체된 경우에는
-    그 객체를 그대로 반환하여 기존 테스트 패턴과의 호환성을 유지한다.
-    """
-    if not isinstance(CANDIDATE_CACHE, Path):
-        return CANDIDATE_CACHE
-    safe = re.sub(r"[^\w-]", "_", f"{ranker}__{optimizer}")
-    return CANDIDATE_CACHE.parent / f"candidate_snapshot_{safe}.json"
-
-
-def _load_candidate_cache(
-    min_score: int,
-    ranker: str = "gpt_5_mini",
-    optimizer: str = "score_tilted_inverse_vol",
-    allow_stale: bool = False,
-) -> dict | None:
-    override = _public_override("_load_candidate_cache", _load_candidate_cache)
-    if override is not None:
-        if ranker == "gpt_5_mini" and optimizer == "score_tilted_inverse_vol":
-            return override(min_score)
-        return override(min_score, ranker, optimizer)
-
-    # 1) 파일 캐시 우선 (테스트의 MemoryCachePath 포함)
-    cache_path = _get_candidate_cache_path(ranker, optimizer)
-    try:
-        if cache_path.exists():
-            result = _candidate_envelope_to_result(
-                json.loads(cache_path.read_text(encoding="utf-8")),
-                min_score,
-                ranker,
-                optimizer,
-                allow_stale=allow_stale,
-            )
-            if result is not None:
-                return result
-    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        logger.warning(f"Failed to read candidate cache: {exc}")
-
-    # 2) DB 스냅샷 폴백 (.runtime 유실/재배포 등으로 파일이 없을 때)
-    try:
-        from src.db.repository import load_account_snapshot
-
-        snap = load_account_snapshot(
-            "_candidates_", trader.TRADING_ENV, _candidate_snapshot_kind(min_score, ranker, optimizer)
-        )
-        if snap is not None:
-            return _candidate_envelope_to_result(
-                snap["payload"], min_score, ranker, optimizer, allow_stale=allow_stale
-            )
-    except (sqlite3.DatabaseError, OSError, ValueError, TypeError) as exc:
-        logger.warning(f"Failed to load candidate snapshot: {exc}")
-    return None
-
-
-def _candidate_snapshot_kind(min_score: int, ranker: str, optimizer: str) -> str:
-    return f"candidates:{ranker}:{optimizer}:{min_score}"
-
-
-def _candidate_envelope_to_result(
-    cached, min_score: int, ranker: str, optimizer: str, *, allow_stale: bool = False
-) -> dict | None:
-    """파일/DB 어느 쪽 envelope든 동일하게 검증해 후보 결과를 복원한다."""
-    if not isinstance(cached, dict):
-        return None
-    expected_ai_signature = {
-        "enabled": bool(getattr(trader.config, "ai_strategy_enabled", False)),
-        "model": getattr(trader.config, "openai_model", "gpt-5-mini"),
-        "candidate_limit": int(getattr(trader.config, "ai_candidate_limit", 5) or 5),
-        "api_configured": bool(str(getattr(trader.config, "openai_api_key", "") or "").strip()),
-        "strategy": _candidate_strategy_cache_signature(ranker),
-    }
-    if (
-        cached.get("trading_env") != trader.TRADING_ENV
-        or cached.get("min_score") != min_score
-        or cached.get("ranker") != ranker
-        or cached.get("optimizer") != optimizer
-        or cached.get("ai_signature") != expected_ai_signature
-    ):
-        return None
-    cached_at = cached.get("cached_at")
-    if not cached_at:
-        return None
-    try:
-        age = (trader.datetime.now(trader.KST) - trader.datetime.fromisoformat(cached_at)).total_seconds()
-    except ValueError:
-        return None
-    is_stale = age > CANDIDATE_CACHE_TTL_SECONDS
-    if is_stale and not allow_stale:
-        return None
-    rows = cached.get("rows")
-    if not isinstance(rows, list):
-        return None
-    return {
-        "candidates": rows,
-        "scan_summary": cached.get("scan_summary", []),
-        "scanned": cached.get("scanned", len(rows)),
-        "min_score": min_score,
-        "_cache": {"stale": is_stale, "cached_at": cached_at},
-    }
-
-
-def _save_candidate_cache(
-    min_score: int,
-    rows: list[dict],
-    scan_summary: list[dict],
-    scanned: int,
-    ranker: str = "gpt_5_mini",
-    optimizer: str = "score_tilted_inverse_vol",
-) -> str | None:
-    override = _public_override("_save_candidate_cache", _save_candidate_cache)
-    if override is not None:
-        if ranker == "gpt_5_mini" and optimizer == "score_tilted_inverse_vol":
-            return override(min_score, rows, scan_summary, scanned)
-        return override(min_score, rows, scan_summary, scanned, ranker, optimizer)
-    envelope = {
-        "cached_at": trader.datetime.now(trader.KST).isoformat(),
-        "trading_env": trader.TRADING_ENV,
-        "min_score": min_score,
-        "ranker": ranker,
-        "optimizer": optimizer,
-        "ai_signature": {
-            "enabled": bool(getattr(trader.config, "ai_strategy_enabled", False)),
-            "model": getattr(trader.config, "openai_model", "gpt-5-mini"),
-            "candidate_limit": int(getattr(trader.config, "ai_candidate_limit", 5) or 5),
-            "api_configured": bool(str(getattr(trader.config, "openai_api_key", "") or "").strip()),
-            "strategy": _candidate_strategy_cache_signature(ranker),
-        },
-        "rows": rows,
-        "scan_summary": scan_summary,
-        "scanned": scanned,
-    }
-    cache_path = _get_candidate_cache_path(ranker, optimizer)
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(json.dumps(envelope, ensure_ascii=False), encoding="utf-8")
-    # DB write-through: 파일 캐시가 유실되어도 마지막 성공본을 DB에서 복구한다.
-    try:
-        from src.db.repository import save_account_snapshot
-
-        save_account_snapshot(
-            "_candidates_",
-            trader.TRADING_ENV,
-            _candidate_snapshot_kind(min_score, ranker, optimizer),
-            envelope,
-            envelope["cached_at"],
-        )
-    except (sqlite3.DatabaseError, OSError, ValueError, TypeError) as exc:
-        logger.warning(f"Failed to persist candidate snapshot: {exc}")
-    return envelope["cached_at"]
+def _candidate_strategy_cache_signature(ranker: str): return _candidate_cache_service_call("_candidate_strategy_cache_signature", ranker)
+def _get_candidate_cache_path(ranker: str, optimizer: str): return _candidate_cache_service_call("_get_candidate_cache_path", ranker, optimizer)
+def _load_candidate_cache(min_score: int, ranker="gpt_5_mini", optimizer="score_tilted_inverse_vol", allow_stale=False): return _candidate_cache_service_call("_load_candidate_cache", min_score, ranker, optimizer, allow_stale)
+def _candidate_snapshot_kind(min_score: int, ranker: str, optimizer: str): return _candidate_cache_service_call("_candidate_snapshot_kind", min_score, ranker, optimizer)
+def _candidate_envelope_to_result(cached, min_score: int, ranker: str, optimizer: str, *, allow_stale=False): return _candidate_cache_service_call("_candidate_envelope_to_result", cached, min_score, ranker, optimizer, allow_stale=allow_stale)
+def _save_candidate_cache(min_score: int, rows, scan_summary, scanned: int, ranker="gpt_5_mini", optimizer="score_tilted_inverse_vol"): return _candidate_cache_service_call("_save_candidate_cache", min_score, rows, scan_summary, scanned, ranker, optimizer)
 
 
 def _resolve_dashboard_strategy(strategy_id: str | None = None) -> dict | None:
@@ -990,7 +695,7 @@ def build_dashboard_candidates(
 
 def _build_candidate_orders_from_scan(candidates: list, *, held_count: int = 0, cash: int) -> list:
     """Build candidate orders using scan prices (no live quote lookup)."""
-    available_slots = max(0, trader.MAX_POSITIONS - held_count)
+    available_slots = max(0, trader.get_settings().max_positions - held_count)
     orders = []
     remaining_cash = cash
     for cand in candidates[:available_slots]:
@@ -1123,48 +828,11 @@ def _env_value_without_inline_comment(value: str) -> str:
 
 
 def _mask_env_value(value: str) -> str:
-    if not value:
-        return ""
-    if len(value) <= 4:
-        return "*" * len(value)
-    return f"{value[:2]}{'*' * max(4, len(value) - 4)}{value[-2:]}"
+    return mask_env_value(value)
 
 
 def _validate_env_value(key: str, value: object) -> str:
-    field = ENV_FIELD_MAP[key]
-    value_text = _env_value_without_inline_comment(str(value).strip())
-    field_type = field["type"]
-    if field_type == "bool":
-        lowered = value_text.lower()
-        if lowered not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
-            raise HTTPException(status_code=400, detail=f"{key} must be a boolean")
-        return "true" if lowered in {"true", "1", "yes", "on"} else "false"
-    if field_type == "int":
-        value_text = value_text.replace(",", "")
-        try:
-            int(value_text)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"{key} must be an integer") from exc
-        return value_text
-    if field_type == "float":
-        value_text = value_text.replace(",", "")
-        try:
-            float(value_text)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=f"{key} must be a number") from exc
-        return value_text
-    if field_type == "select":
-        options = field.get("options", [])
-        if value_text not in options:
-            raise HTTPException(status_code=400, detail=f"{key} must be one of: {', '.join(options)}")
-        return value_text
-    if key == "KISTOCK_ACCOUNT":
-        digits = "".join(char for char in value_text if char.isdigit())
-        warning = _account_format_warning(digits)
-        if warning:
-            raise HTTPException(status_code=400, detail=warning)
-        return digits
-    return value_text
+    return validate_env_value(ENV_FIELD_MAP, key, value)
 
 
 def _env_bool_value(values: dict[str, str], key: str, default: bool = False) -> bool:
@@ -1256,60 +924,6 @@ def _apply_runtime_env_updates(updates: dict[str, str]) -> None:
                 pass
 
 
-
-STRATEGY_ENV_BINDINGS = {
-    "SPLIT_N": ("split_n", "SPLIT_N", int),
-    "STOP_LOSS_PCT": ("stop_loss_pct", "STOP_LOSS_PCT", float),
-    "TAKE_PROFIT": ("take_profit", "TAKE_PROFIT", float),
-    "RSI_BUY": ("rsi_buy", "RSI_BUY", int),
-    "RSI_SELL": ("rsi_sell", "RSI_SELL", int),
-    "TRAILING_STOP_ACTIVATION_PCT": ("trailing_stop_activation_pct", None, float),
-    "TRAILING_STOP_PCT": ("trailing_stop_pct", None, float),
-    "TRAILING_STOP_LOOKBACK": ("trailing_stop_lookback", None, int),
-    "TRADE_VALUE_SURGE_RATIO": ("trade_value_surge_ratio", None, float),
-    "FIRST_WAVE_MIN_PCT": ("first_wave_min_pct", None, float),
-    "FIRST_WAVE_PULLBACK_MIN_PCT": ("first_wave_pullback_min_pct", None, float),
-    "FIRST_WAVE_PULLBACK_MAX_PCT": ("first_wave_pullback_max_pct", None, float),
-    "TOTAL_CAPITAL": ("total_capital", "TOTAL_CAPITAL", float),
-    "MAX_POSITIONS": ("max_positions", "MAX_POSITIONS", int),
-    "MAX_SINGLE_WEIGHT": ("max_single_weight", "MAX_SINGLE_WEIGHT", float),
-    "CASH_BUFFER": ("cash_buffer", "CASH_BUFFER", float),
-    "MAX_DAILY_LOSS_PCT": ("max_daily_loss_pct", "MAX_DAILY_LOSS_PCT", float),
-    "HANSTOCK_EXCLUDED_SYMBOLS": ("hanstock_excluded_symbols", None, str),
-    "SCAN_UNIVERSE_SIZE": ("scan_universe_size", "SCAN_UNIVERSE_SIZE", int),
-}
-
-
-AI_ENV_BINDINGS = {
-    "AI_STRATEGY_ENABLED": ("ai_strategy_enabled", lambda value: str(value).lower() in ("1", "true", "yes", "on")),
-    "AI_SCORE_WEIGHT": ("ai_score_weight", float),
-    "AI_MIN_MODEL_CONFIDENCE": ("ai_min_model_confidence", float),
-    "AI_REQUIRE_BACKTEST_PASS": ("ai_require_backtest_pass", lambda value: str(value).lower() in ("1", "true", "yes", "on")),
-    "AI_AUTO_APPROVE": ("ai_auto_approve", lambda value: str(value).lower() in ("1", "true", "yes", "on")),
-    "OPENAI_API_KEY": ("openai_api_key", str),
-    "OPENAI_MODEL": ("openai_model", str),
-    "OPENAI_TIMEOUT_SECONDS": ("openai_timeout_seconds", float),
-    "AI_CANDIDATE_LIMIT": ("ai_candidate_limit", int),
-}
-
-
-KIS_ENV_BINDINGS = {
-    "KISTOCK_HTS_ID": ("kistock_hts_id", str),
-    "KIS_WEBSOCKET_ENABLED": ("kis_websocket_enabled", lambda value: str(value).lower() in ("1", "true", "yes", "on")),
-    "KIS_CONDITION_SEARCH_ENABLED": ("kis_condition_search_enabled", lambda value: str(value).lower() in ("1", "true", "yes", "on")),
-    "KIS_CONDITION_USER_ID": ("kis_condition_user_id", str),
-    "KIS_CONDITION_SEQ": ("kis_condition_seq", str),
-    "KIS_CONDITION_NAME": ("kis_condition_name", str),
-    "KIS_REAL_CHECK_ENABLED": ("kis_real_check_enabled", lambda value: str(value).lower() in ("1", "true", "yes", "on")),
-    "KIS_REAL_CHECK_APP_KEY": ("kis_real_check_app_key", str),
-    "KIS_REAL_CHECK_APP_SECRET": ("kis_real_check_app_secret", str),
-    "KIS_REAL_CHECK_ACCOUNT": ("kis_real_check_account", str),
-    "KIS_REAL_CHECK_HTS_ID": ("kis_real_check_hts_id", str),
-    "KIS_REAL_CHECK_CONDITION_SEARCH_ENABLED": ("kis_real_check_condition_search_enabled", lambda value: str(value).lower() in ("1", "true", "yes", "on")),
-    "KIS_REAL_CHECK_CONDITION_USER_ID": ("kis_real_check_condition_user_id", str),
-    "KIS_REAL_CHECK_CONDITION_SEQ": ("kis_real_check_condition_seq", str),
-    "KIS_REAL_CHECK_CONDITION_NAME": ("kis_real_check_condition_name", str),
-}
 
 
 def _apply_strategy_env_updates(updates: dict[str, str]) -> None:
@@ -1569,450 +1183,25 @@ def _read_json_file(path: Path, default):
     return _external_integration_service.read_json(path, default)
 
 
-def _quantconnect_auth_status(credentials: QuantConnectCredentials) -> dict:
-    return _external_integration_service.quantconnect_auth_status(credentials)
+def _quantconnect_service_call(name: str, *args, **kwargs):
+    from src.dashboard.services import quantconnect_service
+    quantconnect_service._refresh_dependencies()
+    return getattr(quantconnect_service, name)(*args, **kwargs)
 
-
-def _first_item(value):
-    if isinstance(value, list):
-        return value[0] if value else {}
-    if isinstance(value, dict):
-        return value
-    return {}
-
-
-def _quantconnect_errors(*payloads: dict) -> list[str]:
-    errors = []
-    for payload in payloads:
-        if not isinstance(payload, dict):
-            continue
-        for error in payload.get("errors") or []:
-            if error:
-                errors.append(str(error))
-        if payload.get("error"):
-            errors.append(str(payload["error"]))
-        if payload.get("message") and payload.get("success") is False:
-            errors.append(str(payload["message"]))
-    return list(dict.fromkeys(errors))
-
-
-def _quantconnect_order_rows(payload: dict) -> list[dict]:
-    orders = payload.get("orders") or payload.get("Orders") or []
-    if isinstance(orders, dict):
-        orders = list(orders.values())
-    rows = []
-    for order in orders if isinstance(orders, list) else []:
-        if not isinstance(order, dict):
-            continue
-        symbol = order.get("symbol") or order.get("Symbol") or "MNQ"
-        if isinstance(symbol, dict):
-            symbol = symbol.get("value") or symbol.get("id") or symbol.get("permtick") or "MNQ"
-        direction = order.get("direction") or order.get("side") or order.get("Direction")
-        if direction in {0, "0"}:
-            direction = "Buy"
-        elif direction in {1, "1"}:
-            direction = "Sell"
-        elif direction is None and (order.get("quantity") or order.get("Quantity") or 0):
-            direction = "Buy" if float(order.get("quantity") or order.get("Quantity") or 0) > 0 else "Sell"
-        rows.append({
-            "id": order.get("id") or order.get("orderId") or order.get("OrderId"),
-            "time": order.get("time") or order.get("createdTime") or order.get("lastFillTime") or order.get("Time"),
-            "symbol": symbol,
-            "side": direction,
-            "quantity": order.get("quantity") or order.get("Quantity"),
-            "price": order.get("price") or order.get("Price") or order.get("averageFillPrice"),
-            "status": order.get("status") or order.get("Status"),
-        })
-    return rows
-
-
-def _quantconnect_portfolio_state(payload: dict) -> dict:
-    portfolio = payload.get("portfolio") or payload.get("Portfolio") or {}
-    holdings_raw = portfolio.get("holdings") if isinstance(portfolio, dict) else {}
-    cash_raw = portfolio.get("cash") if isinstance(portfolio, dict) else {}
-    holdings = []
-    if isinstance(holdings_raw, dict):
-        iterator = holdings_raw.items()
-    elif isinstance(holdings_raw, list):
-        iterator = enumerate(holdings_raw)
-    else:
-        iterator = []
-    for key, value in iterator:
-        if not isinstance(value, dict):
-            continue
-        holdings.append({
-            "symbol": value.get("symbol") or value.get("Symbol") or str(key),
-            "quantity": value.get("quantity") or value.get("Quantity") or value.get("holdings") or value.get("q"),
-            "average_price": value.get("averagePrice") or value.get("AveragePrice") or value.get("a"),
-            "market_price": value.get("price") or value.get("Price") or value.get("p"),
-            "market_value": value.get("marketValue") or value.get("MarketValue") or value.get("value") or value.get("v"),
-            "unrealized_pnl": value.get("unrealizedProfit") or value.get("UnrealizedProfit") or value.get("u"),
-        })
-    return {
-        "raw": portfolio if isinstance(portfolio, dict) else {},
-        "holdings": holdings,
-        "cash": cash_raw if isinstance(cash_raw, dict) else {},
-        "total_portfolio_value": portfolio.get("totalPortfolioValue") if isinstance(portfolio, dict) else None,
-    }
-
-
-def _quantconnect_cloud_snapshot(credentials: QuantConnectCredentials, *, force_refresh: bool = False) -> dict:
-    override = _public_override("_quantconnect_cloud_snapshot", _quantconnect_cloud_snapshot)
-    if override is not None:
-        return override(credentials, force_refresh=force_refresh)
-    if not credentials.configured or not credentials.project_configured:
-        return {
-            "enabled": False,
-            "errors": [],
-            "project": {},
-            "live": {},
-            "portfolio": {},
-            "orders": [],
-        }
-
-    now = trader.datetime.now(trader.KST)
-    cached = _read_json_file(QUANTCONNECT_CLOUD_CACHE, {})
-    if not force_refresh and isinstance(cached, dict) and cached.get("checked_at"):
-        try:
-            age = (now - trader.datetime.fromisoformat(cached["checked_at"])).total_seconds()
-        except ValueError:
-            age = None
-        if age is not None and age < 60 and isinstance(cached.get("snapshot"), dict):
-            snapshot = cached["snapshot"]
-            snapshot["cached"] = True
-            return snapshot
-
-    api = QuantConnectAPI(credentials)
-    project_payload = api.read_project(credentials.project_id, timeout=8.0)
-    live_list_payload = api.list_live_algorithms(credentials.project_id, timeout=8.0)
-    live_payload = api.read_live_algorithm(credentials.project_id, timeout=8.0)
-    portfolio_payload = api.read_live_portfolio(credentials.project_id, timeout=8.0)
-
-    projects = project_payload.get("projects") if isinstance(project_payload, dict) else []
-    project = _first_item(projects)
-    live_algorithms = (
-        live_list_payload.get("live") or
-        live_list_payload.get("algorithms") or
-        live_list_payload.get("liveAlgorithms") or
-        []
-    )
-    live_algorithm = _first_item(live_algorithms)
-    deploy_id = (
-        live_payload.get("deployId") or
-        live_payload.get("algorithmId") or
-        live_algorithm.get("deployId") or
-        live_algorithm.get("algorithmId")
-        if isinstance(live_payload, dict)
-        else None
-    )
-
-    orders_payload = {}
-    if deploy_id:
-        orders_payload = api.read_live_orders(credentials.project_id, deploy_id, start=0, end=100, timeout=8.0)
-
-    portfolio = _quantconnect_portfolio_state(portfolio_payload if isinstance(portfolio_payload, dict) else {})
-    snapshot = {
-        "enabled": True,
-        "cached": False,
-        "project": {
-            "id": project.get("projectId") or credentials.project_id,
-            "name": project.get("name") or project.get("Name") or "",
-            "modified": project.get("modified") or project.get("Modified") or "",
-            "language": project.get("language") or project.get("Language") or "",
-        },
-        "live": {
-            "status": live_payload.get("status") or live_algorithm.get("status"),
-            "deploy_id": deploy_id,
-            "message": live_payload.get("message") or live_algorithm.get("message"),
-            "launched": live_payload.get("launched") or live_algorithm.get("launched"),
-            "stopped": live_payload.get("stopped") or live_algorithm.get("stopped"),
-            "brokerage": live_payload.get("brokerage") or live_algorithm.get("brokerage"),
-        },
-        "portfolio": portfolio,
-        "orders": _quantconnect_order_rows(orders_payload if isinstance(orders_payload, dict) else {}),
-        "api_errors": _quantconnect_errors(project_payload, live_list_payload, live_payload, portfolio_payload, orders_payload),
-    }
-    QUANTCONNECT_CLOUD_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    QUANTCONNECT_CLOUD_CACHE.write_text(
-        json.dumps({"checked_at": now.isoformat(), "snapshot": snapshot}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    return snapshot
-
-
-def _clear_quantconnect_cloud_cache() -> None:
-    try:
-        QUANTCONNECT_CLOUD_CACHE.unlink(missing_ok=True)
-    except OSError:
-        pass
-
-
-def _quantconnect_live_nodes(nodes_payload: dict) -> list[dict]:
-    nodes = nodes_payload.get("nodes") if isinstance(nodes_payload, dict) else {}
-    live_nodes = nodes.get("live") if isinstance(nodes, dict) else []
-    return [node for node in live_nodes if isinstance(node, dict)]
-
-
-def _select_quantconnect_live_node(nodes_payload: dict, requested_node_id: str = "") -> dict:
-    live_nodes = _quantconnect_live_nodes(nodes_payload)
-    if requested_node_id:
-        for node in live_nodes:
-            if str(node.get("id") or "") == requested_node_id:
-                return node
-        raise HTTPException(status_code=400, detail=f"QuantConnect live node not found: {requested_node_id}")
-
-    for node in live_nodes:
-        if node.get("active") and not node.get("busy"):
-            return node
-    for node in live_nodes:
-        if node.get("active"):
-            return node
-    if live_nodes:
-        return live_nodes[0]
-    raise HTTPException(status_code=409, detail="No QuantConnect live node is available for this project")
-
-
-def _wait_for_quantconnect_compile(
-    api: QuantConnectAPI,
-    project_id: str,
-    compile_payload: dict,
-    *,
-    attempts: int = 12,
-    interval_seconds: float = 2.0,
-) -> dict:
-    compile_id = str(compile_payload.get("compileId") or "")
-    if not compile_id:
-        errors = compile_payload.get("errors") or [compile_payload.get("error") or "QuantConnect compile did not return compileId"]
-        raise HTTPException(status_code=502, detail="; ".join(str(error) for error in errors if error))
-
-    result = compile_payload
-    for _ in range(attempts):
-        state = str(result.get("state") or "").lower()
-        if state == "buildsuccess":
-            return result
-        if state == "builderror":
-            logs = result.get("logs") or result.get("errors") or ["QuantConnect build failed"]
-            raise HTTPException(status_code=502, detail="; ".join(str(log) for log in logs if log))
-        time.sleep(interval_seconds)
-        result = api.read_compile(project_id, compile_id, timeout=10.0)
-
-    raise HTTPException(status_code=504, detail=f"QuantConnect compile is still pending: {compile_id}")
-
-
-def _quantconnect_mnq_status() -> dict:
-    load_dotenv(dotenv_path=ENV_PATH, override=True)
-    algorithm_path = QUANTCONNECT_MNQ_DIR / "main.py"
-    config_path = QUANTCONNECT_MNQ_DIR / "config.json"
-    doc_path = BASE_DIR / "doc" / "S1.한스톡사용설명서.md"
-    config = _read_json_file(config_path, {})
-    if not isinstance(config, dict):
-        config = {}
-    results = _read_json_file(QUANTCONNECT_MNQ_RESULTS, {})
-    if not isinstance(results, dict):
-        results = {}
-    qc_user_id = os.environ.get("QUANTCONNECT_USER_ID") or os.environ.get("QC_USER_ID")
-    qc_api_token = os.environ.get("QUANTCONNECT_API_TOKEN") or os.environ.get("QC_API_TOKEN")
-    qc_project_id = os.environ.get("QUANTCONNECT_PROJECT_ID") or os.environ.get("QC_PROJECT_ID")
-    credentials = QuantConnectCredentials(
-        user_id=qc_user_id or "",
-        api_token=qc_api_token or "",
-        project_id=qc_project_id or "",
-    )
-    auth = _quantconnect_auth_status(credentials)
-    cloud_sync_configured = credentials.configured and credentials.project_configured
-    cloud_snapshot = _quantconnect_cloud_snapshot(credentials)
-    project_ready = algorithm_path.exists() and config_path.exists()
-
-    deployment = results.get("deployment") if isinstance(results.get("deployment"), dict) else {}
-    if not deployment:
-        cloud_live = cloud_snapshot.get("live", {}) if isinstance(cloud_snapshot.get("live"), dict) else {}
-        cloud_status = str(cloud_live.get("status") or "").strip()
-        if cloud_status:
-            if cloud_status.lower() == "running":
-                deployment_status = "running"
-                deployment_message = "QuantConnect Paper Live deployment is running."
-            else:
-                deployment_status = cloud_status.lower()
-                deployment_message = (
-                    f"QuantConnect project is configured, but the Paper Live deployment is {cloud_status}. "
-                    "Start or redeploy it before sending dashboard orders."
-                )
-        elif not credentials.configured:
-            deployment_status = "not_connected"
-            deployment_message = "QuantConnect User Id and API Token are required."
-        elif not credentials.project_configured:
-            deployment_status = "not_connected"
-            deployment_message = "QuantConnect Project Id is required for project/order sync."
-        else:
-            deployment_status = "ready_to_sync"
-            deployment_message = "QuantConnect API and Project Id are configured. Deploy the project as Paper Live before sending dashboard orders."
-        deployment = {
-            "status": deployment_status,
-            "message": deployment_message,
-        }
-
-    return {
-        "as_of": trader.datetime.now(trader.KST).isoformat(),
-        "feasible": True,
-        "project_ready": project_ready,
-        "cloud_sync_configured": cloud_sync_configured,
-        "auth": {
-            "configured": credentials.configured,
-            "project_configured": credentials.project_configured,
-            "success": bool(auth.get("success")),
-            "status_code": auth.get("status_code"),
-            "error": auth.get("error"),
-        },
-        "algorithm": {
-            "path": str(algorithm_path),
-            "exists": algorithm_path.exists(),
-            "symbol": "MNQ",
-            "quantconnect_symbol": "Futures.Indices.MICRO_NASDAQ_100_E_MINI",
-            "brokerage": "QuantConnect Paper Trading",
-            "max_contracts": config.get("parameters", {}).get("MAX_CONTRACTS", "1"),
-        },
-        "files": {
-            "config": {"path": str(config_path), "exists": config_path.exists()},
-            "documentation": {"path": str(doc_path), "exists": doc_path.exists()},
-            "results": {"path": str(QUANTCONNECT_MNQ_RESULTS), "exists": QUANTCONNECT_MNQ_RESULTS.exists()},
-        },
-        "deployment": deployment,
-        "account": cloud_snapshot.get("portfolio", {}).get("raw") or results.get("account", {}),
-        "positions": cloud_snapshot.get("portfolio", {}).get("holdings") or results.get("positions", []),
-        "orders": cloud_snapshot.get("orders") or results.get("orders", []),
-        "metrics": results.get("metrics", {}),
-        "cloud": cloud_snapshot,
-        "sources": [
-            "https://www.quantconnect.com/docs/v2/cloud-platform/live-trading/brokerages/quantconnect-paper-trading",
-            "https://www.quantconnect.com/docs/v2/writing-algorithms/datasets/algoseek/us-futures",
-        ],
-    }
-
-
-def _quantconnect_credentials() -> QuantConnectCredentials:
-    override = _public_override("_quantconnect_credentials", _quantconnect_credentials)
-    if override is not None:
-        return override()
-    return _external_integration_service.quantconnect_credentials()
-
-
-def _quantconnect_mnq_deploy(payload: dict | None = None) -> dict:
-    payload = payload or {}
-    credentials = _quantconnect_credentials()
-    if not credentials.configured:
-        raise HTTPException(status_code=400, detail="QuantConnect User Id and API Token are required")
-    if not credentials.project_configured:
-        raise HTTPException(status_code=400, detail="QUANTCONNECT_PROJECT_ID is required")
-
-    api = QuantConnectAPI(credentials)
-    payload_node_id = str(payload.get("node_id") or "").strip()
-    requested_node_id = (
-        payload_node_id
-        or os.environ.get("QUANTCONNECT_LIVE_NODE_ID", "").strip()
-        or os.environ.get("QC_LIVE_NODE_ID", "").strip()
-    )
-
-    nodes_payload = api.read_project_nodes(credentials.project_id, timeout=10.0)
-    if not nodes_payload.get("success", False):
-        errors = nodes_payload.get("errors") or [nodes_payload.get("error") or "QuantConnect live node lookup failed"]
-        raise HTTPException(status_code=502, detail="; ".join(str(error) for error in errors if error))
-    try:
-        node = _select_quantconnect_live_node(nodes_payload, requested_node_id)
-    except HTTPException:
-        if payload_node_id:
-            raise
-        node = _select_quantconnect_live_node(nodes_payload, "")
-
-    compile_payload = api.create_compile(credentials.project_id, timeout=10.0)
-    if not compile_payload.get("success", False):
-        errors = compile_payload.get("errors") or [compile_payload.get("error") or "QuantConnect compile failed"]
-        raise HTTPException(status_code=502, detail="; ".join(str(error) for error in errors if error))
-    compile_result = _wait_for_quantconnect_compile(api, credentials.project_id, compile_payload)
-
-    config = _read_json_file(QUANTCONNECT_MNQ_DIR / "config.json", {})
-    parameters = config.get("parameters", {}) if isinstance(config, dict) else {}
-    live_payload = api.create_live_algorithm(
-        credentials.project_id,
-        str(compile_result.get("compileId")),
-        str(node.get("id")),
-        parameters=parameters,
-        timeout=20.0,
-    )
-    if not live_payload.get("success", False):
-        errors = live_payload.get("errors") or [live_payload.get("error") or "QuantConnect Paper Live deployment failed"]
-        raise HTTPException(status_code=502, detail="; ".join(str(error) for error in errors if error))
-
-    _clear_quantconnect_cloud_cache()
-    snapshot = _quantconnect_cloud_snapshot(credentials, force_refresh=True)
-    return {
-        "success": True,
-        "project_id": credentials.project_id,
-        "compile_id": compile_result.get("compileId"),
-        "node": {
-            "id": node.get("id"),
-            "name": node.get("name"),
-            "sku": node.get("sku"),
-        },
-        "deploy_id": live_payload.get("deployId") or live_payload.get("algorithmId"),
-        "raw": live_payload,
-        "cloud": snapshot,
-    }
-
-
-def _quantconnect_mnq_order(payload: dict) -> dict:
-    credentials = _quantconnect_credentials()
-    side = str(payload.get("side") or "").strip().lower()
-    signal_id = str(payload.get("signal_id") or "").strip()
-    provider = str(payload.get("provider") or "").strip()
-    try:
-        quantity = int(payload.get("quantity") or payload.get("qty") or 0)
-    except (TypeError, ValueError):
-        quantity = 0
-
-    if side not in {"buy", "sell"}:
-        raise HTTPException(status_code=400, detail="side must be buy or sell")
-    if quantity < 1:
-        raise HTTPException(status_code=400, detail="quantity must be at least 1")
-    if quantity > 3:
-        raise HTTPException(status_code=400, detail="MNQ paper dashboard orders are limited to 3 contracts")
-    if not credentials.configured:
-        raise HTTPException(status_code=400, detail="QuantConnect User Id and API Token are required")
-    if not credentials.project_configured:
-        raise HTTPException(status_code=400, detail="QUANTCONNECT_PROJECT_ID is required")
-
-    cloud_snapshot = _quantconnect_cloud_snapshot(credentials, force_refresh=True)
-    live = cloud_snapshot.get("live", {}) if isinstance(cloud_snapshot.get("live"), dict) else {}
-    live_status = str(live.get("status") or "").strip()
-    if live_status.lower() != "running":
-        detail = (
-            f"QuantConnect project {credentials.project_id} has no running Paper Live instance"
-        )
-        if live_status:
-            detail += f" (current status: {live_status})"
-        detail += ". Start or redeploy the project in QuantConnect before sending dashboard orders."
-        raise HTTPException(status_code=409, detail=detail)
-
-    order_tag = "hanstock-dashboard-mnq-paper"
-    if signal_id:
-        tag_source = re.sub(r"[^A-Za-z0-9_-]+", "-", provider or "telegram").strip("-") or "telegram"
-        signal_ref = re.sub(r"[^A-Za-z0-9_-]+", "-", signal_id).strip("-") or "signal"
-        order_tag = f"hanstock-signal-{tag_source}-{signal_ref}"[:80]
-
-    command = {
-        "command_type": "order",
-        "symbol": "MNQ",
-        "side": side,
-        "quantity": quantity,
-        "tag": order_tag,
-    }
-    result = QuantConnectAPI(credentials).create_live_command(credentials.project_id, command, timeout=10.0)
-    return {
-        "success": bool(result.get("success")),
-        "command": command,
-        "status_code": result.get("status_code"),
-        "error": result.get("error"),
-        "errors": result.get("errors", []),
-    }
+def _quantconnect_auth_status(credentials): return _quantconnect_service_call("_quantconnect_auth_status", credentials)
+def _first_item(value): return _quantconnect_service_call("_first_item", value)
+def _quantconnect_errors(*payloads): return _quantconnect_service_call("_quantconnect_errors", *payloads)
+def _quantconnect_order_rows(payload): return _quantconnect_service_call("_quantconnect_order_rows", payload)
+def _quantconnect_portfolio_state(payload): return _quantconnect_service_call("_quantconnect_portfolio_state", payload)
+def _quantconnect_cloud_snapshot(credentials, *, force_refresh=False): return _quantconnect_service_call("_quantconnect_cloud_snapshot", credentials, force_refresh=force_refresh)
+def _clear_quantconnect_cloud_cache(): return _quantconnect_service_call("_clear_quantconnect_cloud_cache")
+def _quantconnect_live_nodes(payload): return _quantconnect_service_call("_quantconnect_live_nodes", payload)
+def _select_quantconnect_live_node(payload, requested_node_id=""): return _quantconnect_service_call("_select_quantconnect_live_node", payload, requested_node_id)
+def _wait_for_quantconnect_compile(api, project_id, compile_payload, **kwargs): return _quantconnect_service_call("_wait_for_quantconnect_compile", api, project_id, compile_payload, **kwargs)
+def _quantconnect_mnq_status(): return _quantconnect_service_call("_quantconnect_mnq_status")
+def _quantconnect_credentials(): return _quantconnect_service_call("_quantconnect_credentials")
+def _quantconnect_mnq_deploy(payload=None): return _quantconnect_service_call("_quantconnect_mnq_deploy", payload)
+def _quantconnect_mnq_order(payload): return _quantconnect_service_call("_quantconnect_mnq_order", payload)
 
 
 def _license_name(text: str, hint: str) -> str:
@@ -2077,26 +1266,26 @@ def _demo_trading_readiness() -> dict:
         },
         {
             "key": "demo_environment",
-            "ok": trader.TRADING_ENV == "demo",
-            "message": f"TRADING_ENV={trader.TRADING_ENV}",
+            "ok": trader.runtime_flags().trading_env == "demo",
+            "message": f"TRADING_ENV={trader.runtime_flags().trading_env}",
             "critical": True,
         },
         {
             "key": "dry_run_disabled",
-            "ok": trader.DRY_RUN is False,
-            "message": f"DRY_RUN={str(trader.DRY_RUN).lower()}",
+            "ok": trader.runtime_flags().dry_run is False,
+            "message": f"DRY_RUN={str(trader.runtime_flags().dry_run).lower()}",
             "critical": True,
         },
         {
             "key": "live_trading_disabled",
-            "ok": trader.ENABLE_LIVE_TRADING is False and trader.REAL_ORDERS_ENABLED is False,
-            "message": f"ENABLE_LIVE_TRADING={str(trader.ENABLE_LIVE_TRADING).lower()}, real_orders={str(trader.REAL_ORDERS_ENABLED).lower()}",
+            "ok": trader.runtime_flags().enable_live_trading is False and trader.runtime_flags().real_orders_enabled is False,
+            "message": f"ENABLE_LIVE_TRADING={str(trader.runtime_flags().enable_live_trading).lower()}, real_orders={str(trader.runtime_flags().real_orders_enabled).lower()}",
             "critical": True,
         },
         {
             "key": "demo_order_submission",
-            "ok": trader.ORDER_SUBMISSION_ENABLED is True,
-            "message": f"ORDER_SUBMISSION_ENABLED={str(trader.ORDER_SUBMISSION_ENABLED).lower()}",
+            "ok": trader.runtime_flags().order_submission_enabled is True,
+            "message": f"ORDER_SUBMISSION_ENABLED={str(trader.runtime_flags().order_submission_enabled).lower()}",
             "critical": True,
         },
         {
@@ -2107,8 +1296,8 @@ def _demo_trading_readiness() -> dict:
         },
         {
             "key": "approval_policy",
-            "ok": trader.REQUIRE_APPROVAL or _auto_approval_enabled(),
-            "message": f"REQUIRE_APPROVAL={str(trader.REQUIRE_APPROVAL).lower()}, auto_approval={str(_auto_approval_enabled()).lower()}",
+            "ok": trader.runtime_flags().require_approval or _auto_approval_enabled(),
+            "message": f"REQUIRE_APPROVAL={str(trader.runtime_flags().require_approval).lower()}, auto_approval={str(_auto_approval_enabled()).lower()}",
             "critical": False,
         },
     ]
@@ -2116,27 +1305,17 @@ def _demo_trading_readiness() -> dict:
     return {
         "ready": critical_ready,
         "mode": "kis_demo_auto",
-        "trading_env": trader.TRADING_ENV,
-        "dry_run": trader.DRY_RUN,
-        "enable_live_trading": trader.ENABLE_LIVE_TRADING,
-        "order_submission_enabled": trader.ORDER_SUBMISSION_ENABLED,
-        "real_orders_enabled": trader.REAL_ORDERS_ENABLED,
+        "trading_env": trader.runtime_flags().trading_env,
+        "dry_run": trader.runtime_flags().dry_run,
+        "enable_live_trading": trader.runtime_flags().enable_live_trading,
+        "order_submission_enabled": trader.runtime_flags().order_submission_enabled,
+        "real_orders_enabled": trader.runtime_flags().real_orders_enabled,
         "checks": checks,
     }
 
 
 def _runtime_dashboard_info() -> dict:
-    hostname = socket.gethostname()
-    explicit_label = os.environ.get("HANSTOCK_DASHBOARD_LABEL", "").strip()
-    explicit_origin = os.environ.get("HANSTOCK_DASHBOARD_ORIGIN", "").strip().lower()
-    is_vm = explicit_origin == "vm" or hostname.startswith("hanstock-server")
-    label = explicit_label or ("VM DASHBOARD" if is_vm else "LOCAL DASHBOARD")
-    return {
-        "label": label,
-        "origin": "vm" if is_vm else "local",
-        "is_vm": is_vm,
-        "hostname": hostname,
-    }
+    return dashboard_runtime_info()
 
 
 
@@ -2456,7 +1635,7 @@ def _dashboard_analysis_cycle(
         return resolved_strategy_id, None
     cycle = resolve_common_analysis_cycle(
         resolved_strategy_id,
-        trader.TRADING_ENV,
+        trader.runtime_flags().trading_env,
         cycle_id,
     )
     return resolved_strategy_id, cycle
@@ -2646,7 +1825,7 @@ async def get_candidates(
                     score=cand["score"],
                     reasons=cand["reasons"],
                     price=cand["current_price"],
-                    env=trader.TRADING_ENV,
+                    env=trader.runtime_flags().trading_env,
                     indicators={
                         "rsi": cand.get("rsi"),
                         "rsi2": cand.get("rsi2"),
@@ -2872,207 +2051,46 @@ def _holding_history(api: KIStockAPI, parsed: dict, n: int = 120) -> list[dict]:
 
 
 
+def _approval_service_call(name: str, *args, **kwargs):
+    from src.dashboard.services import approval_service
+    approval_service._refresh_dependencies()
+    return getattr(approval_service, name)(*args, **kwargs)
+
 def _load_pending_approval(approval_id: int) -> dict:
-    item = _approval_by_id(approval_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="approval not found")
-    if item["status"] != "pending":
-        raise HTTPException(status_code=409, detail=f"approval is already {item['status']}")
-    return item
-
-
+    return _approval_service_call("_load_pending_approval", approval_id)
 def _claim_pending_approval(approval_id: int) -> dict:
-    item = _load_pending_approval(approval_id)
-    now = trader.datetime.now(trader.KST).strftime("%Y-%m-%d %H:%M:%S")
-    with trader.connect_db() as conn:
-        cursor = conn.execute(
-            """
-            UPDATE approvals
-            SET status = 'executing', response_msg = 'Submitting order to broker', updated_at = ?
-            WHERE id = ? AND status = 'pending'
-            """,
-            (now, approval_id),
-        )
-    if cursor.rowcount != 1:
-        current = _approval_by_id(approval_id)
-        if current is None:
-            raise HTTPException(status_code=404, detail="approval not found")
-        raise HTTPException(status_code=409, detail=f"approval is already {current['status']}")
-    return item
-
-
+    return _approval_service_call("_claim_pending_approval", approval_id)
 def _approval_response_msg(result: dict, *, ok: bool) -> str:
-    response_msg = str(result.get("msg1", ""))
-    if ok and not trader.DRY_RUN and trader.TRADING_ENV == "demo":
-        response_msg = f"{response_msg} (KIS 모의투자 주문 접수 완료, 체결 여부는 주문내역 동기화 후 확인)"
-    return response_msg
-
-
+    return _approval_service_call("_approval_response_msg", result, ok=ok)
 def _current_holding_qty_from_balance(api, symbol: str) -> int:
-    try:
-        parsed = _parse_balance(_get_balance_data(api, allow_cache=True))
-    except DashboardOperationError:
-        return 0
-    for holding in parsed.get("holdings", []):
-        if str(holding.get("symbol") or "") == str(symbol):
-            return _to_int(holding.get("qty"))
-    return 0
-
-
+    return _approval_service_call("_current_holding_qty_from_balance", api, symbol)
 def _pending_approval_ids(limit: int = 200, *, exclude_sources: set[str] | None = None) -> list[int]:
-    _init_approval_db()
-    with trader.connect_db() as conn:
-        conn.row_factory = sqlite3.Row
-        if exclude_sources:
-            placeholders = ", ".join("?" for _ in exclude_sources)
-            rows = conn.execute(
-                f"""
-                SELECT id FROM approvals
-                WHERE status = 'pending'
-                  AND COALESCE(source, '') NOT IN ({placeholders})
-                ORDER BY id ASC
-                LIMIT ?
-                """,
-                (*sorted(exclude_sources), limit),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id FROM approvals WHERE status = 'pending' ORDER BY id ASC LIMIT ?",
-                (limit,),
-            ).fetchall()
-    return [int(row["id"]) for row in rows]
-
-
+    return _approval_service_call("_pending_approval_ids", limit, exclude_sources=exclude_sources)
 def _is_approval_already_claimed(exc: Exception) -> bool:
-    detail = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
-    return "approval is already" in detail
-
-
+    return _approval_service_call("_is_approval_already_claimed", exc)
 def _auto_approve_pending_approvals(limit: int = 200) -> list[dict]:
-    results = []
-    for approval_id in _pending_approval_ids(limit, exclude_sources=AUTO_APPROVAL_EXCLUDED_SOURCES):
-        try:
-            results.append(_approve_pending_approval(approval_id, "자동승인"))
-        except Exception as exc:
-            if _is_approval_already_claimed(exc):
-                logger.debug(f"auto approval skipped approval_id={approval_id}: {exc}")
-                continue
-            logger.warning(f"auto approval failed for approval_id={approval_id}: {exc}")
-            continue
-    return results
-
-
+    return _approval_service_call("_auto_approve_pending_approvals", limit)
 def _approve_pending_approval(approval_id: int, approval_label: str = "수동승인") -> dict:
-    # Explicit sell-all batches, the periodic sweeper, scheduler jobs, and
-    # manual approvals can all reach this function concurrently. Serialize the
-    # broker-facing path so KIS sees one approval order at a time.
     with _approval_submission_lock:
         return _approve_pending_approval_serialized(approval_id, approval_label)
+def _approve_pending_approval_serialized(approval_id: int, approval_label: str, *, approval: dict | None = None) -> dict:
+    return _approval_service_call("_approve_pending_approval_serialized", approval_id, approval_label, approval=approval)
 
-
-def _approve_pending_approval_serialized(
-    approval_id: int,
-    approval_label: str = "수동승인",
-) -> dict:
-    from src.online_access import is_online_access_blocked
-
-    if is_online_access_blocked():
-        raise HTTPException(
-            status_code=409,
-            detail="Online access is blocked. Approval remains pending.",
-        )
-    pending = _load_pending_approval(approval_id)
-    if (
-        str(pending.get("action") or "").lower() == "buy"
-        and Path(".runtime/kill_switch.json").exists()
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail="Kill switch is active. Buy approval remains pending.",
-        )
-    if pending.get("managed_order_id"):
-        from src.strategy.autonomy.ai_stock_integration import (
-            approve_managed_ai_stock_order,
-        )
-
-        try:
-            return approve_managed_ai_stock_order(approval_id)
-        except Exception as exc:
-            raise HTTPException(
-                status_code=409,
-                detail=f"managed AI-stock approval failed closed: {exc}",
-            ) from exc
-    item = _claim_pending_approval(approval_id)
-    result: dict = {}
-    status = "failed"
-    response_msg = "Order submission did not complete"
-    try:
-        api = _get_api()
-        pre_order_qty = _current_holding_qty_from_balance(api, item["symbol"])
-        result = api.place_order(item["symbol"], item["action"], item["price"], item["qty"])
-        ok = result.get("rt_cd") == "0"
-        status = "executed" if ok else "failed"
-        response_msg = _approval_response_msg(result, ok=ok)
-        if False:  # legacy non-English broker note disabled
-            response_msg = f"{response_msg} (주문 접수 완료 - 실제 체결 여부는 HTS/MTS에서 확인 필요)"
-        trader.save_trade(
-            item["symbol"],
-            item["name"],
-            item["action"],
-            item["qty"],
-            item["price"],
-            item["reason"],
-            ok,
-            trader.ORDER_SUBMISSION_ENABLED,
-            broker_result=result,
-            order_status="submitted" if ok and trader.ORDER_SUBMISSION_ENABLED else "simulated" if ok else "failed",
-            response_msg=response_msg,
-            filled_qty=0 if ok and trader.ORDER_SUBMISSION_ENABLED else item["qty"] if ok else 0,
-            filled_price=0 if ok and trader.ORDER_SUBMISSION_ENABLED else item["price"] if ok else 0,
-            pre_order_qty=pre_order_qty,
-            strategy_id=item.get("strategy_id"),
-            strategy_version=_to_int(item.get("strategy_version")) or None,
-            profile_hash=item.get("profile_hash"),
-            source_approval_id=approval_id,
-        )
-    except Exception as e:
-        status = "failed"
-        response_msg = str(e)
-        logger.warning(f"approval order submission failed approval_id={approval_id}: {e}")
-
-    now = trader.datetime.now(trader.KST).strftime("%Y-%m-%d %H:%M:%S")
-    with trader.connect_db() as conn:
-        conn.execute(
-            "UPDATE approvals SET status = ?, response_msg = ?, updated_at = ? WHERE id = ?",
-            (status, response_msg, now, approval_id),
-        )
-
-    # Slack 알림
-    try:
-        indicators = {"rsi": "-", "sma20": 0, "sma60": 0, "rt": 0}
-        _slack_order(
-            item["name"], item["symbol"], item["action"],
-            item["qty"], item["price"],
-            f"[대시보드 {approval_label}] {item.get('reason', '')}",
-            status == "executed",
-            indicators,
-        )
-    except (OSError, RuntimeError, TypeError, ValueError) as exc:
-        logger.warning(f"Failed to send approval notification: {exc}")
-
-    # 주문이 실제 체결/제출되었으면 잔고가 바뀌므로 잔고·파생 탭 스냅샷을 무효화해
-    # 다음 read에서 최신 상태를 다시 받아오게 한다.
-    if status == "executed":
-        _clear_balance_cache()
-
-    return {"id": approval_id, "status": status, "response_msg": response_msg}
-
-
+for _approval_wrapper_name in (
+    "_load_pending_approval",
+    "_claim_pending_approval",
+    "_approval_response_msg",
+    "_current_holding_qty_from_balance",
+    "_pending_approval_ids",
+    "_is_approval_already_claimed",
+):
+    getattr(sys.modules[__name__], _approval_wrapper_name)._approval_service_wrapper = True
 
 import time
 
 _cloud_trades_cache = None
 _cloud_trades_cache_time = 0
+
 
 def fetch_cloud_trades():
     global _cloud_trades_cache, _cloud_trades_cache_time
@@ -3213,7 +2231,7 @@ def _filled_price_matches_order(trade: dict, *, tolerance: float = 0.30) -> bool
 def _account_trades(trades: list[dict]) -> list[dict]:
     account_rows = []
     # If the trader is running in dry-run/demo mode, or if there are no live trades, show dry-run trades
-    show_dry_run = trader.DRY_RUN or (trader.TRADING_ENV == "demo")
+    show_dry_run = trader.runtime_flags().dry_run or (trader.runtime_flags().trading_env == "demo")
     
     for trade in trades:
         if not _trade_is_ok(trade):
@@ -3517,7 +2535,7 @@ def _build_forward_strategy_performance(
 
     account_trades = [
         trade for trade in _account_trades(trades)
-        if str(trade.get("env") or trader.TRADING_ENV) == str(trader.TRADING_ENV)
+        if str(trade.get("env") or trader.runtime_flags().trading_env) == str(trader.runtime_flags().trading_env)
     ]
     if strategy_id:
         account_trades = [
@@ -3766,500 +2784,34 @@ def _build_periodic_performance(trades: list[dict]) -> dict:
 
 
 
-def _sync_filled_trades_from_history(
-    api,
-    *,
-    days: int = 90,
-    history: list[dict] | None = None,
-) -> dict:
-    from src.db.performance_repository import account_scope_key
-    start_date, end_date = _order_history_window(days)
-    if history is None:
-        history = api.get_trade_history(start_date, end_date)
-    trader.init_db()
-
-    merged_trades = _load_merged_trades()
-    existing = {_history_trade_key(item): item for item in merged_trades}
-    def broker_history_key(item: dict) -> tuple[str, str, str, str, str]:
-        return (
-            str(item.get("env") or trader.TRADING_ENV),
-            str(item.get("ts") or "")[:10],
-            str(item.get("broker_order_id") or "").strip(),
-            str(item.get("symbol") or ""),
-            str(item.get("action") or ""),
-        )
-
-    existing_by_broker_order_id = {
-        broker_history_key(item): item
-        for item in merged_trades
-        if str(item.get("broker_order_id") or "").strip()
-    }
-    active_by_broker_order_id = {
-        (
-            str(item.get("env") or trader.TRADING_ENV),
-            str(item.get("broker_order_id") or "").strip(),
-            str(item.get("symbol") or ""),
-            str(item.get("action") or ""),
-        ): item
-        for item in merged_trades
-        if str(item.get("broker_order_id") or "").strip()
-        and str(item.get("order_status") or "") in {"submitted", "open", "partial"}
-    }
-    imported_count = 0
-    skipped_count = 0
-    updated_count = 0
-    items = []
-
-    with trader.connect_db() as conn:
-        for row in history:
-            trade = _history_row_to_trade(row)
-            if not trade:
-                skipped_count += 1
-                items.append({
-                    "sync_type": "history",
-                    "sync_result": "skipped",
-                    "ts": _history_timestamp(row),
-                    "symbol": _history_symbol(row),
-                    "name": _history_name(row),
-                    "action": _history_action(row),
-                    "qty": _history_fill_qty(row),
-                    "price": _history_fill_price(row),
-                    "broker_order_id": _broker_order_id_from_history(row),
-                    "order_status": "unrecognized",
-                    "message": "체결 거래로 해석할 수 없어 제외",
-                })
-                continue
-
-            key = _history_trade_key(trade)
-            broker_order_id = str(trade.get("broker_order_id") or "").strip()
-            stored = existing.get(key) or existing_by_broker_order_id.get(
-                broker_history_key(trade)
-            )
-            if stored is None:
-                stored = active_by_broker_order_id.get((
-                    str(trade.get("env") or trader.TRADING_ENV),
-                    broker_order_id,
-                    str(trade.get("symbol") or ""),
-                    str(trade.get("action") or ""),
-                ))
-            if stored is not None:
-                item_result = "skipped"
-                item_message = "이미 저장된 체결 기록"
-                stored_state = (
-                    str(stored.get("order_status") or ""),
-                    _to_int(stored.get("filled_qty")),
-                    _to_int(stored.get("filled_price")),
-                )
-                requested_qty = _to_int(stored.get("qty"))
-                filled_qty = _to_int(trade.get("filled_qty"))
-                remaining_qty = _history_remaining_qty(row)
-                if _history_order_is_canceled(row):
-                    incoming_status = "canceled"
-                elif _history_order_is_rejected(row) and filled_qty <= 0:
-                    incoming_status = "failed"
-                elif remaining_qty > 0 and filled_qty <= 0:
-                    incoming_status = "open"
-                elif remaining_qty > 0 or (
-                    requested_qty > 0 and filled_qty < requested_qty
-                ):
-                    incoming_status = "partial"
-                else:
-                    incoming_status = "filled"
-                incoming_state = (
-                    incoming_status,
-                    filled_qty,
-                    _to_int(trade.get("filled_price")),
-                )
-                needs_account_key = not str(stored.get("account_key") or "").strip()
-                if trade["broker_order_id"] and (stored_state != incoming_state or needs_account_key):
-                    stored_id = _to_int(stored.get("id"))
-                    where_sql = (
-                        "id = ?"
-                        if stored_id > 0
-                        else "broker_order_id = ? AND symbol = ? AND action = ? AND env = ? AND substr(ts, 1, 10) = ?"
-                    )
-                    where_values = (
-                        (stored_id,)
-                        if stored_id > 0
-                        else (
-                            trade["broker_order_id"],
-                            trade["symbol"],
-                            trade["action"],
-                            trade["env"],
-                            str(trade["ts"])[:10],
-                        )
-                    )
-                    cursor = conn.execute(
-                        f"""
-                        UPDATE trades
-                        SET order_status = ?,
-                            filled_qty = ?,
-                            filled_price = ?,
-                            response_msg = ?,
-                            broker_result = ?,
-                            account_key = COALESCE(NULLIF(account_key, ''), ?)
-                        WHERE {where_sql}
-                        """,
-                        (
-                            incoming_status,
-                            trade["filled_qty"],
-                            trade["filled_price"],
-                            trade["response_msg"],
-                            trade["broker_result"],
-                            account_scope_key(),
-                            *where_values,
-                        ),
-                    )
-                    updated_count += int(cursor.rowcount)
-                    if cursor.rowcount:
-                        item_result = "updated"
-                        item_message = "기존 거래의 체결 상태 갱신"
-                        logger.info(
-                            "[TRADE_IMPORT_UPDATE] "
-                            f"symbol={trade['symbol']} action={trade['action']} "
-                            f"qty={trade['qty']} status={trade['order_status']} "
-                            f"filled_qty={trade['filled_qty']} filled_price={trade['filled_price']} "
-                            f"broker_order_id={trade['broker_order_id'] or '-'}"
-                        )
-                items.append({
-                    "sync_type": "history",
-                    "sync_result": item_result,
-                    "ts": trade["ts"],
-                    "symbol": trade["symbol"],
-                    "name": trade["name"],
-                    "action": trade["action"],
-                    "qty": trade["filled_qty"] or trade["qty"],
-                    "price": trade["filled_price"] or trade["price"],
-                    "broker_order_id": trade["broker_order_id"],
-                    "order_status": trade["order_status"],
-                    "message": item_message,
-                })
-                skipped_count += 1
-                continue
-
-            conn.execute(
-                """
-                INSERT INTO trades (
-                    ts, symbol, name, action, qty, price, reason, ok, env, dry_run,
-                    broker_order_id, order_status, filled_qty, filled_price, pre_order_qty, response_msg, broker_result,
-                    account_key, fee, tax, cost_source
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    trade["ts"],
-                    trade["symbol"],
-                    trade["name"],
-                    trade["action"],
-                    trade["qty"],
-                    trade["price"],
-                    trade["reason"],
-                    trade["ok"],
-                    trade["env"],
-                    trade["dry_run"],
-                    trade["broker_order_id"],
-                    trade["order_status"],
-                    trade["filled_qty"],
-                    trade["filled_price"],
-                    0,
-                    trade["response_msg"],
-                    trade["broker_result"],
-                    account_scope_key(),
-                    None,
-                    None,
-                    "unavailable",
-                ),
-            )
-            logger.info(
-                "[TRADE_IMPORT] "
-                f"symbol={trade['symbol']} action={trade['action']} qty={trade['qty']} "
-                f"price={trade['price']} status={trade['order_status']} "
-                f"filled_qty={trade['filled_qty']} filled_price={trade['filled_price']} "
-                f"broker_order_id={trade['broker_order_id'] or '-'}"
-            )
-            existing[key] = trade
-            imported_count += 1
-            items.append({
-                "sync_type": "history",
-                "sync_result": "imported",
-                "ts": trade["ts"],
-                "symbol": trade["symbol"],
-                "name": trade["name"],
-                "action": trade["action"],
-                "qty": trade["filled_qty"] or trade["qty"],
-                "price": trade["filled_price"] or trade["price"],
-                "broker_order_id": trade["broker_order_id"],
-                "order_status": trade["order_status"],
-                "message": "증권사 체결 기록 신규 추가",
-            })
-
-    return {
-        "ok": True,
-        "start_date": start_date,
-        "end_date": end_date,
-        "history_count": len(history),
-        "imported_count": imported_count,
-        "updated_count": updated_count,
-        "skipped_count": skipped_count,
-        "items": items,
-    }
+def _sync_filled_trades_from_history(api, *, days: int = 90, history: list[dict] | None = None) -> dict:
+    from src.dashboard.services.order_sync_service import _sync_filled_trades_from_history as sync
+    return sync(api, days=days, history=history)
 
 
 def _order_history_window(days: int = MIN_ORDER_HISTORY_SYNC_DAYS) -> tuple[str, str]:
-    end = trader.datetime.now(trader.KST)
-    start = end - trader.timedelta(days=max(MIN_ORDER_HISTORY_SYNC_DAYS, days))
-    return start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+    from src.dashboard.services.order_sync_service import _order_history_window as window
+    return window(days)
 
 
 def _load_trackable_order_trades(days: int = MIN_ORDER_HISTORY_SYNC_DAYS) -> list[dict]:
-    trader.init_db()
-    cutoff = (trader.datetime.now(trader.KST) - trader.timedelta(days=max(1, int(days)))).strftime("%Y-%m-%d")
-    with trader.connect_db() as conn:
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
-            SELECT *
-            FROM trades
-            WHERE broker_order_id IS NOT NULL
-              AND broker_order_id != ''
-              AND (
-                    COALESCE(order_status, '') IN ('submitted', 'partial', 'open')
-                    OR (
-                        COALESCE(order_status, '') = 'filled'
-                        AND action = 'sell'
-                        AND source_approval_id IS NOT NULL
-                    )
-                  )
-              AND substr(COALESCE(ts, ''), 1, 10) >= ?
-            ORDER BY ts ASC
-            """,
-            (cutoff,),
-        ).fetchall()
-    return [dict(row) for row in rows]
+    from src.dashboard.services.order_sync_service import _load_trackable_order_trades as load
+    return load(days)
 
 
 def _sync_order_status_from_history(
-    api,
-    *,
-    days: int = MIN_ORDER_HISTORY_SYNC_DAYS,
-    history: list[dict] | None = None,
+    api, *, days: int = MIN_ORDER_HISTORY_SYNC_DAYS, history: list[dict] | None = None
 ) -> dict:
-    tracked = _load_trackable_order_trades(days)
-    if not tracked:
-        return {"ok": True, "checked_count": 0, "updated_count": 0, "orders": []}
-
-    start_date, end_date = _order_history_window(days)
-    if history is None:
-        try:
-            history = api.get_trade_history(start_date, end_date)
-        except DashboardOperationError as exc:
-            fallback = _sync_order_status_from_balance(api, tracked, reason=str(exc))
-            return {
-                **fallback,
-                "ok": fallback.get("updated_count", 0) > 0,
-                "history_error": str(exc),
-                "history_count": 0,
-                "fallback": "balance",
-            }
-    orders = []
-    updated_count = 0
-    unmatched = []
-    for trade in tracked:
-        order_id = str(trade.get("broker_order_id") or "")
-        row = next((item for item in history if _history_matches_tracked_order(item, trade)), None)
-        if row is None:
-            unmatched.append(trade)
-            continue
-
-        requested_qty = _to_int(trade.get("qty"))
-        filled_qty = _history_fill_qty(row)
-        filled_price = _history_fill_price(row)
-        remaining_qty = _history_remaining_qty(row)
-        order_date = _history_timestamp(row)[:10]
-        today = trader.datetime.now(trader.KST).strftime("%Y-%m-%d")
-        expired_with_remainder = bool(order_date and order_date < today and remaining_qty > 0)
-        if _history_order_is_canceled(row) or expired_with_remainder:
-            order_status = "canceled"
-        elif _history_order_is_rejected(row) and filled_qty <= 0:
-            order_status = "failed"
-        elif remaining_qty > 0 and filled_qty <= 0:
-            order_status = "open"
-        elif remaining_qty > 0 or (requested_qty > 0 and filled_qty < requested_qty):
-            order_status = "partial"
-        else:
-            order_status = "filled"
-        response_msg = f"KIS order history sync: {order_status}"
-        status_changed = str(trade.get("order_status") or "") != order_status
-        quantity_changed = _to_int(trade.get("filled_qty")) != filled_qty
-        price_changed = filled_price > 0 and _to_int(trade.get("filled_price")) != filled_price
-        if status_changed or quantity_changed or price_changed:
-            updated_count += trader.update_trade_order_status(
-                order_id,
-                trade_id=_to_int(trade.get("id")) or None,
-                order_status=order_status,
-                filled_qty=filled_qty,
-                filled_price=filled_price,
-                response_msg=response_msg,
-                broker_result=row,
-            )
-        orders.append({
-            "broker_order_id": order_id,
-            "symbol": trade.get("symbol", ""),
-            "name": trade.get("name", ""),
-            "action": trade.get("action", ""),
-            "order_status": order_status,
-            "filled_qty": filled_qty,
-            "filled_price": filled_price,
-        })
-
-    balance_sync = _sync_order_status_from_balance(
-        api,
-        unmatched,
-        reason="order absent from KIS history",
-        close_unreserved_sells=True,
-    ) if unmatched else {"ok": True, "checked_count": 0, "updated_count": 0, "orders": []}
-    updated_count += int(balance_sync.get("updated_count", 0) or 0)
-    orders.extend(balance_sync.get("orders", []) or [])
-
-    return {
-        "ok": bool(balance_sync.get("ok", True)),
-        "checked_count": len(tracked),
-        "updated_count": updated_count,
-        "history_count": len(history),
-        "unmatched_count": len(unmatched),
-        "balance_checked_count": int(balance_sync.get("checked_count", 0) or 0),
-        "orders": orders,
-    }
+    from src.dashboard.services.order_sync_service import _sync_order_status_from_history as sync
+    return sync(api, days=days, history=history)
 
 
 def _sync_order_status_from_balance(
-    api,
-    tracked: list[dict],
-    *,
-    reason: str = "",
-    close_unreserved_sells: bool = False,
+    api, tracked: list[dict], *, reason: str = "", close_unreserved_sells: bool = False
 ) -> dict:
-    try:
-        parsed = _parse_balance(_get_balance_data(api, allow_cache=False))
-    except DashboardOperationError as exc:
-        return {
-            "ok": False,
-            "checked_count": len(tracked),
-            "updated_count": 0,
-            "orders": [],
-            "balance_error": str(exc),
-            "history_error": reason,
-        }
+    from src.dashboard.services.order_sync_service import _sync_order_status_from_balance as sync
+    return sync(api, tracked, reason=reason, close_unreserved_sells=close_unreserved_sells)
 
-    holdings = {str(item.get("symbol") or ""): item for item in parsed.get("holdings", [])}
-    orders = []
-    updated_count = 0
-    for trade in tracked:
-        order_id = str(trade.get("broker_order_id") or "")
-        symbol = str(trade.get("symbol") or "")
-        action = str(trade.get("action") or "").lower()
-        requested_qty = _to_int(trade.get("qty"))
-        pre_order_qty = _to_int(trade.get("pre_order_qty"))
-        current = holdings.get(symbol, {})
-        current_qty = _to_int(current.get("qty"))
-        sellable_qty = _to_int(current.get("sellable_qty"))
-        current_price = _to_int(current.get("price")) or _to_int(trade.get("price"))
-
-        filled = False
-        if action == "buy" and requested_qty > 0:
-            filled = current_qty >= pre_order_qty + requested_qty
-        elif action == "sell" and requested_qty > 0:
-            filled = current_qty <= max(0, pre_order_qty - requested_qty)
-
-        if not filled:
-            inferred_filled_qty = (
-                min(requested_qty, max(_to_int(trade.get("filled_qty")), pre_order_qty - current_qty))
-                if action == "sell"
-                else _to_int(trade.get("filled_qty"))
-            )
-            sell_is_unreserved = (
-                close_unreserved_sells
-                and action == "sell"
-                and bool(current)
-                and current_qty > 0
-                and sellable_qty >= current_qty
-            )
-            if sell_is_unreserved:
-                order_status = "partial" if inferred_filled_qty > 0 else "canceled"
-                response_msg = f"Balance reconciliation: {order_status} (no active sell reservation)"
-                updated_count += trader.update_trade_order_status(
-                    order_id,
-                    trade_id=_to_int(trade.get("id")) or None,
-                    order_status=order_status,
-                    filled_qty=inferred_filled_qty,
-                    filled_price=current_price if inferred_filled_qty > 0 else 0,
-                    response_msg=response_msg,
-                    broker_result={
-                        "fallback": "balance",
-                        "history_error": reason,
-                        "pre_order_qty": pre_order_qty,
-                        "current_qty": current_qty,
-                        "sellable_qty": sellable_qty,
-                    },
-                )
-                orders.append({
-                    "broker_order_id": order_id,
-                    "symbol": symbol,
-                    "name": trade.get("name", ""),
-                    "action": action,
-                    "order_status": order_status,
-                    "filled_qty": inferred_filled_qty,
-                    "filled_price": current_price if inferred_filled_qty > 0 else 0,
-                    "balance_confirmed": True,
-                    "sell_reservation_active": False,
-                })
-                continue
-            orders.append({
-                "broker_order_id": order_id,
-                "symbol": symbol,
-                "name": trade.get("name", ""),
-                "action": action,
-                "order_status": trade.get("order_status") or "submitted",
-                "balance_confirmed": False,
-            })
-            continue
-
-        response_msg = "Balance fallback sync: filled"
-        updated_count += trader.update_trade_order_status(
-            order_id,
-            trade_id=_to_int(trade.get("id")) or None,
-            order_status="filled",
-            filled_qty=requested_qty,
-            filled_price=current_price,
-            response_msg=response_msg,
-            broker_result={
-                "fallback": "balance",
-                "history_error": reason,
-                "pre_order_qty": pre_order_qty,
-                "current_qty": current_qty,
-            },
-        )
-        orders.append({
-            "broker_order_id": order_id,
-            "symbol": symbol,
-            "name": trade.get("name", ""),
-            "action": action,
-            "order_status": "filled",
-            "filled_qty": requested_qty,
-            "filled_price": current_price,
-            "balance_confirmed": True,
-        })
-
-    return {
-        "ok": True,
-        "checked_count": len(tracked),
-        "updated_count": updated_count,
-        "orders": orders,
-    }
-
-
-
-# =============================================================================
 # Executor 상태 (스위치) API
 # =============================================================================
 
@@ -4564,7 +3116,7 @@ def _run_scheduled_cycles_for_strategies(
 
         cycle = start_common_analysis_cycle(
             strategy_id,
-            trader.TRADING_ENV,
+            trader.runtime_flags().trading_env,
             mode=f"scheduled_{mode}",
         )
         try:

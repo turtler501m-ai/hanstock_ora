@@ -3,6 +3,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from src.db.connection import DEFAULT_BUSY_TIMEOUT_MS, open_sqlite
 from src.db.repository import DBWrapper
@@ -31,6 +32,14 @@ class SqliteConnectionPolicyTests(unittest.TestCase):
         wrapper.close()
         with self.assertRaises(sqlite3.ProgrammingError):
             conn.execute("SELECT 1")
+
+    def test_open_sqlite_closes_connection_when_pragma_initialization_fails(self):
+        conn = Mock()
+        conn.execute.side_effect = sqlite3.OperationalError("pragma failed")
+        with patch("src.db.connection.sqlite3.connect", return_value=conn):
+            with self.assertRaises(sqlite3.OperationalError):
+                open_sqlite(":memory:")
+        conn.close.assert_called_once_with()
 
 
 class RuntimeStatePersistenceTests(unittest.TestCase):

@@ -6,6 +6,9 @@ stale 후보는 confirmed가 될 수 없다.
 """
 from __future__ import annotations
 
+from src.db import ai_scan_repository as scan_repository
+from src.db import ai_watchlist_repository as watchlist_repository
+
 from typing import Any
 
 from src.ai_stock.constants import (
@@ -16,7 +19,7 @@ from src.ai_stock.constants import (
     WATCH_TRANSITIONS,
 )
 from src.ai_stock.freshness import is_stale
-from src.db import ai_stock_repository as repo
+
 
 # confirmed 결정 기준 기본값(정책에서 override, §1.4)
 DEFAULT_MIN_FINAL = 65.0
@@ -26,7 +29,7 @@ DEFAULT_MAX_RISK = 60.0
 
 def register(candidate: dict[str, Any]) -> dict[str, Any]:
     cid = int(candidate["candidate_id"])
-    repo.upsert_watch(cid, {
+    watchlist_repository.upsert_watch(cid, {
         "market": candidate["market"],
         "symbol": candidate.get("symbol"),
         "status": WATCH_DISCOVERED,
@@ -38,12 +41,12 @@ def register(candidate: dict[str, Any]) -> dict[str, Any]:
         "market_regime": candidate.get("market_regime"),
         "invalidation_conditions": candidate.get("invalidation_conditions", []),
     })
-    repo.update_watch_status(cid, WATCH_DISCOVERED, reason="registered")
-    return repo.get_watch(cid)
+    watchlist_repository.update_watch_status(cid, WATCH_DISCOVERED, reason="registered")
+    return watchlist_repository.get_watch(cid)
 
 
 def _policy_for(candidate: dict[str, Any]) -> dict[str, Any]:
-    pol = repo.get_policy(candidate.get("strategy_id") or "ai_stock_default_v1", candidate["market"]) or {}
+    pol = watchlist_repository.get_policy(candidate.get("strategy_id") or "ai_stock_default_v1", candidate["market"]) or {}
     return pol
 
 
@@ -73,7 +76,7 @@ def can_confirm(candidate: dict[str, Any]) -> tuple[bool, list[str]]:
 def transition(candidate_id: int, to_status: str, *, reason: str | None = None) -> dict[str, Any]:
     if to_status not in WATCH_STATUSES:
         raise ValueError(f"invalid status {to_status}")
-    current = repo.get_watch(candidate_id)
+    current = watchlist_repository.get_watch(candidate_id)
     if current is None:
         raise ValueError("watch item not found")
     allowed = WATCH_TRANSITIONS.get(current["status"], set())
@@ -81,14 +84,14 @@ def transition(candidate_id: int, to_status: str, *, reason: str | None = None) 
         raise ValueError(f"transition {current['status']}->{to_status} not allowed")
 
     if to_status == WATCH_CONFIRMED:
-        candidate = repo.get_candidate(candidate_id)
+        candidate = scan_repository.get_candidate(candidate_id)
         if candidate is None:
             raise ValueError("candidate not found for confirmation")
         ok, blocks = can_confirm(candidate)
         if not ok:
             raise ValueError("confirm blocked: " + ", ".join(blocks))
 
-    repo.update_watch_status(candidate_id, to_status, reason=reason)
-    result = repo.get_watch(candidate_id)
+    watchlist_repository.update_watch_status(candidate_id, to_status, reason=reason)
+    result = watchlist_repository.get_watch(candidate_id)
     result["market"] = current["market"]
     return result

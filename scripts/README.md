@@ -7,11 +7,11 @@
 일반 사용자는 프로젝트 루트의 짧은 래퍼 명령을 사용합니다.
 
 ```powershell
-.\server.cmd restart
-.\server.cmd status
-.\server.cmd logs
-.\server.cmd tail
-.\verify.cmd
+.\scripts\local\server.cmd restart
+.\scripts\local\server.cmd status
+.\scripts\local\server.cmd logs
+.\scripts\local\server.cmd tail
+powershell -ExecutionPolicy Bypass -File .\tools\verify-local.ps1
 ```
 
 Telegram poll 1회 실행:
@@ -23,10 +23,10 @@ Telegram poll 1회 실행:
 VM 자동 배포와 접속:
 
 ```powershell
-.\deploy-vm.ps1
-.\connect-vm.ps1
-.\check-vm.ps1
-.\vm-dashboard.cmd
+.\scripts\local\deploy-vm.ps1
+.\scripts\local\connect-vm.ps1
+.\scripts\local\check-vm.ps1
+.\scripts\local\vm-dashboard.ps1
 ```
 
 내부 구조:

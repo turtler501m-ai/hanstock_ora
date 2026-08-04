@@ -34,7 +34,7 @@ def safety_state() -> dict[str, Any]:
     try:
         from src import trader
 
-        trading_env = getattr(trader, "TRADING_ENV", trading_env) or trading_env
+        trading_env = trader.runtime_flags().trading_env or trading_env
     except Exception:
         pass
     return {

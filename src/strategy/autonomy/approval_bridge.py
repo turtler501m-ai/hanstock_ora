@@ -1,6 +1,11 @@
 """Canonical approval and execution pipeline for autonomous managed orders."""
 from __future__ import annotations
 
+from src.db import ai_execution_repository as execution_repository
+from src.db import ai_risk_repository as risk_repository
+# Compatibility DI seam for the legacy combined execution/risk repository protocol.
+from src.db import ai_autonomy_repository as repository
+
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from dataclasses import dataclass
@@ -11,7 +16,6 @@ from src.approval_service import (
     ApprovalService,
     ApprovalStatusError,
 )
-from src.db import ai_stock_repository as repository
 
 from .lifecycle import StrategyLifecycleGate
 from .ai_planner import trade_intent_from_payload

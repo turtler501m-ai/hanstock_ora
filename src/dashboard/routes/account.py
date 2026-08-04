@@ -170,7 +170,7 @@ def _attach_holding_strategies(parsed: dict) -> dict:
             HAVING net_qty > 0
             ORDER BY net_qty DESC, strategy_id
             """,
-            (str(trader.TRADING_ENV or ""), str(trader.TRADING_ENV or "")),
+            (str(trader.runtime_flags().trading_env or ""), str(trader.runtime_flags().trading_env or "")),
         ).fetchall()
     for row in rows:
         sid = str(row["strategy_id"])
@@ -241,12 +241,12 @@ def health():
         "ok": not missing and not account_warning,
         "missing": missing,
         "account_warning": account_warning,
-        "trading_env": trader.TRADING_ENV,
-        "dry_run": trader.DRY_RUN,
-        "enable_live_trading": trader.ENABLE_LIVE_TRADING,
-        "require_approval": trader.REQUIRE_APPROVAL,
-        "order_submission_enabled": trader.ORDER_SUBMISSION_ENABLED,
-        "real_orders_enabled": trader.REAL_ORDERS_ENABLED,
+        "trading_env": trader.runtime_flags().trading_env,
+        "dry_run": trader.runtime_flags().dry_run,
+        "enable_live_trading": trader.runtime_flags().enable_live_trading,
+        "require_approval": trader.runtime_flags().require_approval,
+        "order_submission_enabled": trader.runtime_flags().order_submission_enabled,
+        "real_orders_enabled": trader.runtime_flags().real_orders_enabled,
         "online_access_blocked": bool(getattr(trader.config, "online_access_blocked", False)),
         "circuit_breaker": KIStockAPI.circuit_status(),
         "active_model_version": getattr(trader.config, "active_model_version", "v1"),

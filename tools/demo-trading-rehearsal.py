@@ -169,7 +169,7 @@ def _demo_order_rehearsal(
         limit_price,
         "demo order rehearsal",
         ok,
-        trader.ORDER_SUBMISSION_ENABLED,
+        trader.runtime_flags().order_submission_enabled,
         broker_result=result,
         order_status="submitted" if ok else "failed",
         response_msg=response_msg,

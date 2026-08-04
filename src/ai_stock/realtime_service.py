@@ -8,6 +8,10 @@ KR은 KISWebSocketClient 실시간, US는 폴링으로 동작(한계는 §4.8).
 """
 from __future__ import annotations
 
+from src.db import ai_scan_repository as scan_repository
+from src.db import ai_watchlist_repository as watchlist_repository
+from src.db import ai_snapshot_repository as snapshot_repository
+
 from typing import Any
 
 from src.ai_stock.constants import (
@@ -18,7 +22,7 @@ from src.ai_stock.constants import (
 )
 from src.ai_stock.freshness import is_stale, now as _now
 from src.ai_stock.markets import require_storable_market
-from src.db import ai_stock_repository as repo
+
 
 
 def run_realtime_cycle(market: str, *, strategy_id: str = "ai_stock_default_v1") -> dict[str, Any]:
@@ -30,7 +34,7 @@ def run_realtime_cycle(market: str, *, strategy_id: str = "ai_stock_default_v1")
 
     market = require_storable_market(market)
     provider = get_provider()
-    pool = [w for w in repo.list_watchlist(market=market)
+    pool = [w for w in watchlist_repository.list_watchlist(market=market)
             if w.get("status") in ("watching", WATCH_CONFIRMED)]
     signals = []
     errors = []
@@ -53,12 +57,12 @@ def evaluate_timing(market: str, candidate_id: int, *,
                     strategy_id: str = "ai_stock_default_v1") -> dict[str, Any]:
     """후보 1건의 2차 타이밍 신호 생성. 후보 풀(confirmed/watching)만 대상."""
     market = require_storable_market(market)
-    watch = repo.get_watch(candidate_id)
-    candidate = repo.get_candidate(candidate_id)
+    watch = watchlist_repository.get_watch(candidate_id)
+    candidate = scan_repository.get_candidate(candidate_id)
     if watch is None or candidate is None:
         raise ValueError("candidate not in pool")  # 즉흥 신호 금지(§4.8)
 
-    pol = repo.get_policy(strategy_id, market) or {}
+    pol = watchlist_repository.get_policy(strategy_id, market) or {}
     min_conf = float(pol.get("timing_min_confidence") or 0.6)
 
     quote = realtime_quote or {}
@@ -112,5 +116,5 @@ def evaluate_timing(market: str, candidate_id: int, *,
         "automation_level": int(pol.get("automation_level") or 4),
         "data_as_of": data_as_of,
     }
-    repo.save_timing_signal(signal)
+    snapshot_repository.save_timing_signal(signal)
     return signal

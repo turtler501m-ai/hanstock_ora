@@ -16,7 +16,7 @@ from src.ai_stock import constants as C
 from src.ai_stock.markets import normalize_market, require_storable_market, MarketError
 from src.ai_stock.safety import safety_state
 from src.ai_stock.schemas import envelope
-from src.db import ai_stock_repository as repo
+from src.db import ai_dashboard_repository as repo
 
 router = APIRouter(tags=["ai-stock"])
 

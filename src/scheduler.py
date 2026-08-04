@@ -149,7 +149,7 @@ def _result_submitted_orders(result: dict) -> bool:
 def _sync_order_status_after_cycle(result: dict) -> dict:
     if not _order_status_sync_enabled():
         return result
-    if trader.DRY_RUN or not trader.ORDER_SUBMISSION_ENABLED:
+    if trader.runtime_flags().dry_run or not trader.runtime_flags().order_submission_enabled:
         return result
     if not _result_submitted_orders(result):
         return result
@@ -166,7 +166,7 @@ def _sync_order_status_after_cycle(result: dict) -> dict:
 def _sync_order_status_before_cycle() -> dict | None:
     if not _order_status_sync_enabled():
         return None
-    if trader.DRY_RUN or not trader.ORDER_SUBMISSION_ENABLED:
+    if trader.runtime_flags().dry_run or not trader.runtime_flags().order_submission_enabled:
         return None
     try:
         from src.dashboard import _get_api, _sync_order_status_from_history
@@ -244,7 +244,7 @@ def _slack_cycle_result(result: dict, *, mode: str) -> None:
     details_line = (
         f"계획/승인대기/완료: {plan_count} / {queued_count} / {approved_count} | "
         f"실패: {failed_approval_count} | 재시도: {retry_count}\n"
-        f"환경: {trader.TRADING_ENV}(dry={trader.DRY_RUN}, order_sub={trader.ORDER_SUBMISSION_ENABLED})"
+        f"환경: {trader.runtime_flags().trading_env}(dry={trader.runtime_flags().dry_run}, order_sub={trader.runtime_flags().order_submission_enabled})"
     )
 
     if approval_errors:

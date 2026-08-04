@@ -1,6 +1,8 @@
 """Dashboard projection for the AI-led stock decision pipeline."""
 from __future__ import annotations
 
+from src.db import ai_dashboard_repository as repo
+
 import json
 from pathlib import Path
 from typing import Any
@@ -8,7 +10,7 @@ from typing import Any
 from src.ai_stock import constants as C
 from src.ai_stock.automation_service import evaluate_gate
 from src.config import config
-from src.db import ai_stock_repository as repo
+
 
 
 def _latest_scan(market: str, strategy_id: str | None) -> dict[str, Any] | None:

@@ -17,7 +17,7 @@ def _kis_websocket_status() -> dict:
     return {
         "enabled": bool(getattr(trader.config, "kis_websocket_enabled", False)),
         "running": running,
-        "trading_env": trader.TRADING_ENV,
+        "trading_env": trader.runtime_flags().trading_env,
         "hts_id": getattr(trader.config, "kistock_hts_id", "") or "",
         "subscriptions": sorted([f"{tr_id}:{tr_key}" for tr_id, tr_key in getattr(client, "active_subscriptions", set())]) if client else [],
         "reconnect_count": int(getattr(client, "reconnect_count", 0) or 0) if client else 0,
@@ -52,13 +52,11 @@ def _stop_kis_websocket() -> dict:
         return {"ok": True, **_kis_websocket_status()}
 
 
-@router.on_event("startup")
 def start_kis_websocket_if_enabled():
     if bool(getattr(trader.config, "kis_websocket_enabled", False)):
         _start_kis_websocket()
 
 
-@router.on_event("startup")
 def start_snapshot_refresher_if_enabled():
     # DASHBOARD_SNAPSHOT_REFRESH_ENABLED=true일 때만 백그라운드로 DB 스냅샷을 데운다.
     try:
@@ -67,7 +65,6 @@ def start_snapshot_refresher_if_enabled():
         pass
 
 
-@router.on_event("startup")
 def start_auto_approval_sweeper_on_boot():
     # 자동승인 토글이 켜져 있으면 cron이 만든 대기 승인도 주기적으로 일괄 처리한다.
     try:
@@ -75,79 +72,21 @@ def start_auto_approval_sweeper_on_boot():
     except Exception:
         pass
 
-ENV_FIELD_TEXT = {
-    "KISTOCK_APP_KEY": {"label": "KIS App Key", "hint": "국내주식 KIS API 앱 키입니다."},
-    "KISTOCK_APP_SECRET": {"label": "KIS App Secret", "hint": "국내주식 KIS API 앱 시크릿입니다."},
-    "KISTOCK_ACCOUNT": {"label": "KIS 계좌번호", "hint": "8자리 또는 10자리 계좌번호를 입력합니다."},
-    "KISTOCK_HTS_ID": {"label": "KIS HTS ID", "hint": "실시간 주문체결 통보와 조건검색식 조회에 사용할 HTS ID입니다."},
-    "KIS_WEBSOCKET_ENABLED": {"label": "KIS 웹소켓 사용", "hint": "true이면 KIS 실시간 체결통보 웹소켓을 시작할 수 있습니다."},
-    "KIS_CONDITION_SEARCH_ENABLED": {"label": "KIS 조건검색 사용", "hint": "true이면 매수 후보 스캔에 조건검색식 결과를 우선 반영합니다."},
-    "KIS_CONDITION_USER_ID": {"label": "조건검색 사용자 ID", "hint": "비워두면 KIS HTS ID를 사용합니다."},
-    "KIS_CONDITION_SEQ": {"label": "조건검색식 번호"},
-    "KIS_CONDITION_NAME": {"label": "조건검색식 이름"},
-    "TRADING_ENV": {"label": "거래 환경", "hint": "demo=모의투자, real=실전투자 환경입니다."},
-    "DRY_RUN": {"label": "주문 차단 모드", "hint": "true이면 실제 KIS 주문 API를 호출하지 않습니다."},
-    "ENABLE_LIVE_TRADING": {"label": "실전 주문 허용", "hint": "실전 환경에서 실제 주문을 허용하는 최종 보호 스위치입니다."},
-    "REQUIRE_APPROVAL": {"label": "주문 승인 필요", "hint": "true이면 주문을 승인 대기열에 먼저 등록합니다."},
-    "ONLINE_ACCESS_BLOCKED": {
-        "label": "온라인 접속 차단",
-        "hint": "true이면 외부 API, 웹소켓, 시세 갱신과 모든 주문 실행을 차단합니다. DB 저장 정보는 계속 표시됩니다.",
-    },
-    "SPLIT_N": {"label": "분할 매수 횟수"},
-    "STOP_LOSS_PCT": {"label": "손절 기준 %"},
-    "TAKE_PROFIT": {"label": "익절 기준 %"},
-    "RSI_BUY": {"label": "RSI 매수 기준"},
-    "RSI_SELL": {"label": "RSI 매도 기준"},
-    "TRAILING_STOP_ACTIVATION_PCT": {"label": "트레일링 활성 수익률 %"},
-    "TRAILING_STOP_PCT": {"label": "고점 대비 청산 하락률 %"},
-    "TRAILING_STOP_LOOKBACK": {"label": "트레일링 참고 기간"},
-    "TRADE_VALUE_SURGE_RATIO": {"label": "거래대금 급등 배수", "hint": "당일 거래대금이 직전 20일 평균의 몇 배 이상일 때 가점할지 설정합니다."},
-    "FIRST_WAVE_MIN_PCT": {"label": "1차 파동 최소 상승률 %"},
-    "FIRST_WAVE_PULLBACK_MIN_PCT": {"label": "눌림목 최소 조정률 %"},
-    "FIRST_WAVE_PULLBACK_MAX_PCT": {"label": "눌림목 최대 조정률 %"},
-    "TOTAL_CAPITAL": {"label": "총 운용 자금"},
-    "ACCOUNT_INITIAL_CAPITAL": {
-        "label": "계좌 초기자산",
-        "hint": "총자산 대비 전체 손익을 계산하는 표시 기준이며 주문 규모에는 영향을 주지 않습니다.",
-    },
-    "MAX_POSITIONS": {"label": "최대 보유 종목 수"},
-    "MAX_SINGLE_WEIGHT": {"label": "종목당 최대 비중"},
-    "CASH_BUFFER": {"label": "현금 보유 비중"},
-    "MAX_DAILY_LOSS_PCT": {"label": "일 최대 손실 %"},
-    "SCAN_UNIVERSE_SIZE": {"label": "스캔 종목 수"},
-    "KIS_CIRCUIT_COOLDOWN_SECONDS": {"label": "KIS API 차단 해제 대기초", "hint": "KIS API 오류가 반복될 때 재시도 전 대기 시간입니다."},
-    "TRADE_DB_PATH": {"label": "거래 DB 경로"},
-    "ACTIVE_MODEL_VERSION": {"label": "활성 모델 버전"},
-    "AI_STRATEGY_ENABLED": {"label": "AI 전략 사용", "hint": "true이면 후보 평가에 OpenAI 모델 점수를 함께 사용합니다."},
-    "AI_SCORE_WEIGHT": {"label": "AI 점수 반영 비중", "hint": "0~1 사이 값입니다. 0.4이면 룰 60%, AI 40%로 계산합니다."},
-    "AI_MIN_MODEL_CONFIDENCE": {"label": "AI 최소 신뢰도"},
-    "AI_REQUIRE_BACKTEST_PASS": {"label": "백테스트 통과 필수"},
-    "AI_AUTO_APPROVE": {"label": "AI 자동 승인"},
-    "AI_MIN_RULE_SCORE": {"label": "AI 최소 룰 점수", "hint": "OpenAI 호출 전 필터링할 최소 룰 점수입니다 (기본 1.5)."},
-    "AI_ALLOW_CANDIDATE_PROMOTION": {"label": "AI 후보 승격 허용", "hint": "true이면 룰 미달 종목도 AI 점수를 바탕으로 승급합니다."},
-    "OPENAI_API_KEY": {"label": "OpenAI API Key", "hint": "gpt-5-mini 호출에 사용할 OpenAI API 키입니다."},
-    "OPENAI_MODEL": {"label": "OpenAI 모델", "hint": "예: gpt-5-mini"},
-    "OPENAI_TIMEOUT_SECONDS": {"label": "OpenAI 응답 제한초"},
-    "AI_CANDIDATE_LIMIT": {"label": "AI 평가 후보 수"},
-    "SLACK_WEBHOOK_URL": {"label": "Slack Webhook URL"},
-    "MISTOCK_SLACK_WEBHOOK_URL": {"label": "Mistock Slack Webhook URL"},
-    "TELEGRAM_API_ID": {"label": "Telegram API ID"},
-    "TELEGRAM_API_HASH": {"label": "Telegram API Hash"},
-    "TELEGRAM_SESSION_NAME": {"label": "Telegram Session Name", "hint": "로컬 Telethon 세션 경로입니다. Git에 포함하지 마세요."},
-    "TELEGRAM_TARGET_CHANNELS": {"label": "Telegram Target Channels", "hint": "쉼표로 구분한 채널 사용자명, ID, 초대 링크입니다."},
-    "MISTOCK_EXCHANGE_MAP": {"label": "미국주식 거래소 매핑", "hint": "예: BRK.B=NYSE,TSLA=NASD"},
-    "MISTOCK_UNIVERSE": {"label": "미스톡 기본 스캔 유니버스", "hint": "미국주식 스캔 시 사용할 기본 관심종목 목록(쉼표 구분)입니다. 예: AAPL,MSFT,NVDA,TSLA"},
-}
+
+def run_dashboard_startup_tasks() -> None:
+    start_kis_websocket_if_enabled()
+    start_snapshot_refresher_if_enabled()
+    start_auto_approval_sweeper_on_boot()
 
 
 def _current_env_field_value(key: str, raw_values: dict[str, str]) -> str:
     if key in raw_values:
         return raw_values.get(key, "")
     runtime_values = {
-        "TRADING_ENV": getattr(trader.config, "trading_env", trader.TRADING_ENV),
-        "DRY_RUN": str(bool(getattr(trader.config, "dry_run", trader.DRY_RUN))).lower(),
-        "ENABLE_LIVE_TRADING": str(bool(getattr(trader.config, "enable_live_trading", trader.ENABLE_LIVE_TRADING))).lower(),
-        "REQUIRE_APPROVAL": str(bool(getattr(trader.config, "require_approval", trader.REQUIRE_APPROVAL))).lower(),
+        "TRADING_ENV": getattr(trader.config, "trading_env", trader.runtime_flags().trading_env),
+        "DRY_RUN": str(bool(getattr(trader.config, "dry_run", trader.runtime_flags().dry_run))).lower(),
+        "ENABLE_LIVE_TRADING": str(bool(getattr(trader.config, "enable_live_trading", trader.runtime_flags().enable_live_trading))).lower(),
+        "REQUIRE_APPROVAL": str(bool(getattr(trader.config, "require_approval", trader.runtime_flags().require_approval))).lower(),
         "ONLINE_ACCESS_BLOCKED": str(bool(getattr(trader.config, "online_access_blocked", False))).lower(),
         "SPLIT_N": getattr(trader.config, "split_n", trader.SPLIT_N),
         "STOP_LOSS_PCT": getattr(trader.config, "stop_loss_pct", trader.STOP_LOSS_PCT),
@@ -161,9 +100,9 @@ def _current_env_field_value(key: str, raw_values: dict[str, str]) -> str:
         "FIRST_WAVE_MIN_PCT": getattr(trader.config, "first_wave_min_pct", 12),
         "FIRST_WAVE_PULLBACK_MIN_PCT": getattr(trader.config, "first_wave_pullback_min_pct", 3),
         "FIRST_WAVE_PULLBACK_MAX_PCT": getattr(trader.config, "first_wave_pullback_max_pct", 12),
-        "TOTAL_CAPITAL": getattr(trader.config, "total_capital", trader.TOTAL_CAPITAL),
+        "TOTAL_CAPITAL": getattr(trader.config, "total_capital", trader.get_settings().total_capital),
         "ACCOUNT_INITIAL_CAPITAL": getattr(trader.config, "account_initial_capital", 0),
-        "MAX_POSITIONS": getattr(trader.config, "max_positions", trader.MAX_POSITIONS),
+        "MAX_POSITIONS": getattr(trader.config, "max_positions", trader.get_settings().max_positions),
         "MAX_SINGLE_WEIGHT": getattr(trader.config, "max_single_weight", trader.MAX_SINGLE_WEIGHT),
         "CASH_BUFFER": getattr(trader.config, "cash_buffer", trader.CASH_BUFFER),
         "MAX_DAILY_LOSS_PCT": getattr(trader.config, "max_daily_loss_pct", trader.MAX_DAILY_LOSS_PCT),
@@ -203,13 +142,13 @@ def get_config():
     from src.strategy.technical_readiness import build_technical_strategy_readiness
 
     return {
-        "trading_env": trader.TRADING_ENV,
-        "dry_run": trader.DRY_RUN,
-        "enable_live_trading": trader.ENABLE_LIVE_TRADING,
-        "require_approval": trader.REQUIRE_APPROVAL,
+        "trading_env": trader.runtime_flags().trading_env,
+        "dry_run": trader.runtime_flags().dry_run,
+        "enable_live_trading": trader.runtime_flags().enable_live_trading,
+        "require_approval": trader.runtime_flags().require_approval,
         "online_access_blocked": bool(getattr(trader.config, "online_access_blocked", False)),
-        "order_submission_enabled": trader.ORDER_SUBMISSION_ENABLED,
-        "real_orders_enabled": trader.REAL_ORDERS_ENABLED,
+        "order_submission_enabled": trader.runtime_flags().order_submission_enabled,
+        "real_orders_enabled": trader.runtime_flags().real_orders_enabled,
         "kistock_account": trader.config.kistock_account,
         "split_n": trader.SPLIT_N,
         "stop_loss_pct": trader.STOP_LOSS_PCT,
@@ -223,9 +162,9 @@ def get_config():
         "first_wave_min_pct": trader.config.first_wave_min_pct,
         "first_wave_pullback_min_pct": trader.config.first_wave_pullback_min_pct,
         "first_wave_pullback_max_pct": trader.config.first_wave_pullback_max_pct,
-        "total_capital": trader.TOTAL_CAPITAL,
+        "total_capital": trader.get_settings().total_capital,
         "account_initial_capital": getattr(trader.config, "account_initial_capital", 0),
-        "max_positions": trader.MAX_POSITIONS,
+        "max_positions": trader.get_settings().max_positions,
         "max_single_weight": trader.MAX_SINGLE_WEIGHT,
         "cash_buffer": trader.CASH_BUFFER,
         "max_daily_loss_pct": trader.MAX_DAILY_LOSS_PCT,
@@ -260,16 +199,15 @@ def get_env_settings():
     fields = []
     for field in ENV_FIELDS:
         key = field["key"]
-        text = ENV_FIELD_TEXT.get(key, {})
         value = _virtual_env_value(key, values) if field.get("virtual") else _current_env_field_value(key, values)
-        is_secret = field["type"] == "secret"
+        is_secret = bool(field.get("secret"))
         display_type = "text" if is_secret else field["type"]
         item = {
             "key": key,
-            "label": text.get("label", field["label"]),
+            "label": field["label"],
             "type": display_type,
             "options": field.get("options", []),
-            "hint": text.get("hint", field.get("hint", "")),
+            "hint": field.get("hint", ""),
             "secret": False,
             "virtual": bool(field.get("virtual")),
             "has_value": bool(value),
@@ -366,12 +304,12 @@ def set_runtime_order_mode(payload: dict = Body(...)):
     return {
         "ok": True,
         "updated": sorted(updates.keys()),
-        "trading_env": trader.TRADING_ENV,
-        "dry_run": trader.DRY_RUN,
-        "enable_live_trading": trader.ENABLE_LIVE_TRADING,
+        "trading_env": trader.runtime_flags().trading_env,
+        "dry_run": trader.runtime_flags().dry_run,
+        "enable_live_trading": trader.runtime_flags().enable_live_trading,
         "online_access_blocked": bool(getattr(trader.config, "online_access_blocked", False)),
-        "order_submission_enabled": trader.ORDER_SUBMISSION_ENABLED,
-        "real_orders_enabled": trader.REAL_ORDERS_ENABLED,
+        "order_submission_enabled": trader.runtime_flags().order_submission_enabled,
+        "real_orders_enabled": trader.runtime_flags().real_orders_enabled,
         "requires_restart": False,
     }
 
@@ -506,8 +444,8 @@ def get_kis_rehearsal():
     for key, ok in required.items():
         checks.append({"key": key, "ok": ok, "critical": True})
 
-    checks.append({"key": "DRY_RUN", "ok": bool(trader.DRY_RUN), "critical": False})
-    checks.append({"key": "ORDER_SUBMISSION_ENABLED", "ok": bool(trader.ORDER_SUBMISSION_ENABLED), "critical": False})
+    checks.append({"key": "DRY_RUN", "ok": bool(trader.runtime_flags().dry_run), "critical": False})
+    checks.append({"key": "ORDER_SUBMISSION_ENABLED", "ok": bool(trader.runtime_flags().order_submission_enabled), "critical": False})
     checks.append({"key": "WEBSOCKET_CONFIGURED", "ok": bool(getattr(trader.config, "kistock_hts_id", "") or trader.config.kistock_account), "critical": False})
     checks.append({"key": "CONDITION_SEARCH_CONFIGURED", "ok": bool(
         getattr(trader.config, "kis_condition_seq", "")
@@ -527,10 +465,10 @@ def get_kis_rehearsal():
     critical_ok = all(item["ok"] for item in checks if item["critical"])
     return {
         "ok": critical_ok,
-        "trading_env": trader.TRADING_ENV,
-        "dry_run": bool(trader.DRY_RUN),
-        "order_submission_enabled": bool(trader.ORDER_SUBMISSION_ENABLED),
-        "real_orders_enabled": bool(trader.REAL_ORDERS_ENABLED),
+        "trading_env": trader.runtime_flags().trading_env,
+        "dry_run": bool(trader.runtime_flags().dry_run),
+        "order_submission_enabled": bool(trader.runtime_flags().order_submission_enabled),
+        "real_orders_enabled": bool(trader.runtime_flags().real_orders_enabled),
         "checks": checks,
         "sample_order_payload": sample_order,
         "websocket": _kis_websocket_status(),

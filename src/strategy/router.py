@@ -20,12 +20,19 @@ def _is_kis_rate_limit_message(message: str) -> bool:
 
 
 class OrderRouter:
-    def __init__(self, api: KIStockAPI, approval_service: ApprovalService | None = None):
+    def __init__(
+        self,
+        api: KIStockAPI,
+        approval_service: ApprovalService | None = None,
+        execution_context=None,
+    ):
         self.api = api
-        self.dry_run = config.dry_run
-        self.env = config.trading_env
-        self.enable_live = config.enable_live_trading
-        self.require_approval = config.require_approval
+        source = execution_context or config
+        self.dry_run = source.dry_run
+        self.env = getattr(source, "trading_env")
+        self.enable_live = source.enable_live_trading
+        self.require_approval = source.require_approval
+        self.online_access_blocked = bool(getattr(source, "online_access_blocked", False))
         self.approval_service = approval_service or ApprovalService(ApprovalRepository(connect_db))
         self._last_order_at = 0.0
 
@@ -35,7 +42,7 @@ class OrderRouter:
             trading_env=self.env,
             enable_live_trading=self.enable_live,
             require_approval=self.require_approval,
-            online_access_blocked=bool(getattr(config, "online_access_blocked", False)),
+            online_access_blocked=self.online_access_blocked,
         )
 
     def _current_holding_qty(self, symbol: str) -> int:

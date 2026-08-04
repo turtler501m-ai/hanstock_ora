@@ -164,7 +164,7 @@ def _history_row_to_trade(row: dict) -> dict:
         "price": price,
         "reason": "broker history import",
         "ok": 1,
-        "env": trader.TRADING_ENV,
+        "env": trader.runtime_flags().trading_env,
         "dry_run": 0,
         "broker_order_id": _broker_order_id_from_history(row),
         "order_status": "filled",

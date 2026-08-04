@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from src.db import ai_watchlist_repository as watchlist_repository
+
 from dataclasses import dataclass
 from typing import Any
 
@@ -101,9 +103,9 @@ def build(market: str, items: list[dict[str, Any]], policy: dict[str, Any] | Non
 
 def _load_policy(market: str) -> dict[str, Any] | None:
     try:
-        from src.db import ai_stock_repository as repo
 
-        pol = repo.get_policy("ai_stock_default_v1", market)
+
+        pol = watchlist_repository.get_policy("ai_stock_default_v1", market)
         return pol
     except Exception:
         return None

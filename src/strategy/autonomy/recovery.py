@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from src.db import ai_execution_repository as execution_repository
+from src.db import ai_risk_repository as risk_repository
+# Compatibility DI seam for the legacy combined execution/risk repository protocol.
+from src.db import ai_autonomy_repository as repository
+
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from src.db import ai_stock_repository as repository
 
 from .broker_adapters import ManagedOrderReconciler, ReconciliationResult
 from .protection import (
@@ -177,7 +181,7 @@ class AutonomousRecoveryService:
         if not failures:
             return signal
         alerts = tuple(
-            f"보호 복구 실패: position={item.position_id} {item.reason}"
+            f"蹂댄샇 蹂듦뎄 ?ㅽ뙣: position={item.position_id} {item.reason}"
             for item in failures
         )
         return ProtectionGateSignal(

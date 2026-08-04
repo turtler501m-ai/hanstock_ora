@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from src.db.repository import init_db, connect_db
-from src.db import ai_stock_repository as repo
+from src.db import ai_autonomy_repository as repo
 from src.ai_stock import market_data, automation_service
 from src.ai_stock.automation_service import evaluate_gate, set_policy, run_strategy
 from src.ai_stock.freshness import now

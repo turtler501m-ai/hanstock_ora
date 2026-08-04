@@ -6,19 +6,21 @@ The summary includes broker/account state plus AI watchlist target hints.
 """
 from __future__ import annotations
 
+from src.db import ai_watchlist_repository as watchlist_repository
+
 import os
 from typing import Any
 
 from src.ai_stock.freshness import now
 from src.ai_stock.markets import currency_of, markets_for_query
-from src.db import ai_stock_repository as repo
+
 
 
 def summary(market: str, display_currency: str = "LOCAL") -> dict[str, Any]:
     by_market = []
     for m in markets_for_query(market):
         account = _account_snapshot(m)
-        watch = repo.list_watchlist(market=m)
+        watch = watchlist_repository.list_watchlist(market=m)
         candidates = [w for w in watch if w.get("status") in ("watching", "confirmed", "execution_planned")]
         holdings = account.get("holdings") or []
         total_eval = _num(account.get("total_eval"))

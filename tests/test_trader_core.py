@@ -402,7 +402,7 @@ class TraderCoreTests(unittest.TestCase):
         }
 
         api = _FakeAPI()
-        with patch.object(trader, "TOTAL_CAPITAL", 100_000_000), \
+        with patch.object(trader.config, "total_capital", 100_000_000), \
                 patch.object(trader, "CASH_BUFFER", 0.20), \
                 patch.object(trader, "generate_signal", return_value={
                     "action": "hold", "qty": 0, "price": 0, "reason": "", "indicators": {},

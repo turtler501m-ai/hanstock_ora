@@ -23,7 +23,7 @@ VM 또는 Linux 서버에서 사용하는 스크립트입니다. Windows 로컬�
 2. `git fetch`
 3. 지정 브랜치 checkout/pull
 4. `.venv` 없으면 생성
-5. `requirements.txt` 설치
+5. `constraints/vm-python.lock`을 `--require-hashes`로 설치
 6. 대시보드 재시작
 7. 서버 상태 출력
 

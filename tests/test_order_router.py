@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from src.config import config
@@ -6,6 +7,21 @@ from src.strategy import router
 
 
 class OrderRouterTests(unittest.TestCase):
+    def test_explicit_execution_context_is_independent_from_global_config(self):
+        context = SimpleNamespace(
+            dry_run=True,
+            trading_env="demo",
+            enable_live_trading=False,
+            require_approval=True,
+            online_access_blocked=False,
+        )
+        with patch.object(router.config, "dry_run", False):
+            order_router = router.OrderRouter(Mock(), execution_context=context)
+
+        self.assertTrue(order_router.dry_run)
+        self.assertEqual(order_router.env, "demo")
+        self.assertTrue(order_router.require_approval)
+
     def _set_config(self, **values):
         original = {key: getattr(config, key) for key in values}
         for key, value in values.items():

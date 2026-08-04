@@ -140,7 +140,7 @@ def save_candidates_from_signals(signals: list[dict[str, Any]]) -> int:
             score=signal.get("score", 0),
             reasons=signal.get("reasons", []),
             price=price,
-            env=trader.TRADING_ENV,
+            env=trader.runtime_flags().trading_env,
             indicators={},
             strategy={"id": STRATEGY_ID},
             ranker_model="rule_only",

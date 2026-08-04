@@ -1,12 +1,16 @@
 """Compare-and-set order state machine and abstract broker boundary."""
 from __future__ import annotations
 
+from src.db import ai_execution_repository as execution_repository
+from src.db import ai_risk_repository as risk_repository
+# Compatibility DI seam for the legacy combined execution/risk repository protocol.
+from src.db import ai_autonomy_repository as repository
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Mapping, Protocol
 
-from src.db import ai_stock_repository as repository
 from .protection import HardStopProtectionService, ProtectionBroker
 
 

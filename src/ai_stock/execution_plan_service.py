@@ -7,6 +7,10 @@ automation service or dashboard route.
 """
 from __future__ import annotations
 
+from src.db import ai_scan_repository as scan_repository
+from src.db import ai_watchlist_repository as watchlist_repository
+from src.db import ai_execution_repository as execution_repository
+
 import math
 import os
 from datetime import datetime, time
@@ -14,15 +18,15 @@ from typing import Any
 
 from src.ai_stock.constants import WATCH_CONFIRMED, WATCH_EXECUTION_PLANNED
 from src.ai_stock.freshness import is_stale, now as _now
-from src.db import ai_stock_repository as repo
+
 
 ACTIVE_PLAN_STATUSES = {"planned", "approval_queued", "approved", "submitted"}
 
 
 def create_plan(candidate_id: int, *, options: dict[str, Any] | None = None) -> dict[str, Any]:
     options = options or {}
-    watch = repo.get_watch(candidate_id)
-    candidate = repo.get_candidate(candidate_id)
+    watch = watchlist_repository.get_watch(candidate_id)
+    candidate = scan_repository.get_candidate(candidate_id)
     checks: list[dict[str, Any]] = []
 
     def check(name: str, ok: bool, detail: str = "") -> bool:
@@ -38,7 +42,7 @@ def create_plan(candidate_id: int, *, options: dict[str, Any] | None = None) -> 
     stop_price = float(options.get("stop_price") or 0)
     take_profit = options.get("take_profit")
 
-    pol = repo.get_policy(candidate.get("strategy_id") or "ai_stock_default_v1", market) or {}
+    pol = watchlist_repository.get_policy(candidate.get("strategy_id") or "ai_stock_default_v1", market) or {}
     stale = is_stale(candidate.get("data_as_of"), "ai_eval")
     check("fresh_data", (not stale) or _truthy(pol.get("allow_stale_data_trade")), "stale_allowed" if stale else "")
     check("entry_price", entry_price > 0, str(entry_price))
@@ -95,9 +99,9 @@ def create_plan(candidate_id: int, *, options: dict[str, Any] | None = None) -> 
         "status": "planned",
         "created_at": _now().isoformat(),
     }
-    plan_id = repo.save_execution_plan(plan)
+    plan_id = execution_repository.save_execution_plan(plan)
     plan["id"] = plan_id
-    repo.update_watch_status(candidate_id, WATCH_EXECUTION_PLANNED, reason=f"plan #{plan_id}")
+    watchlist_repository.update_watch_status(candidate_id, WATCH_EXECUTION_PLANNED, reason=f"plan #{plan_id}")
     return plan
 
 
@@ -120,7 +124,7 @@ def _kill_switch_active() -> bool:
 
 
 def _has_active_duplicate_plan(candidate_id: int) -> bool:
-    for plan in repo.list_execution_plans(limit=500):
+    for plan in execution_repository.list_execution_plans(limit=500):
         if int(plan.get("candidate_id") or 0) == int(candidate_id) and plan.get("status") in ACTIVE_PLAN_STATUSES:
             return True
     return False

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from src.db import ai_snapshot_repository as repository
+
 import hashlib
 import json
 import math
@@ -10,7 +12,6 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Mapping, Protocol
 
-from src.db import ai_stock_repository as repository
 
 from .orchestrator import MarketContext, PortfolioContext
 from .risk_envelope import RiskSnapshot

@@ -1,14 +1,27 @@
 """Production assembly boundary for the autonomous strategy platform."""
 from __future__ import annotations
 
+from src.db import ai_watchlist_repository as watchlist_repository
+from src.db import ai_execution_repository as execution_repository
+from src.db import ai_risk_repository as risk_repository
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import Any, Mapping
 
-from src.db import ai_stock_repository
+
 from src.db.strategy_repository import load_ai_strategies
 from src.config import config
+
+# Preserve the historical patch seam while sourcing every operation from its
+# bounded repository. Production code no longer imports the monolithic facade.
+ai_stock_repository = SimpleNamespace(
+    get_policy=watchlist_repository.get_policy,
+    list_strategy_positions=execution_repository.list_strategy_positions,
+    count_daily_new_risk_managed_orders=execution_repository.count_daily_new_risk_managed_orders,
+    list_active_reserved_exposures=risk_repository.list_active_reserved_exposures,
+)
 
 from .ai_planner import (
     AutonomousAIAdapter,

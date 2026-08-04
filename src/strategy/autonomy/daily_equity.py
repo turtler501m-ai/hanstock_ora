@@ -1,13 +1,17 @@
 """Authoritative daily PnL derived from an immutable trusted equity baseline."""
 from __future__ import annotations
 
+# Compatibility DI seam: this service passes one repository object to both
+# snapshot accounting and protection services, which span bounded repositories.
+from src.db import ai_autonomy_repository as ai_stock_repository
+
 import math
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
-from src.db import ai_stock_repository
+
 
 from .protection import HardStopProtectionService, ProtectionGateSignal
 from .runtime import RuntimeConfigurationError

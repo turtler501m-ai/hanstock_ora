@@ -1,11 +1,14 @@
 """Injected KR/US broker adapters and restart-safe order reconciliation."""
 from __future__ import annotations
 
+from src.db import ai_execution_repository as execution_repository
+# Compatibility DI seam for the legacy combined execution/risk repository protocol.
+from src.db import ai_autonomy_repository as repository
+
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Mapping, Protocol
 
-from src.db import ai_stock_repository as repository
 
 from .order_state import (
     BrokerCancellation,

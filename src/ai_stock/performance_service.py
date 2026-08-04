@@ -6,6 +6,9 @@ auto-disable or auto-promote a strategy without a separate approval path.
 """
 from __future__ import annotations
 
+from src.db import ai_watchlist_repository as watchlist_repository
+from src.db import ai_snapshot_repository as snapshot_repository
+
 from typing import Any
 
 MIN_SAMPLE = 5
@@ -20,7 +23,7 @@ def run_update(market: str) -> dict[str, Any]:
     """
     from src.ai_stock.market_data import get_provider
     from src.ai_stock.markets import markets_for_query
-    from src.db import ai_stock_repository as repo
+
 
     provider = get_provider()
     updated = 0
@@ -29,7 +32,7 @@ def run_update(market: str) -> dict[str, Any]:
         benchmarks = provider.index_series(m) or {}
         benchmark_series = next(iter(benchmarks.values()), []) if benchmarks else []
         benchmark_return = _horizon_return(benchmark_series, EVALUATION_DAYS)
-        for w in repo.list_watchlist(market=m):
+        for w in watchlist_repository.list_watchlist(market=m):
             base = _num(w.get("initial_price"))
             symbol = w.get("symbol")
             if base <= 0 or not symbol:
@@ -45,7 +48,7 @@ def run_update(market: str) -> dict[str, Any]:
                 skipped += 1
                 continue
             metrics = _metrics(base, closes, benchmark_return=benchmark_return)
-            repo.save_performance(w["candidate_id"], {
+            snapshot_repository.save_performance(w["candidate_id"], {
                 "market": m,
                 "base_price": base,
                 "base_date": w.get("created_at"),

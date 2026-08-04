@@ -6,6 +6,7 @@ import os
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -41,10 +42,40 @@ from src.strategy_ids import AI_REBALANCE_STRATEGY_ID, ISOLATED_STOCK_STRATEGY_I
 
 KST = timezone(timedelta(hours=9))
 
-TRADING_ENV = config.trading_env
-DRY_RUN = config.dry_run
-ENABLE_LIVE_TRADING = config.enable_live_trading
-REQUIRE_APPROVAL = config.require_approval
+
+@dataclass(frozen=True)
+class TraderRuntimeContext:
+    """Immutable settings snapshot used by one trading-engine run."""
+
+    settings: object
+    flags: object
+
+    @classmethod
+    def capture(cls) -> "TraderRuntimeContext":
+        current = get_settings()
+        settings = current.model_copy(deep=True)
+        return cls(settings=settings, flags=trading_flags(settings))
+
+    def kis_client_config(self, group: str = "default") -> KISClientConfig:
+        settings = self.settings
+        if group == "real_check":
+            return KISClientConfig(
+                base_url=_kis_base_url("real"),
+                app_key=settings.kis_real_check_app_key,
+                app_secret=settings.kis_real_check_app_secret,
+                account_no=settings.kis_real_check_account or settings.kistock_account,
+                trading_env="real",
+                token_cache_path=Path("data") / "kis_token_real_check.json",
+            )
+        return KISClientConfig(
+            base_url=_kis_base_url(self.flags.trading_env),
+            app_key=settings.kistock_app_key,
+            app_secret=settings.kistock_app_secret,
+            account_no=settings.kistock_account,
+            trading_env=self.flags.trading_env,
+            token_cache_path=Path("data") / "kis_token.json",
+        )
+
 ONLINE_ACCESS_BLOCKED = config.online_access_blocked
 
 SPLIT_N = config.split_n
@@ -53,54 +84,35 @@ TAKE_PROFIT = config.take_profit
 RSI_BUY = config.rsi_buy
 RSI_SELL = config.rsi_sell
 
-TOTAL_CAPITAL = config.total_capital
-MAX_POSITIONS = config.max_positions
 MAX_SINGLE_WEIGHT = config.max_single_weight
 CASH_BUFFER = config.cash_buffer
 MAX_DAILY_LOSS_PCT = config.max_daily_loss_pct
 SCAN_UNIVERSE_SIZE = config.scan_universe_size
 
-REAL_ORDERS_ENABLED = (
-    not ONLINE_ACCESS_BLOCKED
-    and (not DRY_RUN)
-    and TRADING_ENV == "real"
-    and ENABLE_LIVE_TRADING
-)
-ORDER_SUBMISSION_ENABLED = (
-    not ONLINE_ACCESS_BLOCKED
-    and (not DRY_RUN)
-    and (TRADING_ENV == "demo" or REAL_ORDERS_ENABLED)
-)
-
-
 def runtime_flags():
-    return trading_flags(get_settings())
+    return TraderRuntimeContext.capture().flags
 
 
 def sync_legacy_config_aliases() -> None:
-    global TRADING_ENV, DRY_RUN, ENABLE_LIVE_TRADING, REQUIRE_APPROVAL
-    global ONLINE_ACCESS_BLOCKED, REAL_ORDERS_ENABLED, ORDER_SUBMISSION_ENABLED
+    """Refresh the few remaining legacy client/strategy constants.
+
+    Runtime safety and allocation values are deliberately not mirrored as
+    mutable module globals; callers must capture ``TraderRuntimeContext``.
+    """
+    global ONLINE_ACCESS_BLOCKED
     global SPLIT_N, STOP_LOSS_PCT, TAKE_PROFIT, RSI_BUY, RSI_SELL
-    global TOTAL_CAPITAL, MAX_POSITIONS, MAX_SINGLE_WEIGHT, CASH_BUFFER
+    global MAX_SINGLE_WEIGHT, CASH_BUFFER
     global MAX_DAILY_LOSS_PCT, SCAN_UNIVERSE_SIZE
     global BASE_URL, KISTOCK_APP_KEY, KISTOCK_APP_SECRET, KISTOCK_ACCOUNT
 
     settings = get_settings()
     flags = trading_flags(settings)
-    TRADING_ENV = flags.trading_env
-    DRY_RUN = flags.dry_run
-    ENABLE_LIVE_TRADING = flags.enable_live_trading
-    REQUIRE_APPROVAL = flags.require_approval
     ONLINE_ACCESS_BLOCKED = flags.online_access_blocked
-    REAL_ORDERS_ENABLED = flags.real_orders_enabled
-    ORDER_SUBMISSION_ENABLED = flags.order_submission_enabled
     SPLIT_N = settings.split_n
     STOP_LOSS_PCT = settings.stop_loss_pct
     TAKE_PROFIT = settings.take_profit
     RSI_BUY = settings.rsi_buy
     RSI_SELL = settings.rsi_sell
-    TOTAL_CAPITAL = settings.total_capital
-    MAX_POSITIONS = settings.max_positions
     MAX_SINGLE_WEIGHT = settings.max_single_weight
     CASH_BUFFER = settings.cash_buffer
     MAX_DAILY_LOSS_PCT = settings.max_daily_loss_pct
@@ -134,14 +146,7 @@ KISTOCK_ACCOUNT = config.kistock_account
 _LEGACY_SYNCED_VALUES = {
     name: globals()[name]
     for name in (
-        "TRADING_ENV",
-        "DRY_RUN",
-        "ENABLE_LIVE_TRADING",
-        "REQUIRE_APPROVAL",
         "ONLINE_ACCESS_BLOCKED",
-        "REAL_ORDERS_ENABLED",
-        "ORDER_SUBMISSION_ENABLED",
-        "TOTAL_CAPITAL",
         "MAX_DAILY_LOSS_PCT",
         "BASE_URL",
         "KISTOCK_APP_KEY",
@@ -158,13 +163,11 @@ def _runtime_value(alias: str, settings_value):
     return settings_value
 
 
-def operating_capital(account_total_eval: int | float = 0) -> int:
+def operating_capital(account_total_eval: int | float = 0, *, runtime: TraderRuntimeContext | None = None) -> int:
     """Return the configured capital available to Hanstock for this account."""
-    settings = get_settings()
-    configured = max(
-        0,
-        int(_runtime_value("TOTAL_CAPITAL", settings.total_capital) or 0),
-    )
+    settings = (runtime or TraderRuntimeContext.capture()).settings
+    configured_value = settings.total_capital
+    configured = max(0, int(configured_value or 0))
     account_total = max(0, int(account_total_eval or 0))
     if configured <= 0:
         return account_total
@@ -177,11 +180,14 @@ def available_buying_cash(
     broker_cash: int | float,
     stock_eval: int | float,
     account_total_eval: int | float,
+    *,
+    runtime: TraderRuntimeContext | None = None,
 ) -> int:
     """Cap new buys by configured capital, cash buffer, and current exposure."""
-    settings = get_settings()
-    capital = operating_capital(account_total_eval)
-    cash_buffer = float(_runtime_value("CASH_BUFFER", settings.cash_buffer) or 0)
+    runtime = runtime or TraderRuntimeContext.capture()
+    settings = runtime.settings
+    capital = operating_capital(account_total_eval, runtime=runtime)
+    cash_buffer = float(settings.cash_buffer or 0)
     investable_limit = int(capital * max(0.0, 1.0 - cash_buffer))
     remaining_exposure = max(0, investable_limit - max(0, int(stock_eval or 0)))
     return min(max(0, int(broker_cash or 0)), remaining_exposure)
@@ -193,11 +199,13 @@ def buying_cash_diagnostics(
     account_total_eval: int | float,
     *,
     locked_holding_eval: int | float = 0,
+    runtime: TraderRuntimeContext | None = None,
 ) -> dict:
     """Expose why new-buy cash is capped for dashboard/log diagnostics."""
-    settings = get_settings()
-    capital = operating_capital(account_total_eval)
-    cash_buffer = float(_runtime_value("CASH_BUFFER", settings.cash_buffer) or 0)
+    runtime = runtime or TraderRuntimeContext.capture()
+    settings = runtime.settings
+    capital = operating_capital(account_total_eval, runtime=runtime)
+    cash_buffer = float(settings.cash_buffer or 0)
     investable_limit = int(capital * max(0.0, 1.0 - cash_buffer))
     exposure_for_new_buys = max(0, int(stock_eval or 0) - int(locked_holding_eval or 0))
     exposure_remaining = investable_limit - exposure_for_new_buys
@@ -228,25 +236,19 @@ def _kis_base_url(trading_env: str) -> str:
     )
 
 
-def build_kis_client_config(group: str = "default") -> KISClientConfig:
+def build_kis_client_config(group: str = "default", *, runtime: TraderRuntimeContext | None = None) -> KISClientConfig:
+    if runtime is not None:
+        return runtime.kis_client_config(group)
     settings = get_settings()
-    flags = trading_flags(settings)
     if group == "real_check":
-        return KISClientConfig(
-            base_url=_kis_base_url("real"),
-            app_key=settings.kis_real_check_app_key,
-            app_secret=settings.kis_real_check_app_secret,
-            account_no=settings.kis_real_check_account or settings.kistock_account,
-            trading_env="real",
-            token_cache_path=Path("data") / "kis_token_real_check.json",
-        )
-    base_url = _kis_base_url(flags.trading_env)
+        return TraderRuntimeContext.capture().kis_client_config(group)
+    flags = trading_flags(settings)
     return KISClientConfig(
-        base_url=_runtime_value("BASE_URL", base_url),
+        base_url=_runtime_value("BASE_URL", _kis_base_url(flags.trading_env)),
         app_key=_runtime_value("KISTOCK_APP_KEY", settings.kistock_app_key),
         app_secret=_runtime_value("KISTOCK_APP_SECRET", settings.kistock_app_secret),
         account_no=_runtime_value("KISTOCK_ACCOUNT", settings.kistock_account),
-        trading_env=_runtime_value("TRADING_ENV", flags.trading_env),
+        trading_env=flags.trading_env,
         token_cache_path=Path("data") / "kis_token.json",
     )
 
@@ -275,16 +277,21 @@ class KIStockAPI:
     _circuit_opened_at: "datetime | None" = None
     MAX_ERRORS: int = 5
 
-    def __init__(self, notify_errors: bool = True, group: str = "default") -> None:
+    def __init__(self, notify_errors: bool = True, group: str = "default", runtime: TraderRuntimeContext | None = None) -> None:
         require_online_access("KIS API access")
+        self._runtime_injected = runtime is not None
+        self.runtime = runtime or TraderRuntimeContext.capture()
         self.notify_errors = notify_errors
         self.group = group
-        self.client_config = build_kis_client_config(group=group)
+        self.client_config = build_kis_client_config(
+            group=group,
+            runtime=self.runtime if self._runtime_injected else None,
+        )
         self.base_url = getattr(self.client_config, "base_url", BASE_URL)
         self.app_key = getattr(self.client_config, "app_key", KISTOCK_APP_KEY)
         self.app_secret = getattr(self.client_config, "app_secret", KISTOCK_APP_SECRET)
         self.account_no = getattr(self.client_config, "account_no", KISTOCK_ACCOUNT)
-        self.trading_env = getattr(self.client_config, "trading_env", TRADING_ENV)
+        self.trading_env = getattr(self.client_config, "trading_env", self.runtime.flags.trading_env)
         if self.group == "real_check":
             self.token_cache_path = getattr(self.client_config, "token_cache_path", None) or (
                 Path("data") / "kis_token_real_check.json"
@@ -296,7 +303,7 @@ class KIStockAPI:
         self._client = KISClient(self.client_config, session=HTTP, access_token=self.access_token)
 
     def _apply_group_condition_settings(self) -> None:
-        settings = get_settings()
+        settings = self.runtime.settings
         if self.group == "real_check":
             self.kis_condition_search_enabled = settings.kis_real_check_condition_search_enabled
             self.kis_condition_user_id = (
@@ -382,6 +389,10 @@ class KIStockAPI:
             self._success()
         else:
             self._fail()
+
+    def _order_submission_enabled(self) -> bool:
+        runtime = getattr(self, "runtime", None)
+        return bool(runtime.flags.order_submission_enabled)
 
     def _sync_circuit_to_client(self) -> None:
         self._client.circuit.error_count = self.__class__._err_count
@@ -483,13 +494,7 @@ class KIStockAPI:
 
     def place_order(self, symbol: str, order_type: str, price: int, qty: int) -> dict:
         require_online_access("KIS order submission")
-        flags = trading_flags(get_settings())
-        # Settings is authoritative. The alias remains an explicit
-        # compatibility override for callers that still patch this module.
-        submission_enabled = (
-            flags.order_submission_enabled or bool(ORDER_SUBMISSION_ENABLED)
-        )
-        if not submission_enabled:
+        if not self._order_submission_enabled():
             return {"rt_cd": "0", "msg1": "DRY_RUN"}
         is_demo = self.trading_env == "demo"
         if order_type == "buy":
@@ -533,8 +538,7 @@ class KIStockAPI:
         cancel_all: bool = True,
     ) -> dict:
         require_online_access("KIS order cancellation")
-        flags = trading_flags(get_settings())
-        if not flags.order_submission_enabled:
+        if not self._order_submission_enabled():
             return {"rt_cd": "0", "msg1": "DRY_RUN"}
         order_no = str(order_no or "").strip()
         if not order_no:
@@ -634,14 +638,23 @@ def real_check_configured(settings=None) -> bool:
     )
 
 
-def build_market_data_api(broker_api: KIStockAPI) -> KIStockAPI:
-    settings = get_settings()
+def build_market_data_api(
+    broker_api: KIStockAPI,
+    *,
+    runtime: TraderRuntimeContext | None = None,
+) -> KIStockAPI:
+    api_runtime = getattr(broker_api, "runtime", None)
+    runtime = runtime or (api_runtime if isinstance(api_runtime, TraderRuntimeContext) else None)
+    runtime = runtime or TraderRuntimeContext.capture()
+    settings = runtime.settings
     if not settings.kis_real_check_enabled:
         return broker_api
     if not settings.kis_real_check_app_key or not settings.kis_real_check_app_secret:
         logger.warning("[KIS real_check] enabled but app key/secret are empty; using broker API for market data")
         return broker_api
     try:
+        if isinstance(api_runtime, TraderRuntimeContext):
+            return KIStockAPI(notify_errors=False, group="real_check", runtime=runtime)
         return KIStockAPI(notify_errors=False, group="real_check")
     except Exception as exc:
         logger.warning(f"[KIS real_check] failed to initialize; using broker API for market data: {exc}")
@@ -698,24 +711,21 @@ def init_approval_db() -> None:
             pass
 
 
-def daily_loss_halt_triggered(pnl: int) -> bool:
-    settings = get_settings()
-    total_capital = _runtime_value("TOTAL_CAPITAL", settings.total_capital)
-    max_daily_loss_pct = _runtime_value(
-        "MAX_DAILY_LOSS_PCT",
-        settings.max_daily_loss_pct,
-    )
+def daily_loss_halt_triggered(pnl: int, *, runtime: TraderRuntimeContext | None = None) -> bool:
+    settings = (runtime or TraderRuntimeContext.capture()).settings
+    total_capital = settings.total_capital
+    max_daily_loss_pct = settings.max_daily_loss_pct
     if total_capital <= 0:
         return False
     loss_pct = abs(pnl) / total_capital * 100
     return pnl < 0 and loss_pct >= max_daily_loss_pct
 
 
-def check_daily_loss(pnl: int) -> bool:
+def check_daily_loss(pnl: int, *, runtime: TraderRuntimeContext | None = None) -> bool:
     if Path(".runtime/kill_switch.json").exists():
         logger.warning("Kill switch active — 신규 매수 중단, 보유 포지션 방어는 계속")
         return True
-    halted = daily_loss_halt_triggered(pnl)
+    halted = daily_loss_halt_triggered(pnl, runtime=runtime)
     if halted:
         logger.warning(f"일일 손실 한도 초과: {pnl:+,} KRW — 신규 매수 중단, 보유 포지션 방어는 계속")
     return halted
@@ -938,7 +948,12 @@ def build_runtime_plan(
     read_cached_candidates: bool = False,
     force_strategy_id: str | None = None,
     candidate_scan_override: dict | None = None,
+    runtime: TraderRuntimeContext | None = None,
 ) -> dict:
+    api_runtime = getattr(api, "runtime", None)
+    if runtime is None and isinstance(api_runtime, TraderRuntimeContext):
+        runtime = api_runtime
+    runtime = runtime or TraderRuntimeContext.capture()
     active_strategy_id = force_strategy_id
     active_strategy = None
     try:
@@ -983,7 +998,7 @@ def build_runtime_plan(
             int(stock.get("evlu_amt", 0) or 0)
             for stock in stocks
         )
-    capital = operating_capital(total_eval)
+    capital = operating_capital(total_eval, runtime=runtime)
     sell_order_symbols = _sell_order_symbols_by_status()
     active_sell_symbols = sell_order_symbols["submitted"] | sell_order_symbols["open"]
     retryable_sell_symbols = sell_order_symbols["partial"] | sell_order_symbols["failed"]
@@ -1006,6 +1021,7 @@ def build_runtime_plan(
         stock_eval,
         total_eval,
         locked_holding_eval=locked_holding_eval,
+        runtime=runtime,
     )
     buying_cash = int(buying_cash_info["buying_cash"])
     pnl = int(summary.get("evlu_pfls_smtl_amt", 0) or 0)
@@ -1084,7 +1100,7 @@ def build_runtime_plan(
             if row is not None:
                 position_rows.append(row)
 
-    halted = daily_loss_halt_triggered(pnl)
+    halted = daily_loss_halt_triggered(pnl, runtime=runtime)
     remaining_cash = buying_cash
     candidate_rows = []
     candidate_scan: dict = {"candidates": [], "scan_summary": [], "scanned": 0, "min_score": 2, "scan_error": None}
@@ -1221,7 +1237,7 @@ def build_runtime_plan(
                     score=candidate.get("score", 0),
                     reasons=candidate.get("reasons", []),
                     price=candidate.get("current_price", candidate.get("price", 0)),
-                    env=get_settings().trading_env,
+                    env=runtime.flags.trading_env,
                     indicators=indicators
                 )
             if order:
@@ -1333,14 +1349,16 @@ def run(
     include_ai_rebalance: bool = False,
     execution_categories: set[str] | None = None,
     force_strategy_id: str | None = None,
+    runtime: TraderRuntimeContext | None = None,
 ) -> dict:
-    settings = get_settings()
-    flags = trading_flags(settings)
+    runtime = runtime or TraderRuntimeContext.capture()
+    settings = runtime.settings
+    flags = runtime.flags
     check_secrets()
     init_db()
     init_approval_db()
 
-    api = KIStockAPI()
+    api = KIStockAPI(runtime=runtime)
     market_data_api = build_market_data_api(api)
     balance = api.get_balance()
 
@@ -1380,7 +1398,7 @@ def run(
             real_orders_enabled=flags.real_orders_enabled,
         )
 
-    daily_loss_halted = check_daily_loss(pnl)
+    daily_loss_halted = check_daily_loss(pnl, runtime=runtime)
 
     bp_kwargs = {}
     if include_ai_rebalance:
@@ -1397,7 +1415,7 @@ def run(
 
     context: dict = {"mode": mode}
     if mode != "analysis_only":
-        context["router"] = OrderRouter(api)
+        context["router"] = OrderRouter(api, execution_context=runtime.flags)
 
     results = []
     execution_buying_cash = int(runtime_bundle.get("buying_cash", cash) or 0)

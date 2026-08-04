@@ -7,7 +7,12 @@ automation_level 게이트를 서버에서만 판정한다. 정책 변경 시 �
 """
 from __future__ import annotations
 
+from src.db import ai_scan_repository as scan_repository
+from src.db import ai_watchlist_repository as watchlist_repository
+from src.db import ai_execution_repository as execution_repository
+
 from typing import Any
+from src.db import ai_autonomy_repository as repo
 
 from src.ai_stock.constants import (
     AUTOMATION_APPROVE,
@@ -17,7 +22,7 @@ from src.ai_stock.constants import (
 from src.ai_stock.markets import require_storable_market
 from src.ai_stock.freshness import is_stale
 from src.ai_stock.safety import live_trading_allowed
-from src.db import ai_stock_repository as repo
+
 
 
 def _daily_completed_orders(market: str | None, strategy_id: str | None) -> int:

@@ -165,7 +165,7 @@ def _strategy_scan(strategy_id: str, *, min_score: float = 1.0) -> dict:
             score=s.get("score", 0.0),
             reasons=s.get("reasons", []),
             price=s.get("current_price", 0.0),
-            env=trader.TRADING_ENV,
+            env=trader.runtime_flags().trading_env,
             indicators={
                 "rsi": s.get("rsi"),
                 "rsi2": s.get("rsi2"),
@@ -320,7 +320,7 @@ def run_plunge_bounce_scan():
                 score=s.get("score", 0.0),
                 reasons=s.get("reasons", []),
                 price=s.get("current_price", 0.0),
-                env=trader.TRADING_ENV,
+                env=trader.runtime_flags().trading_env,
                 indicators={
                     "rsi": s.get("rsi"),
                     "rsi2": s.get("rsi2"),
@@ -632,7 +632,7 @@ def get_strategy_positions(strategy_id: str):
     sid = _validate_strategy_id(strategy_id)
     from src.db.repository import reconstruct_strategy_positions
 
-    positions = reconstruct_strategy_positions(sid, env=trader.TRADING_ENV)
+    positions = reconstruct_strategy_positions(sid, env=trader.runtime_flags().trading_env)
     # 현재가를 붙여 평가손익 계산(실패해도 보유 정보는 반환)
     try:
         from src.trader import KIStockAPI

@@ -24,6 +24,60 @@ class ClosingConnection(sqlite3.Connection):
             self.close()
 
 
+class DBWrapper:
+    """Normalize SQLite and PostgreSQL connection behavior for repositories."""
+
+    def __init__(self, conn, is_pg: bool = False, close_on_exit: bool = False):
+        self.conn = conn
+        self.is_pg = is_pg
+        self.close_on_exit = close_on_exit
+
+    def __enter__(self):
+        self.conn.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return self.conn.__exit__(exc_type, exc_value, traceback)
+        finally:
+            if self.close_on_exit:
+                self.conn.close()
+
+    def execute(self, sql, params=()):
+        if self.is_pg:
+            from psycopg2.extras import DictCursor
+
+            sql = sql.replace("?", "%s")
+            if "AUTOINCREMENT" in sql:
+                sql = sql.replace(
+                    "INTEGER PRIMARY KEY AUTOINCREMENT",
+                    "SERIAL PRIMARY KEY",
+                )
+            cursor = self.conn.cursor(cursor_factory=DictCursor)
+        else:
+            cursor = self.conn.cursor()
+        cursor.execute(sql, params)
+        return cursor
+
+    def commit(self):
+        return self.conn.commit()
+
+    def rollback(self):
+        return self.conn.rollback()
+
+    def close(self):
+        return self.conn.close()
+
+    @property
+    def row_factory(self):
+        return None if self.is_pg else self.conn.row_factory
+
+    @row_factory.setter
+    def row_factory(self, factory):
+        if not self.is_pg:
+            self.conn.row_factory = factory
+
+
 def _busy_timeout_ms() -> int:
     raw = os.environ.get("SQLITE_BUSY_TIMEOUT_MS", str(DEFAULT_BUSY_TIMEOUT_MS))
     try:
@@ -46,10 +100,14 @@ def open_sqlite(
         check_same_thread=False,
         factory=ClosingConnection,
     )
-    conn.execute(f"PRAGMA busy_timeout={timeout_ms}")
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    if row_factory is not None:
-        conn.row_factory = row_factory
-    return conn
+    try:
+        conn.execute(f"PRAGMA busy_timeout={timeout_ms}")
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        if row_factory is not None:
+            conn.row_factory = row_factory
+        return conn
+    except BaseException:
+        conn.close()
+        raise

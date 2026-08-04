@@ -1,12 +1,17 @@
 """Fail-closed continuous strategy orchestration, stopping before broker I/O."""
 from __future__ import annotations
 
+# Compatibility DI seam: the orchestrator's historical repository protocol
+# spans execution and atomic risk-reservation operations.
+from src.db import ai_autonomy_repository as repository
+
+
+
 import hashlib
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from typing import Any, Mapping, Protocol, Sequence
 
-from src.db import ai_stock_repository as repository
 
 from .models import OrderType, TradeAction, TradeIntent
 from .lifecycle import StrategyHealth, StrategyLifecycleGate

@@ -60,10 +60,10 @@ def get_narrative_momentum_status():
             "history_path": _display_path(NARRATIVE_HISTORY_PATH),
             "theme_map_path": _display_path(THEME_MAP_PATH),
             "safety": {
-                "dry_run": bool(trader.DRY_RUN),
-                "trading_env": trader.TRADING_ENV,
-                "enable_live_trading": bool(trader.ENABLE_LIVE_TRADING),
-                "require_approval": bool(trader.REQUIRE_APPROVAL),
+                "dry_run": bool(trader.runtime_flags().dry_run),
+                "trading_env": trader.runtime_flags().trading_env,
+                "enable_live_trading": bool(trader.runtime_flags().enable_live_trading),
+                "require_approval": bool(trader.runtime_flags().require_approval),
                 "online_access_blocked": bool(getattr(trader.config, "online_access_blocked", False)),
             },
         }

@@ -5,62 +5,10 @@ import hashlib
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from src.config import config
-from src.db.connection import open_sqlite
+from src.db.connection import DBWrapper, open_sqlite
 from src.utils.logger import logger
 
 KST = timezone(timedelta(hours=9))
-
-class DBWrapper:
-    def __init__(self, conn, is_pg=False, close_on_exit=False):
-        self.conn = conn
-        self.is_pg = is_pg
-        self.close_on_exit = close_on_exit
-
-    def __enter__(self):
-        self.conn.__enter__()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        try:
-            return self.conn.__exit__(exc_type, exc_val, exc_tb)
-        finally:
-            if self.close_on_exit:
-                self.conn.close()
-
-    def execute(self, sql, params=()):
-        if self.is_pg:
-            from psycopg2.extras import DictCursor
-
-            sql = sql.replace("?", "%s")
-            if "AUTOINCREMENT" in sql:
-                sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
-            
-            cursor = self.conn.cursor(cursor_factory=DictCursor)
-        else:
-            cursor = self.conn.cursor()
-            
-        cursor.execute(sql, params)
-        return cursor
-        
-    def commit(self):
-        self.conn.commit()
-
-    def rollback(self):
-        self.conn.rollback()
-
-    def close(self):
-        self.conn.close()
-        
-    @property
-    def row_factory(self):
-        if self.is_pg:
-            return None
-        return self.conn.row_factory
-        
-    @row_factory.setter
-    def row_factory(self, factory):
-        if not self.is_pg:
-            self.conn.row_factory = factory
 
 def connect_db():
     db_url = os.environ.get("DATABASE_URL")
@@ -395,7 +343,7 @@ def init_db() -> None:
         except (sqlite3.Error, OSError, ValueError, TypeError) as sc_err:
             logger.warning(f"Failed to sync custom rules to DB on init: {sc_err}")
         try:
-            from src.db.ai_stock_repository import init_ai_stock_tables
+            from src.db.ai_schema_repository import init_ai_stock_tables
             init_ai_stock_tables(conn)
             conn.commit()
         except (sqlite3.Error, OSError, ValueError, TypeError, ImportError) as ai_err:

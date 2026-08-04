@@ -40,12 +40,12 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
 
     def setUp(self) -> None:
-        self.original_dry_run = trader.DRY_RUN
-        self.original_trading_env = trader.TRADING_ENV
+        self.original_dry_run = trader.config.dry_run
+        self.original_trading_env = trader.config.trading_env
 
     def tearDown(self) -> None:
-        trader.DRY_RUN = self.original_dry_run
-        trader.TRADING_ENV = self.original_trading_env
+        trader.config.dry_run = self.original_dry_run
+        trader.config.trading_env = self.original_trading_env
 
     def test_period_bucket_has_new_keys(self):
         bucket = _period_bucket()
@@ -63,25 +63,25 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
         ]
 
         # Case 1: DRY_RUN=false, TRADING_ENV=real -> Bypasses dry_run=1
-        trader.DRY_RUN = False
-        trader.TRADING_ENV = "real"
+        trader.config.dry_run = False
+        trader.config.trading_env = "real"
         real_trades = _account_trades(trades)
         self.assertEqual(len(real_trades), 1)
         self.assertEqual(real_trades[0]["dry_run"], 0)
 
         # Case 2: DRY_RUN=true -> Includes dry_run=1
-        trader.DRY_RUN = True
+        trader.config.dry_run = True
         demo_trades = _account_trades(trades)
         self.assertEqual(len(demo_trades), 2)
 
         # Case 3: TRADING_ENV=demo -> Includes dry_run=1 even if DRY_RUN=false
-        trader.DRY_RUN = False
-        trader.TRADING_ENV = "demo"
+        trader.config.dry_run = False
+        trader.config.trading_env = "demo"
         demo_trades_2 = _account_trades(trades)
         self.assertEqual(len(demo_trades_2), 2)
 
     def test_build_periodic_performance_computes_correct_realized_rates(self):
-        trader.DRY_RUN = True
+        trader.config.dry_run = True
         trades = [
             # Buy 10 shares of Samsung Electronics at 70,000 KRW (total cost = 700,000)
             {"ok": 1, "dry_run": 1, "reason": "buy", "symbol": "005930", "action": "buy", "qty": 10, "price": 70000, "ts": "2026-05-27 10:00:00"},
@@ -111,8 +111,8 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
         self.assertEqual(sell_detail["realized_pnl_rate"], 10.0)
 
     def test_build_periodic_performance_ignores_implausible_partial_fill_price(self):
-        trader.DRY_RUN = False
-        trader.TRADING_ENV = "real"
+        trader.config.dry_run = False
+        trader.config.trading_env = "real"
         trades = [
             {
                 "ok": 1,
@@ -158,7 +158,7 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
         self.assertEqual(perf["daily"][0]["realized_pnl"], -23700)
 
     def test_periodic_performance_adds_strategy_validation_and_attribution(self):
-        trader.DRY_RUN = True
+        trader.config.dry_run = True
         trades = []
         for day in range(1, 7):
             strategy_id = "alpha"
@@ -187,7 +187,7 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
         self.assertEqual(validation["validation_status"], "effective")
 
     def test_periodic_performance_adds_daily_and_monthly_index_changes(self):
-        trader.DRY_RUN = True
+        trader.config.dry_run = True
         trades = [{
             "ok": 1, "dry_run": 1, "symbol": "005930", "action": "buy",
             "qty": 1, "price": 70000, "ts": "2026-05-03 10:00:00",

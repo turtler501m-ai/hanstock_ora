@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 
 from src.dashboard import get_trades
 

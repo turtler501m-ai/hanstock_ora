@@ -403,9 +403,9 @@ class SchedulerModeTests(unittest.TestCase):
         with patch.object(scheduler.trader, "run", return_value=expected), patch(
             "src.dashboard._approve_pending_approval",
             return_value={"id": 123, "status": "executed"},
-        ), patch.object(scheduler.trader, "DRY_RUN", False), patch.object(
-            scheduler.trader, "ORDER_SUBMISSION_ENABLED", True
-        ), patch("src.dashboard._get_api", return_value=object()) as get_api, patch(
+        ), patch.object(scheduler.trader.config, "dry_run", False), patch(
+            "src.dashboard._get_api", return_value=object()
+        ) as get_api, patch(
             "src.dashboard._sync_order_status_from_history",
             return_value={"ok": True, "updated_count": 1},
         ) as sync_status, patch.object(scheduler.time, "sleep"), patch.object(
@@ -421,9 +421,9 @@ class SchedulerModeTests(unittest.TestCase):
     def test_execute_syncs_stale_orders_before_building_new_plan(self):
         with patch.object(
             scheduler.trader, "run", return_value={"results": []}
-        ), patch.object(scheduler.trader, "DRY_RUN", False), patch.object(
-            scheduler.trader, "ORDER_SUBMISSION_ENABLED", True
-        ), patch("src.dashboard._get_api", return_value=object()), patch(
+        ), patch.object(scheduler.trader.config, "dry_run", False), patch(
+            "src.dashboard._get_api", return_value=object()
+        ), patch(
             "src.dashboard._sync_order_status_from_history",
             return_value={"ok": True, "updated_count": 3},
         ) as sync_status:
@@ -498,9 +498,9 @@ class SchedulerModeTests(unittest.TestCase):
         with patch.object(scheduler.trader, "run", return_value=expected), patch(
             "src.dashboard._approve_pending_approval",
             return_value={"id": 123, "status": "executed"},
-        ), patch.object(scheduler.trader, "DRY_RUN", False), patch.object(
-            scheduler.trader, "ORDER_SUBMISSION_ENABLED", True
-        ), patch("src.dashboard._get_api", return_value=object()), patch(
+        ), patch.object(scheduler.trader.config, "dry_run", False), patch(
+            "src.dashboard._get_api", return_value=object()
+        ), patch(
             "src.dashboard._sync_order_status_from_history",
             side_effect=RuntimeError("history unavailable"),
         ), patch.object(scheduler.time, "sleep"), patch.object(

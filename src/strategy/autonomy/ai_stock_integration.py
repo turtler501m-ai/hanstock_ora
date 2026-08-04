@@ -1,13 +1,17 @@
 """Application wiring between AI-stock schedules and the autonomy platform."""
 from __future__ import annotations
 
+from src.db import ai_watchlist_repository as watchlist_repository
+from src.db import ai_execution_repository as execution_repository
+from src.db import ai_autonomy_repository as ai_stock_repository
+
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from src.approval_service import ApprovalService
 from src.config import config
-from src.db import ai_stock_repository
+
 from src.db.repository import connect_db
 from src.db.strategy_repository import load_ai_strategies
 from src.repositories import ApprovalRepository

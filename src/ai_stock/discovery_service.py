@@ -6,6 +6,9 @@
 """
 from __future__ import annotations
 
+from src.db import ai_scan_repository as scan_repository
+from src.db import ai_watchlist_repository as watchlist_repository
+
 from typing import Any
 
 from src.ai_stock import briefing_service, narrative_service, universe
@@ -21,7 +24,7 @@ from src.ai_stock.constants import (
 from src.ai_stock.markets import currency_of, require_storable_market
 from src.ai_stock.scoring import ScoreProfile, score_candidate
 from src.ai_stock.freshness import now as _now
-from src.db import ai_stock_repository as repo
+
 
 FEATURE_VERSION = "ai_stock_features_v1"
 PROMPT_VERSION = "ai_stock_prompt_v1"
@@ -186,7 +189,7 @@ def run_scan(*, market: str, strategy_id: str = "ai_stock_default_v1",
     """1차 배치 스캔. 중복 활성 스캔이면 ScanConflict (라우터가 409)."""
     market = require_storable_market(market)
     options = options or {}
-    scan_id = repo.create_scan(
+    scan_id = scan_repository.create_scan(
         market=market, strategy_id=strategy_id, strategy_version=1,
         model=None, feature_version=FEATURE_VERSION, prompt_version=PROMPT_VERSION,
         data_as_of=_now().isoformat(),
@@ -195,7 +198,7 @@ def run_scan(*, market: str, strategy_id: str = "ai_stock_default_v1",
     fallback_count = 0
     errors: list[str] = []
     try:
-        policy = repo.get_policy(strategy_id, market)
+        policy = watchlist_repository.get_policy(strategy_id, market)
         profile = ScoreProfile.from_dict((policy or {}).get("score_profile") if policy else None)
         from src.ai_stock.market_data import get_provider
 
@@ -222,20 +225,20 @@ def run_scan(*, market: str, strategy_id: str = "ai_stock_default_v1",
                 cand["scan_id"] = scan_id
                 cand["strategy_id"] = strategy_id
                 cand["profile_hash"] = None
-                repo.save_candidate(cand)
+                scan_repository.save_candidate(cand)
                 candidate_count += 1
                 if cand.get("fallback_used"):
                     fallback_count += 1
             except Exception as exc:  # 종목 부분 실패 격리 (§5.12.3)
                 errors.append(f"{item.get('symbol')}: {exc}")
         status = SCAN_PARTIAL if errors else SCAN_COMPLETED
-        repo.finish_scan(
+        scan_repository.finish_scan(
             scan_id, status=status, candidate_count=candidate_count,
             fallback_count=fallback_count,
             error_message=("; ".join(errors[:5]) if errors else None),
         )
     except Exception as exc:
-        repo.finish_scan(scan_id, status=SCAN_FAILED, error_message=str(exc))
+        scan_repository.finish_scan(scan_id, status=SCAN_FAILED, error_message=str(exc))
         raise
 
     return {

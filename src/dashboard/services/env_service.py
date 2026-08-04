@@ -3,6 +3,55 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from fastapi import HTTPException
+
+
+def account_format_warning(account: str) -> str:
+    digits = "".join(char for char in str(account or "") if char.isdigit())
+    if not digits:
+        return "KISTOCK_ACCOUNT is required"
+    if len(digits) not in {8, 10}:
+        return "KISTOCK_ACCOUNT must be 8 digits, or 10 digits including 2-digit product code"
+    return ""
+
+
+def mask_env_value(value: str) -> str:
+    if not value:
+        return ""
+    if len(value) <= 4:
+        return "*" * len(value)
+    return f"{value[:2]}{'*' * max(4, len(value) - 4)}{value[-2:]}"
+
+
+def validate_env_value(field_map: dict, key: str, value: object) -> str:
+    field = field_map[key]
+    value_text = env_value_without_inline_comment(str(value).strip())
+    field_type = field["type"]
+    if field_type == "bool":
+        lowered = value_text.lower()
+        if lowered not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
+            raise HTTPException(status_code=400, detail=f"{key} must be a boolean")
+        return "true" if lowered in {"true", "1", "yes", "on"} else "false"
+    if field_type in {"int", "float"}:
+        value_text = value_text.replace(",", "")
+        try:
+            (int if field_type == "int" else float)(value_text)
+        except ValueError as exc:
+            expected = "an integer" if field_type == "int" else "a number"
+            raise HTTPException(status_code=400, detail=f"{key} must be {expected}") from exc
+        return value_text
+    if field_type == "select":
+        options = field.get("options", [])
+        if value_text not in options:
+            raise HTTPException(status_code=400, detail=f"{key} must be one of: {', '.join(options)}")
+    if key == "KISTOCK_ACCOUNT":
+        digits = "".join(char for char in value_text if char.isdigit())
+        warning = account_format_warning(digits)
+        if warning:
+            raise HTTPException(status_code=400, detail=warning)
+        return digits
+    return value_text
+
 
 def env_value_without_inline_comment(value: str) -> str:
     quote = None

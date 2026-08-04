@@ -96,6 +96,7 @@ def main() -> int:
             "PYTHONUTF8": "1",
             "PYTHONIOENCODING": "utf-8",
             "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONWARNINGS": "error::ResourceWarning,default::DeprecationWarning",
             "HANSTOCK_LOG_LEVEL": "DEBUG" if args.verbose else "WARNING",
         }
     )
@@ -117,12 +118,27 @@ def main() -> int:
                 env=env,
                 timeout=args.timeout,
                 check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
             )
         except subprocess.TimeoutExpired:
             print(f"{label} timed out after {args.timeout}s", file=sys.stderr, flush=True)
             return 124
         elapsed = time.monotonic() - batch_started
+        if result.stdout:
+            print(result.stdout, end="", flush=True)
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr, flush=True)
         print(f"{label} finished in {elapsed:.1f}s", flush=True)
+        warning_output = result.stdout + result.stderr
+        if "ResourceWarning:" in warning_output:
+            print(f"{label} leaked a resource", file=sys.stderr, flush=True)
+            return 1
+        if "DeprecationWarning:" in warning_output:
+            print(f"{label} emitted a deprecation warning", file=sys.stderr, flush=True)
+            return 1
         if result.returncode:
             return result.returncode
 

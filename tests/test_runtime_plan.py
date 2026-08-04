@@ -5,6 +5,26 @@ from src import trader
 
 
 class RuntimePlanTests(unittest.TestCase):
+    def test_explicit_runtime_context_replaces_legacy_trader_aliases(self):
+        runtime = trader.TraderRuntimeContext.capture()
+        client_config = trader.build_kis_client_config(runtime=runtime)
+        capital = trader.operating_capital(runtime=runtime)
+
+        self.assertEqual(client_config.trading_env, runtime.flags.trading_env)
+        self.assertEqual(capital, int(runtime.settings.total_capital))
+        self.assertFalse(hasattr(trader, "TRADING_ENV"))
+        self.assertFalse(hasattr(trader, "TOTAL_CAPITAL"))
+
+    def test_buying_cash_uses_one_runtime_snapshot(self):
+        runtime = trader.TraderRuntimeContext.capture()
+        with patch.object(
+            trader.TraderRuntimeContext,
+            "capture",
+            return_value=runtime,
+        ) as capture:
+            trader.available_buying_cash(1_000_000, 0, 1_000_000)
+        capture.assert_called_once_with()
+
     def make_api(self, *, balance, daily=None, quote=None):
         api = Mock()
         api.get_balance.return_value = balance
@@ -255,7 +275,7 @@ class RuntimePlanTests(unittest.TestCase):
             patch("src.trader.slack_session_end"),
             patch("src.trader.check_daily_loss", return_value=False),
             patch("src.trader.daily_loss_halt_triggered", return_value=False),
-            patch("src.trader.TOTAL_CAPITAL", 100_000_000),
+            patch("src.trader.config.total_capital", 100_000_000),
             patch("src.trader.CASH_BUFFER", 0.20),
             patch("src.trader.generate_signal", return_value={
                 "action": "buy",
@@ -308,7 +328,7 @@ class RuntimePlanTests(unittest.TestCase):
         api = self.make_api(balance=balance)
 
         with (
-            patch("src.trader.TOTAL_CAPITAL", 100_000_000),
+            patch("src.trader.config.total_capital", 100_000_000),
             patch("src.trader.CASH_BUFFER", 0.20),
             patch("src.trader._sell_order_symbols_by_status", return_value={
                 "submitted": set(),
@@ -361,7 +381,7 @@ class RuntimePlanTests(unittest.TestCase):
         api = self.make_api(balance=balance)
 
         with (
-            patch("src.trader.TOTAL_CAPITAL", 100_000_000),
+            patch("src.trader.config.total_capital", 100_000_000),
             patch("src.trader.CASH_BUFFER", 0.20),
             patch("src.trader._sell_order_symbols_by_status", return_value={
                 "submitted": set(),

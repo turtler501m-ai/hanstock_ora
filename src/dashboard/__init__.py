@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from contextlib import asynccontextmanager
+
 from fastapi import HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
@@ -33,6 +35,18 @@ for route_module in [
     ai_stock,
 ]:
     app.include_router(route_module.router)
+
+
+@asynccontextmanager
+async def _dashboard_lifespan(_app):
+    settings.run_dashboard_startup_tasks()
+    try:
+        yield
+    finally:
+        settings._stop_kis_websocket()
+
+
+app.router.lifespan_context = _dashboard_lifespan
 
 
 @app.exception_handler(HTTPException)

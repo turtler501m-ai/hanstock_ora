@@ -7,6 +7,10 @@ silently falling back to configured capital.
 """
 from __future__ import annotations
 
+# Compatibility DI seam for callers injecting one repository that supplies
+# scan and execution reads; production implementations live in bounded modules.
+from src.db import ai_autonomy_repository as ai_stock_repository
+
 import math
 import statistics
 from dataclasses import dataclass
@@ -15,7 +19,7 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from src.ai_stock.market_data import MarketDataProvider, get_provider
 from src.config import config
-from src.db import ai_stock_repository
+
 from src.utils.logger import logger
 
 from .runtime import AutonomyRuntime, RuntimeConfigurationError, RuntimeResult

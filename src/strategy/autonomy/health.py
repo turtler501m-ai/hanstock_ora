@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from src.db.ai_stock_support import connect_ai_stock
+from src.db import strategy_repository
+
 import json
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping, Protocol
-
-from src.db import ai_stock_repository, strategy_repository
 
 from .lifecycle import StrategyHealth
 
@@ -75,7 +76,7 @@ class RepositoryHealthSource:
     """Aggregate only durable autonomy records, never in-memory counters."""
 
     def aggregate(self, strategy_id: str) -> Mapping[str, Any]:
-        with ai_stock_repository._connect() as conn:
+        with connect_ai_stock() as conn:
             decisions = conn.execute(
                 """
                 SELECT action, intent_payload, rejection_reason

@@ -11,6 +11,7 @@ $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONDONTWRITEBYTECODE = "1"
+$env:PYTHONWARNINGS = "error::ResourceWarning,default::DeprecationWarning"
 
 function Get-PythonPath {
     $venvPython = Join-Path (Resolve-Path ".") ".venv\Scripts\python.exe"
@@ -32,24 +33,36 @@ function Get-PythonPath {
 
 $python = Get-PythonPath
 
+function Invoke-Checked {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$Command,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Label failed with exit code $LASTEXITCODE"
+    }
+}
+
 Write-Host "verify-local profile: $Profile"
 
 if ($Profile -eq "all") {
-    powershell -ExecutionPolicy Bypass -File tools\check-encoding.ps1
+    Invoke-Checked { powershell -ExecutionPolicy Bypass -File tools\check-encoding.ps1 } "encoding check"
 }
 
-& $python -c "import pathlib; [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for root in ('src','tests') for p in pathlib.Path(root).rglob('*.py')]"
+Invoke-Checked { & $python -c "import pathlib; [compile(p.read_text(encoding='utf-8'), str(p), 'exec') for root in ('src','tests') for p in pathlib.Path(root).rglob('*.py')]" } "Python source compile"
+Invoke-Checked { & $python tools\verify-deploy-constraints.py } "deploy constraints verification"
 
 if ($Profile -eq "all") {
-    & $python -m py_compile tools\demo-trading-rehearsal.py
-    & $python tools\run-tests.py --profile all
-    & $python tools\demo-trading-rehearsal.py --no-db --allow-not-ready
+    Invoke-Checked { & $python -m py_compile tools\demo-trading-rehearsal.py } "demo rehearsal compile"
+    Invoke-Checked { & $python tools\run-tests.py --profile all } "all test profile"
+    Invoke-Checked { & $python tools\demo-trading-rehearsal.py --no-db --allow-not-ready } "demo trading rehearsal"
 } else {
-    & $python tools\run-tests.py --profile $Profile
+    Invoke-Checked { & $python tools\run-tests.py --profile $Profile } "$Profile test profile"
 }
 
-node --check web\static\js\app.js
-node --check web\static\js\futures_signals.js
-node --check web\static\js\env_settings.js
-node --check web\static\js\finrl.js
-node --check web\static\js\vendors.js
+Invoke-Checked { node --check web\static\js\app.js } "app.js syntax check"
+Invoke-Checked { node --check web\static\js\futures_signals.js } "futures_signals.js syntax check"
+Invoke-Checked { node --check web\static\js\env_settings.js } "env_settings.js syntax check"
+Invoke-Checked { node --check web\static\js\finrl.js } "finrl.js syntax check"
+Invoke-Checked { node --check web\static\js\vendors.js } "vendors.js syntax check"

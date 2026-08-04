@@ -3,7 +3,7 @@ import unittest
 import asyncio
 import json
 import math
-import sqlite3
+import sqlite3 as _sqlite3
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -14,6 +14,17 @@ from unittest.mock import patch
 import src.dashboard as dashboard
 import src.dashboard.core as dashboard_core
 from src.dashboard import _parse_balance, _portfolio_totals
+from src.db.connection import open_sqlite
+
+
+class _ClosingSqlite:
+    """Test-local SQLite facade whose context manager closes connections."""
+
+    Row = _sqlite3.Row
+    connect = staticmethod(open_sqlite)
+
+
+sqlite3 = _ClosingSqlite()
 
 
 class MemoryCachePath:
@@ -273,12 +284,11 @@ class DashboardCoreTests(unittest.TestCase):
         original_env_path = dashboard.ENV_PATH
         original_config = dashboard.trader.config.online_access_blocked
         original_runtime = dashboard.trader.ONLINE_ACCESS_BLOCKED
-        original_submission = dashboard.trader.ORDER_SUBMISSION_ENABLED
+        original_submission = dashboard.trader.runtime_flags().order_submission_enabled
         try:
             dashboard.ENV_PATH = MemoryTextPath("ONLINE_ACCESS_BLOCKED=false\n")
             dashboard.trader.config.online_access_blocked = False
             dashboard.trader.ONLINE_ACCESS_BLOCKED = False
-            dashboard.trader.ORDER_SUBMISSION_ENABLED = True
 
             with patch("src.dashboard.routes.settings._stop_kis_websocket") as stop_websocket:
                 result = dashboard.update_env_settings({
@@ -288,22 +298,21 @@ class DashboardCoreTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             self.assertTrue(dashboard.trader.config.online_access_blocked)
             self.assertTrue(dashboard.trader.ONLINE_ACCESS_BLOCKED)
-            self.assertFalse(dashboard.trader.ORDER_SUBMISSION_ENABLED)
+            self.assertFalse(dashboard.trader.runtime_flags().order_submission_enabled)
             self.assertIn("ONLINE_ACCESS_BLOCKED=true", dashboard.ENV_PATH.content)
             stop_websocket.assert_called_once()
         finally:
             dashboard.ENV_PATH = original_env_path
             dashboard.trader.config.online_access_blocked = original_config
             dashboard.trader.ONLINE_ACCESS_BLOCKED = original_runtime
-            dashboard.trader.ORDER_SUBMISSION_ENABLED = original_submission
 
     def test_runtime_order_mode_updates_apply_without_restart(self):
         original_env_path = dashboard.ENV_PATH
-        original_trading_env = dashboard.trader.TRADING_ENV
-        original_dry_run = dashboard.trader.DRY_RUN
-        original_enable_live = dashboard.trader.ENABLE_LIVE_TRADING
-        original_order_submission = dashboard.trader.ORDER_SUBMISSION_ENABLED
-        original_real_orders = dashboard.trader.REAL_ORDERS_ENABLED
+        original_trading_env = dashboard.trader.config.trading_env
+        original_dry_run = dashboard.trader.config.dry_run
+        original_enable_live = dashboard.trader.config.enable_live_trading
+        original_order_submission = dashboard.trader.runtime_flags().order_submission_enabled
+        original_real_orders = dashboard.trader.runtime_flags().real_orders_enabled
         original_config_values = {
             "trading_env": dashboard.trader.config.trading_env,
             "dry_run": dashboard.trader.config.dry_run,
@@ -312,11 +321,9 @@ class DashboardCoreTests(unittest.TestCase):
         try:
             path = MemoryTextPath("TRADING_ENV=demo\nDRY_RUN=true\nENABLE_LIVE_TRADING=false\n")
             dashboard.ENV_PATH = path
-            dashboard.trader.TRADING_ENV = "demo"
-            dashboard.trader.DRY_RUN = True
-            dashboard.trader.ENABLE_LIVE_TRADING = False
-            dashboard.trader.REAL_ORDERS_ENABLED = False
-            dashboard.trader.ORDER_SUBMISSION_ENABLED = False
+            dashboard.trader.config.trading_env = "demo"
+            dashboard.trader.config.dry_run = True
+            dashboard.trader.config.enable_live_trading = False
             dashboard.trader.config.trading_env = "demo"
             dashboard.trader.config.dry_run = True
             dashboard.trader.config.enable_live_trading = False
@@ -330,11 +337,9 @@ class DashboardCoreTests(unittest.TestCase):
                 dashboard.set_runtime_order_mode({"key": "REAL_ORDERS_ENABLED", "enabled": True})
         finally:
             dashboard.ENV_PATH = original_env_path
-            dashboard.trader.TRADING_ENV = original_trading_env
-            dashboard.trader.DRY_RUN = original_dry_run
-            dashboard.trader.ENABLE_LIVE_TRADING = original_enable_live
-            dashboard.trader.ORDER_SUBMISSION_ENABLED = original_order_submission
-            dashboard.trader.REAL_ORDERS_ENABLED = original_real_orders
+            dashboard.trader.config.trading_env = original_trading_env
+            dashboard.trader.config.dry_run = original_dry_run
+            dashboard.trader.config.enable_live_trading = original_enable_live
             dashboard.trader.config.trading_env = original_config_values["trading_env"]
             dashboard.trader.config.dry_run = original_config_values["dry_run"]
             dashboard.trader.config.enable_live_trading = original_config_values["enable_live_trading"]
@@ -416,20 +421,18 @@ class DashboardCoreTests(unittest.TestCase):
 
     def test_demo_trading_readiness_requires_demo_submission_without_live_switch(self):
         original_values = {
-            "trading_env": dashboard.trader.TRADING_ENV,
-            "dry_run": dashboard.trader.DRY_RUN,
-            "enable_live_trading": dashboard.trader.ENABLE_LIVE_TRADING,
-            "order_submission_enabled": dashboard.trader.ORDER_SUBMISSION_ENABLED,
-            "real_orders_enabled": dashboard.trader.REAL_ORDERS_ENABLED,
+            "trading_env": dashboard.trader.config.trading_env,
+            "dry_run": dashboard.trader.config.dry_run,
+            "enable_live_trading": dashboard.trader.config.enable_live_trading,
+            "order_submission_enabled": dashboard.trader.runtime_flags().order_submission_enabled,
+            "real_orders_enabled": dashboard.trader.runtime_flags().real_orders_enabled,
             "account": dashboard.trader.config.kistock_account,
         }
         original_required_env_missing = dashboard._required_env_missing
         try:
-            dashboard.trader.TRADING_ENV = "demo"
-            dashboard.trader.DRY_RUN = False
-            dashboard.trader.ENABLE_LIVE_TRADING = False
-            dashboard.trader.ORDER_SUBMISSION_ENABLED = True
-            dashboard.trader.REAL_ORDERS_ENABLED = False
+            dashboard.trader.config.trading_env = "demo"
+            dashboard.trader.config.dry_run = False
+            dashboard.trader.config.enable_live_trading = False
             dashboard.trader.config.kistock_account = "1234567801"
             dashboard._required_env_missing = lambda: []
 
@@ -439,17 +442,15 @@ class DashboardCoreTests(unittest.TestCase):
             self.assertTrue(all(check["ok"] for check in readiness["checks"] if check["critical"]))
             self.assertFalse(readiness["real_orders_enabled"])
         finally:
-            dashboard.trader.TRADING_ENV = original_values["trading_env"]
-            dashboard.trader.DRY_RUN = original_values["dry_run"]
-            dashboard.trader.ENABLE_LIVE_TRADING = original_values["enable_live_trading"]
-            dashboard.trader.ORDER_SUBMISSION_ENABLED = original_values["order_submission_enabled"]
-            dashboard.trader.REAL_ORDERS_ENABLED = original_values["real_orders_enabled"]
+            dashboard.trader.config.trading_env = original_values["trading_env"]
+            dashboard.trader.config.dry_run = original_values["dry_run"]
+            dashboard.trader.config.enable_live_trading = original_values["enable_live_trading"]
             dashboard.trader.config.kistock_account = original_values["account"]
             dashboard._required_env_missing = original_required_env_missing
 
     def test_env_update_applies_strategy_settings_without_restart(self):
         original_env_path = dashboard.ENV_PATH
-        original_total_capital = dashboard.trader.TOTAL_CAPITAL
+        original_total_capital = dashboard.trader.config.total_capital
         original_max_single_weight = dashboard.trader.MAX_SINGLE_WEIGHT
         original_config_total_capital = dashboard.trader.config.total_capital
         original_account_initial_capital = dashboard.trader.config.account_initial_capital
@@ -467,7 +468,7 @@ class DashboardCoreTests(unittest.TestCase):
             })
 
             self.assertFalse(result["requires_restart"])
-            self.assertEqual(dashboard.trader.TOTAL_CAPITAL, 12000000.0)
+            self.assertEqual(dashboard.trader.config.total_capital, 12000000.0)
             self.assertEqual(dashboard.trader.config.total_capital, 12000000.0)
             self.assertEqual(dashboard.trader.config.account_initial_capital, 500000000.0)
             self.assertEqual(dashboard.trader.MAX_SINGLE_WEIGHT, 0.25)
@@ -477,7 +478,7 @@ class DashboardCoreTests(unittest.TestCase):
             self.assertIn("MAX_SINGLE_WEIGHT=0.25", path.content)
         finally:
             dashboard.ENV_PATH = original_env_path
-            dashboard.trader.TOTAL_CAPITAL = original_total_capital
+            dashboard.trader.config.total_capital = original_total_capital
             dashboard.trader.MAX_SINGLE_WEIGHT = original_max_single_weight
             dashboard.trader.config.total_capital = original_config_total_capital
             dashboard.trader.config.account_initial_capital = original_account_initial_capital
@@ -815,8 +816,8 @@ class DashboardCoreTests(unittest.TestCase):
         original_get_api = dashboard._get_api
         original_save_trade = dashboard.trader.save_trade
         original_slack_order = dashboard._slack_order
-        original_dry_run = dashboard.trader.DRY_RUN
-        original_order_submission = dashboard.trader.ORDER_SUBMISSION_ENABLED
+        original_dry_run = dashboard.trader.config.dry_run
+        original_order_submission = dashboard.trader.runtime_flags().order_submission_enabled
 
         class _FakeAPI:
             def place_order(self, symbol, order_type, price, qty):
@@ -829,8 +830,7 @@ class DashboardCoreTests(unittest.TestCase):
                 dashboard._get_api = lambda: _FakeAPI()
                 dashboard.trader.save_trade = lambda *args, **kwargs: None
                 dashboard._slack_order = lambda *args, **kwargs: None
-                dashboard.trader.DRY_RUN = True
-                dashboard.trader.ORDER_SUBMISSION_ENABLED = False
+                dashboard.trader.config.dry_run = True
 
                 created = dashboard.create_approval({
                     "symbol": "005930",
@@ -855,17 +855,16 @@ class DashboardCoreTests(unittest.TestCase):
             dashboard._get_api = original_get_api
             dashboard.trader.save_trade = original_save_trade
             dashboard._slack_order = original_slack_order
-            dashboard.trader.DRY_RUN = original_dry_run
-            dashboard.trader.ORDER_SUBMISSION_ENABLED = original_order_submission
+            dashboard.trader.config.dry_run = original_dry_run
 
     def test_approval_execution_is_claimed_once_and_records_broker_result(self):
         original_db_path = dashboard.trader.config.trade_db_path
         original_get_api = dashboard._get_api
         original_slack_order = dashboard._slack_order
         original_auto_approval_state = dashboard.AUTO_APPROVAL_STATE
-        original_dry_run = dashboard.trader.DRY_RUN
-        original_trading_env = dashboard.trader.TRADING_ENV
-        original_order_submission = dashboard.trader.ORDER_SUBMISSION_ENABLED
+        original_dry_run = dashboard.trader.config.dry_run
+        original_trading_env = dashboard.trader.config.trading_env
+        original_order_submission = dashboard.trader.runtime_flags().order_submission_enabled
 
         class _FakeAPI:
             def __init__(self):
@@ -884,9 +883,8 @@ class DashboardCoreTests(unittest.TestCase):
                 dashboard.AUTO_APPROVAL_STATE = MemoryCachePath()
                 dashboard._get_api = lambda: fake_api
                 dashboard._slack_order = lambda *args, **kwargs: None
-                dashboard.trader.DRY_RUN = False
-                dashboard.trader.TRADING_ENV = "demo"
-                dashboard.trader.ORDER_SUBMISSION_ENABLED = True
+                dashboard.trader.config.dry_run = False
+                dashboard.trader.config.trading_env = "demo"
 
                 created = dashboard.create_approval({
                     "symbol": "005930",
@@ -919,9 +917,8 @@ class DashboardCoreTests(unittest.TestCase):
             dashboard._get_api = original_get_api
             dashboard._slack_order = original_slack_order
             dashboard.AUTO_APPROVAL_STATE = original_auto_approval_state
-            dashboard.trader.DRY_RUN = original_dry_run
-            dashboard.trader.TRADING_ENV = original_trading_env
-            dashboard.trader.ORDER_SUBMISSION_ENABLED = original_order_submission
+            dashboard.trader.config.dry_run = original_dry_run
+            dashboard.trader.config.trading_env = original_trading_env
 
     def test_get_approvals_reclaims_stale_executing_orders(self):
         original_db_path = dashboard.trader.config.trade_db_path
@@ -1373,7 +1370,7 @@ class DashboardCoreTests(unittest.TestCase):
 
     def test_order_status_sync_marks_submitted_demo_order_filled(self):
         original_db_path = dashboard.trader.config.trade_db_path
-        original_dry_run = dashboard.trader.DRY_RUN
+        original_dry_run = dashboard.trader.config.dry_run
 
         class _FakeAPI:
             def get_trade_history(self, start_date, end_date):
@@ -1387,7 +1384,7 @@ class DashboardCoreTests(unittest.TestCase):
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
                 db_path = f"{tmpdir}/trades.sqlite"
                 dashboard.trader.config.trade_db_path = db_path
-                dashboard.trader.DRY_RUN = False
+                dashboard.trader.config.dry_run = False
                 dashboard.trader.save_trade(
                     "005930",
                     "Samsung",
@@ -1415,11 +1412,11 @@ class DashboardCoreTests(unittest.TestCase):
                 self.assertEqual(row["filled_price"], 70100)
         finally:
             dashboard.trader.config.trade_db_path = original_db_path
-            dashboard.trader.DRY_RUN = original_dry_run
+            dashboard.trader.config.dry_run = original_dry_run
 
     def test_order_status_sync_does_not_match_reused_order_id_for_other_symbol(self):
         original_db_path = dashboard.trader.config.trade_db_path
-        original_dry_run = dashboard.trader.DRY_RUN
+        original_dry_run = dashboard.trader.config.dry_run
 
         class _FakeAPI:
             def get_trade_history(self, start_date, end_date):
@@ -1437,7 +1434,7 @@ class DashboardCoreTests(unittest.TestCase):
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
                 db_path = f"{tmpdir}/trades.sqlite"
                 dashboard.trader.config.trade_db_path = db_path
-                dashboard.trader.DRY_RUN = False
+                dashboard.trader.config.dry_run = False
                 dashboard.trader.save_trade(
                     "005930",
                     "Samsung",
@@ -1465,7 +1462,7 @@ class DashboardCoreTests(unittest.TestCase):
                 self.assertEqual(row["filled_price"], 0)
         finally:
             dashboard.trader.config.trade_db_path = original_db_path
-            dashboard.trader.DRY_RUN = original_dry_run
+            dashboard.trader.config.dry_run = original_dry_run
 
     def test_order_status_sync_cancels_unmatched_sell_without_balance_reservation(self):
         original_db_path = dashboard.trader.config.trade_db_path
@@ -1567,7 +1564,7 @@ class DashboardCoreTests(unittest.TestCase):
 
     def test_order_status_sync_falls_back_to_balance_when_history_fails(self):
         original_db_path = dashboard.trader.config.trade_db_path
-        original_dry_run = dashboard.trader.DRY_RUN
+        original_dry_run = dashboard.trader.config.dry_run
         original_get_balance_data = dashboard._get_balance_data
 
         class _FakeAPI:
@@ -1578,7 +1575,7 @@ class DashboardCoreTests(unittest.TestCase):
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
                 db_path = f"{tmpdir}/trades.sqlite"
                 dashboard.trader.config.trade_db_path = db_path
-                dashboard.trader.DRY_RUN = False
+                dashboard.trader.config.dry_run = False
                 dashboard._get_balance_data = lambda api, allow_cache=False: {
                     "output1": [
                         {
@@ -1620,7 +1617,7 @@ class DashboardCoreTests(unittest.TestCase):
                 self.assertEqual(row["filled_price"], 70200)
         finally:
             dashboard.trader.config.trade_db_path = original_db_path
-            dashboard.trader.DRY_RUN = original_dry_run
+            dashboard.trader.config.dry_run = original_dry_run
             dashboard._get_balance_data = original_get_balance_data
 
     def test_filled_trade_history_sync_imports_lookback_rows(self):
@@ -1741,7 +1738,7 @@ class DashboardCoreTests(unittest.TestCase):
         original_get_balance_data = stock_routes._get_balance_data
         original_fetch_cloud_trades = stock_routes.fetch_cloud_trades
         original_clear_balance_cache = stock_routes._clear_balance_cache
-        original_dry_run = stock_routes.trader.DRY_RUN
+        original_dry_run = stock_routes.trader.config.dry_run
 
         class _FakeAPI:
             def get_trade_history(self, start_date, end_date):
@@ -1767,7 +1764,7 @@ class DashboardCoreTests(unittest.TestCase):
                 }
                 stock_routes.fetch_cloud_trades = lambda: []
                 stock_routes._clear_balance_cache = lambda: None
-                stock_routes.trader.DRY_RUN = False
+                stock_routes.trader.config.dry_run = False
 
                 result = stock_routes._execute_trade_sync(
                     days=1,
@@ -1789,7 +1786,7 @@ class DashboardCoreTests(unittest.TestCase):
             stock_routes._get_balance_data = original_get_balance_data
             stock_routes.fetch_cloud_trades = original_fetch_cloud_trades
             stock_routes._clear_balance_cache = original_clear_balance_cache
-            stock_routes.trader.DRY_RUN = original_dry_run
+            stock_routes.trader.config.dry_run = original_dry_run
 
     def test_broker_sync_removes_only_local_mismatch_rows(self):
         import src.dashboard.routes.stock as stock_routes
@@ -1844,7 +1841,7 @@ class DashboardCoreTests(unittest.TestCase):
         original_get_balance_data = stock_routes._get_balance_data
         original_fetch_cloud_trades = stock_routes.fetch_cloud_trades
         original_clear_balance_cache = stock_routes._clear_balance_cache
-        original_dry_run = stock_routes.trader.DRY_RUN
+        original_dry_run = stock_routes.trader.config.dry_run
         try:
             with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
                 dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
@@ -1869,7 +1866,7 @@ class DashboardCoreTests(unittest.TestCase):
                 }
                 stock_routes.fetch_cloud_trades = lambda: []
                 stock_routes._clear_balance_cache = lambda: None
-                stock_routes.trader.DRY_RUN = False
+                stock_routes.trader.config.dry_run = False
 
                 result = stock_routes._execute_trade_sync(
                     days=1,
@@ -1889,7 +1886,7 @@ class DashboardCoreTests(unittest.TestCase):
             stock_routes._get_balance_data = original_get_balance_data
             stock_routes.fetch_cloud_trades = original_fetch_cloud_trades
             stock_routes._clear_balance_cache = original_clear_balance_cache
-            stock_routes.trader.DRY_RUN = original_dry_run
+            stock_routes.trader.config.dry_run = original_dry_run
 
     def test_trade_sync_status_persists_runs_in_database(self):
         import src.dashboard.routes.stock as stock_routes
@@ -2626,9 +2623,9 @@ class DashboardCoreTests(unittest.TestCase):
         self.assertEqual(saved[-1]["symbols"], ["005930", "000660", "035420"])
 
     def test_candidate_orders_use_scan_price_without_quote_lookup(self):
-        original_max_positions = dashboard.trader.MAX_POSITIONS
+        original_max_positions = dashboard.trader.config.max_positions
         try:
-            dashboard.trader.MAX_POSITIONS = 1
+            dashboard.trader.config.max_positions = 1
             orders = dashboard._build_candidate_orders_from_scan(
                 [
                     {"ticker": "005930", "current_price": 70003, "score": 2, "reasons": ["test"]},
@@ -2642,7 +2639,7 @@ class DashboardCoreTests(unittest.TestCase):
             self.assertEqual(orders[0]["limit_price"], 70000)
             self.assertLessEqual(orders[0]["estimated_cost"], 1_000_000)
         finally:
-            dashboard.trader.MAX_POSITIONS = original_max_positions
+            dashboard.trader.config.max_positions = original_max_positions
 
 
 if __name__ == "__main__":

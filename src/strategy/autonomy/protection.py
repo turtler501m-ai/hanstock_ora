@@ -7,10 +7,14 @@ a global blocker for new risk-increasing orders.
 
 from __future__ import annotations
 
+from src.db import ai_execution_repository as execution_repository
+from src.db import ai_risk_repository as risk_repository
+# Compatibility DI seam for the legacy combined execution/risk repository protocol.
+from src.db import ai_autonomy_repository as repository
+
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping, Protocol
 
-from src.db import ai_stock_repository as repository
 
 
 @dataclass(frozen=True)
