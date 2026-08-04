@@ -1,50 +1,27 @@
 # Repository Guidelines
 
-## Project Structure
+## Project Structure & Module Organization
 
-This is a Python trading and dashboard project.
+Hanstock is a Python trading platform with FastAPI dashboards and an Android client.
 
-- `src/`: application code
-- `src/api/`: KIS, KIS futures, QuantConnect API clients
-- `src/db/`: persistence helpers
-- `src/futures_signals/`: Telegram futures signal collection, parsing, verification, execution
-- `src/notifier/`: notification helpers
-- `src/strategy/`: trading strategy, indicators, risk, allocation
-- `src/utils/`: shared utilities
-- `web/templates/`: dashboard templates
-- `web/static/`: CSS and JavaScript
-- `tests/`: unittest test suite
-- `config/`: non-secret checked-in configuration such as Telegram channel definitions
-- `src/integrations/`: external platform artifacts such as QuantConnect algorithms
-- `tools/`: local verification and utility scripts
-- `scripts/local/`: Windows local development scripts
-- `scripts/vm/`: VM/Linux operation scripts
-- `doc/S1.한스톡사용설명서.md`: consolidated project manual
+- `src/`: application code and entry points (`dashboard.py`, `trader.py`)
+- `src/api/`: KIS, futures, Bybit, LS, and QuantConnect clients
+- `src/dashboard/`: dashboard routes, services, and presenters
+- `src/db/`: bounded persistence repositories and migrations
+- `src/strategy/`, `src/ai_stock/`, `src/futures_signals/`: trading and analysis domains
+- `web/templates/`, `web/static/`: server-rendered pages, CSS, and JavaScript
+- `android/`: Gradle-based Android client
+- `tests/`: Python `unittest` suite
+- `config/`: checked-in, non-secret configuration
+- `scripts/local/`, `scripts/vm/`: Windows development and Linux VM operations
+- `tools/`: verification and maintenance utilities
+- `doc/`: project manuals and technical notes
 
-Main entry points:
+Put generated state only in `.runtime/`, `logs/`, or `data/`. Keep application code, tests, and web assets free of runtime output.
 
-- Dashboard: `src/dashboard.py`
-- Trading engine: `src/trader.py`
-- Local server: `scripts/local/server.cmd`
-- VM server: `scripts/vm/server.sh`
+## Build, Test, and Development Commands
 
-Runtime artifacts belong in `.runtime/`, `logs/`, or `data/`. Do not place generated runtime files under `src/`, `web/`, or `tests/`.
-
-Placement rules:
-
-- New application code goes under `src/`.
-- API clients go under `src/api/`.
-- External platform integrations go under `src/integrations/` unless a more specific existing package owns them.
-- Checked-in non-secret configuration goes under `config/`.
-- Local Windows scripts go under `scripts/local/`.
-- VM/Linux scripts go under `scripts/vm/`.
-- Verification and maintenance tools go under `tools/`.
-- Documentation is consolidated in `doc/S1.한스톡사용설명서.md`.
-- Do not commit personal IDE settings; `.vscode/` is ignored.
-
-## Local Development
-
-Set up a local environment:
+Create a local environment:
 
 ```powershell
 python -m venv .venv
@@ -53,124 +30,30 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Run the dashboard locally:
+Run or inspect the dashboard with `scripts\local\server.cmd restart|status|logs|tail`; open `http://127.0.0.1:8000`. Run the engine directly with `python src\trader.py`.
 
-```powershell
-.\scripts\local\server.cmd restart
-```
-
-Inspect the local server:
-
-```powershell
-.\scripts\local\server.cmd status
-.\scripts\local\server.cmd logs
-.\scripts\local\server.cmd tail
-```
-
-Open:
-
-```text
-http://127.0.0.1:8000
-```
-
-Run the trading engine directly:
-
-```powershell
-python src\trader.py
-```
-
-## VM Operation
-
-VM code should be updated from Git, not edited directly on the VM.
-
-Deploy/update from local:
-
-```powershell
-.\scripts\local\deploy-vm.ps1
-```
-
-Recreate the VM project folder from a fresh clone:
-
-```powershell
-.\scripts\local\deploy-vm.ps1 -FreshClone
-```
-
-Open SSH to the VM:
-
-```powershell
-.\scripts\local\connect-vm.ps1
-```
-
-Run directly on the VM:
-
-```bash
-./scripts/vm/update.sh main
-./scripts/vm/server.sh restart
-./scripts/vm/server.sh status
-```
-
-## Testing
-
-Run local verification before committing changes that affect trading logic, dashboard routes, persistence, configuration, or deployment scripts:
+Before committing significant changes, run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\verify-local.ps1
 python -m unittest discover -s tests
-```
-
-For encoding checks:
-
-```powershell
 powershell -ExecutionPolicy Bypass -File tools\check-encoding.ps1
 ```
 
-Tests use `test_*.py` naming under `tests/`. Prefer deterministic tests with mocked KIS, Telegram, Slack, QuantConnect, Bybit, and network responses.
+Deploy from a clean local branch with `scripts\local\deploy-vm.ps1`. Do not edit VM source directly.
 
-## Coding Style
+## Coding Style & Naming Conventions
 
-Follow `.editorconfig`: UTF-8, LF endings, final newline, and trimmed trailing whitespace for code and text files.
+Follow `.editorconfig`: UTF-8, LF endings, final newline, and no trailing whitespace. Use four-space Python indentation. Name modules and functions `snake_case`, classes `PascalCase`, and constants/environment variables `UPPER_SNAKE_CASE`. Keep API, database, dashboard, and strategy logic in their existing bounded packages. Do not hardcode credentials or account identifiers.
 
-Use:
+## Testing Guidelines
 
-- Python modules/functions: `snake_case`
-- Classes: `PascalCase`
-- Constants and environment variables: `UPPER_SNAKE_CASE`
+Use deterministic `unittest` tests named `test_*.py`. Mock KIS, Telegram, Slack, OpenAI, QuantConnect, Bybit, and other network calls. Add regression coverage for trading logic, routes, persistence, configuration, and deployment behavior. There is no fixed coverage threshold; changed behavior must be exercised.
 
-Keep configuration in `.env`, `.env.example`, and `src/config.py`. Do not hardcode credentials, account identifiers, tokens, or VM-specific secrets.
+## Commit & Pull Request Guidelines
 
-## Git Workflow
+Recent history uses short, behavior-focused Korean subjects, for example `전략조회 완료 팝업 제거`; concise English is also acceptable. Keep commits scoped and exclude unrelated local changes. Pull requests should explain behavior and risk, list verification commands, link relevant issues, and include screenshots for dashboard or Android UI changes.
 
-Use short, behavior-focused Korean or English commit subjects.
+## Security & Trading Safety
 
-Before commit:
-
-```powershell
-git status
-python -m unittest discover -s tests
-```
-
-Do not include unrelated local changes in a cleanup or infrastructure commit. If dashboard UI files are already modified for another task, leave them unstaged unless the current task explicitly includes them.
-
-## Security
-
-Treat live trading as guarded behavior. Keep these defaults unless intentionally testing live execution:
-
-```text
-DRY_RUN=true
-TRADING_ENV=demo
-ENABLE_LIVE_TRADING=false
-REQUIRE_APPROVAL=true
-```
-
-Never commit:
-
-- `.env`
-- API keys, app secrets, account numbers, tokens
-- Telegram session files
-- local databases
-- logs
-- `.runtime/`
-- `data/*.db`
-- `data/*.sqlite`
-
-VM `.env` and local `.env` are separate operational files. Do not copy secrets into the repository.
+Default to `DRY_RUN=true`, `TRADING_ENV=demo`, `ENABLE_LIVE_TRADING=false`, and `REQUIRE_APPROVAL=true`. Never commit `.env`, keys, tokens, account numbers, Telegram sessions, databases, logs, or `.runtime/`. Local and VM `.env` files are separate operational secrets.
