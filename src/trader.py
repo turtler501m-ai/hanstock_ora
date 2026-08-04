@@ -37,7 +37,7 @@ from src.execution_plan import (
     candidate_order_to_plan_row,
     build_execution_plan,
 )
-from src.strategy_ids import ISOLATED_STOCK_STRATEGY_IDS
+from src.strategy_ids import AI_REBALANCE_STRATEGY_ID, ISOLATED_STOCK_STRATEGY_IDS
 
 KST = timezone(timedelta(hours=9))
 
@@ -925,6 +925,7 @@ def build_ai_rebalance_rows(api, balance_data: dict, total_eval: int) -> list[di
                 "delta_value": position.get("delta_value", 0),
                 "ai_active": bool(ai_plan.get("ai_active")),
             },
+            strategy_id=AI_REBALANCE_STRATEGY_ID,
         ).to_dict())
     return rows
 

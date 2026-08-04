@@ -3122,7 +3122,7 @@ def _load_merged_trades() -> list[dict]:
         ts_norm = str(ts).replace("T", " ").split(".")[0].strip()
         broker_order_id = str(t.get("broker_order_id") or "").strip()
         source_approval_id = str(t.get("source_approval_id") or "").strip()
-        strategy_id = str(t.get("strategy_id") or "").strip()
+        strategy_id = _resolved_trade_strategy_id(t)
         trade_env = str(t.get("env") or "demo")
         if broker_order_id:
             key = f"broker:{trade_env}:{ts_norm[:10]}:{broker_order_id}:{t.get('action')}"
@@ -3151,7 +3151,7 @@ def _load_merged_trades() -> list[dict]:
             "filled_qty": _to_int(t.get("filled_qty")),
             "filled_price": _to_int(t.get("filled_price")),
             "response_msg": t.get("response_msg", ""),
-            "strategy_id": t.get("strategy_id") or "",
+            "strategy_id": strategy_id,
             "strategy_version": t.get("strategy_version"),
             "profile_hash": t.get("profile_hash") or "",
             "source_approval_id": t.get("source_approval_id"),
@@ -3161,6 +3161,18 @@ def _load_merged_trades() -> list[dict]:
             "cost_source": t.get("cost_source") or "unavailable",
         }
     return sorted(merged_trades.values(), key=lambda x: x["ts"])
+
+
+def _resolved_trade_strategy_id(trade: dict) -> str:
+    """Recover attribution only when the recorded execution source is unambiguous."""
+    strategy_id = str(trade.get("strategy_id") or "").strip()
+    if strategy_id:
+        return strategy_id
+    if str(trade.get("reason") or "").strip().startswith("AI rebalance "):
+        from src.strategy_ids import AI_REBALANCE_STRATEGY_ID
+
+        return AI_REBALANCE_STRATEGY_ID
+    return ""
 
 
 def _trade_is_ok(trade: dict) -> bool:
@@ -3258,6 +3270,7 @@ def _strategy_label(strategy_id: str) -> str:
     except Exception:
         pass
     defaults = {
+        "ai_rebalance": "AI 자산배분 리밸런싱",
         "seven_split": "7분할 매매",
         "volatility_breakout": "변동성 돌파",
         "rsi_limit_strategy": "RSI 지정가",
@@ -3541,6 +3554,7 @@ def _build_forward_strategy_performance(
     )
     current_account_key = account_scope_key()
     for row in results:
+        row["strategy_name"] = _strategy_label(row["strategy_id"])
         issues = row.setdefault("quality_issues", [])
         strategy_trade_rows = [
             trade for trade in account_trades

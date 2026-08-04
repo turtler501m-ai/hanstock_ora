@@ -292,6 +292,7 @@ class TraderCoreTests(unittest.TestCase):
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["category"], "ai_rebalance")
+        self.assertEqual(rows[0]["strategy_id"], "ai_rebalance")
         self.assertEqual(rows[0]["action"], "sell")
         self.assertEqual(rows[0]["qty"], 2)
 

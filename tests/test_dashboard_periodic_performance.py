@@ -8,7 +8,11 @@ from src.dashboard import (
     _period_bucket,
     trader,
 )
-from src.dashboard.core import _INDEX_SYMBOL_ALIASES, _safe_index_rows
+from src.dashboard.core import (
+    _INDEX_SYMBOL_ALIASES,
+    _resolved_trade_strategy_id,
+    _safe_index_rows,
+)
 
 
 class DashboardPeriodicPerformanceTests(unittest.TestCase):
@@ -17,6 +21,13 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
         self.assertNotIn("229200", _INDEX_SYMBOL_ALIASES["KOSDAQ"])
         self.assertEqual(_INDEX_SYMBOL_ALIASES["KOSPI"][0], "^KS11")
         self.assertEqual(_INDEX_SYMBOL_ALIASES["KOSDAQ"][0], "^KQ11")
+
+    def test_legacy_ai_rebalance_trade_recovers_strategy_attribution(self):
+        self.assertEqual(
+            _resolved_trade_strategy_id({"reason": "AI rebalance 3.0% -> 5.0%"}),
+            "ai_rebalance",
+        )
+        self.assertEqual(_resolved_trade_strategy_id({"reason": "manual order"}), "")
 
     def test_kis_benchmark_move_preserves_consecutive_sessions(self):
         rows = _safe_index_rows([

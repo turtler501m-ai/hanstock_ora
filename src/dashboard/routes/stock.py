@@ -3157,11 +3157,13 @@ def update_forward_performance_review(
 ):
     from src.db.performance_repository import save_strategy_performance_review
     from src.db.strategy_repository import load_ai_strategies
+    from src.strategy_ids import AI_REBALANCE_STRATEGY_ID
 
     try:
         known_ids = {
             str(item.get("id")) for item in load_ai_strategies() if item.get("id")
         }
+        known_ids.add(AI_REBALANCE_STRATEGY_ID)
         if strategy_id not in known_ids and strategy_id != "unattributed":
             raise ValueError(f"strategy not found: {strategy_id}")
         review = save_strategy_performance_review(
