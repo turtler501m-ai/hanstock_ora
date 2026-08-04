@@ -3322,10 +3322,9 @@ _INDEX_SYMBOL_ALIASES = {
 _KIS_INDEX_CODES = {"KOSPI": "0001", "KOSDAQ": "1001"}
 
 
-def _safe_index_rows(rows: list[dict], max_daily_change_pct: float = 12.0) -> list[dict]:
-    """Discard invalid or implausible benchmark observations."""
+def _safe_index_rows(rows: list[dict]) -> list[dict]:
+    """Normalize benchmark observations without breaking the trading-day chain."""
     result: list[dict] = []
-    previous = None
     for row in sorted(rows, key=lambda item: str(item.get("date") or "")):
         try:
             close = float(row.get("close") or 0)
@@ -3334,11 +3333,7 @@ def _safe_index_rows(rows: list[dict], max_daily_change_pct: float = 12.0) -> li
         date = str(row.get("date") or "")[:10]
         if len(date) != 10 or close <= 0:
             continue
-        if previous and abs(close / previous - 1) * 100 > max_daily_change_pct:
-            logger.warning(f"Rejected abnormal benchmark close date={date} close={close}")
-            continue
         result.append({"date": date, "close": close})
-        previous = close
     return result
 
 

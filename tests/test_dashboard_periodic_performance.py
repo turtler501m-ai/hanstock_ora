@@ -18,13 +18,13 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
         self.assertEqual(_INDEX_SYMBOL_ALIASES["KOSPI"][0], "^KS11")
         self.assertEqual(_INDEX_SYMBOL_ALIASES["KOSDAQ"][0], "^KQ11")
 
-    def test_abnormal_benchmark_move_is_rejected(self):
+    def test_kis_benchmark_move_preserves_consecutive_sessions(self):
         rows = _safe_index_rows([
-            {"date": "2026-07-30", "close": 5593.56},
             {"date": "2026-07-31", "close": 6595.45},
+            {"date": "2026-08-03", "close": 6257.45},
         ])
 
-        self.assertEqual(rows, [{"date": "2026-07-30", "close": 5593.56}])
+        self.assertEqual(len(rows), 2)
 
     def setUp(self) -> None:
         self.original_dry_run = trader.DRY_RUN
