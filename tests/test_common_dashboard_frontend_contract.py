@@ -67,6 +67,8 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("strategy-review-decision", APP_JS)
         self.assertIn("자동매매 상태는 변경되지 않았습니다", APP_JS)
         self.assertIn("Forward performance render failed", APP_JS)
+        self.assertIn("qualitySummary", APP_JS)
+        self.assertIn('title="${escapeHtml(qualityDetail)}"', APP_JS)
         self.assertIn("거래비용과 계좌 입출금이 확인되지 않은 결과는 추정치", INDEX_HTML)
 
     def test_trade_sync_result_lists_every_processed_item(self):

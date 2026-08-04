@@ -4357,6 +4357,10 @@ function renderStrategyForwardPerformance(items) {
             ...(quality.blocking_issues || []), ...(quality.warnings || []),
             ...(item.quality_issues || []),
         ])];
+        const qualityDetail = qualityIssues
+            .map((code) => qualityLabels[code] || code)
+            .join(', ');
+        const qualitySummary = qualityIssues.length ? `문제 ${qualityIssues.length}건` : '이상 없음';
         return `
             <tr>
                 <td><strong>${escapeHtml(item.strategy_name || item.strategy_id)}</strong><div class="time-muted">${escapeHtml(item.strategy_id || '')}</div></td>
@@ -4367,7 +4371,7 @@ function renderStrategyForwardPerformance(items) {
                 <td>${formatOptionalPercent(kospiReturn)}</td>
                 <td>${formatOptionalPercent(kosdaqReturn)}</td>
                 <td class="${Number(excess) > 0 ? 'text-success' : Number(excess) < 0 ? 'text-danger' : ''}">${formatOptionalPercent(excess)}<div class="time-muted">KOSPI 대비</div></td>
-                <td>${pill(qualityText, quality.status === 'blocked' ? 'sell' : 'hold')}<div class="time-muted">${escapeHtml(navText)}</div><small class="strategy-validation-reason">${escapeHtml(qualityIssues.map((code) => qualityLabels[code] || code).join(', '))}</small></td>
+                <td class="strategy-quality-cell">${pill(qualityText, quality.status === 'blocked' ? 'sell' : 'hold')}<span class="strategy-validation-reason" title="${escapeHtml(qualityDetail)}">${escapeHtml(qualitySummary)}</span><div class="time-muted strategy-nav-summary">${escapeHtml(navText)}</div></td>
                 <td>${isAccount ? '<span class="time-muted">계좌 전체</span>' : `<select class="strategy-review-decision" data-id="${escapeHtml(item.strategy_id)}">
                     ${Object.entries(decisionLabels).map(([value, label]) => `<option value="${value}" ${item.review_decision === value ? 'selected' : ''}>${label}</option>`).join('')}
                 </select>`}</td>

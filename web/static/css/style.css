@@ -1804,10 +1804,26 @@ tbody tr:hover {
 }
 
 .strategy-validation-reason {
-    display: block;
-    margin-top: 0.2rem;
+    display: inline-block;
+    margin-left: 0.35rem;
     color: var(--text-muted);
     font-size: 0.75rem;
+    white-space: nowrap;
+    cursor: help;
+}
+
+#table-strategy-validation tbody td {
+    vertical-align: middle;
+}
+
+.strategy-quality-cell {
+    min-width: 150px;
+    white-space: nowrap;
+}
+
+.strategy-nav-summary {
+    margin-top: 0.2rem;
+    white-space: nowrap;
 }
 
 .trade-sync-result-details {
