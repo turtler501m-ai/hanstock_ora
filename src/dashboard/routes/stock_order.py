@@ -2,14 +2,21 @@
 
 import functools
 import inspect
+import threading
 
 from fastapi import APIRouter
 from src.dashboard.routes import stock as _stock
+
+_ROUTE_OWNED_STATE = {
+    "_trade_sync_lock",
+    "_trade_sync_thread",
+}
 
 def _refresh_legacy_dependencies() -> None:
     globals().update({
         name: value for name, value in vars(_stock).items()
         if name not in {"router", "_refresh_legacy_dependencies", "_CompatRouter", "_stock"}
+        and name not in _ROUTE_OWNED_STATE
         and not name.startswith("__")
     })
 
@@ -35,6 +42,8 @@ class _CompatRouter(APIRouter):
 
 _refresh_legacy_dependencies()
 router = _CompatRouter(tags=["stock", "stock-order"])
+_trade_sync_lock = threading.Lock()
+_trade_sync_thread: threading.Thread | None = None
 
 @router.get("/api/approvals")
 def get_approvals(limit: int = 50, strategy_id: str | None = None):
