@@ -3257,7 +3257,7 @@ def _period_bucket() -> dict:
 def _strategy_label(strategy_id: str) -> str:
     strategy_id = str(strategy_id or "").strip()
     if not strategy_id or strategy_id == "unattributed":
-        return "전략 미기록"
+        return "수동/출처 미확인"
     try:
         from src.db.strategy_repository import load_ai_strategies
 
@@ -3523,6 +3523,11 @@ def _build_forward_strategy_performance(
         account_trades = [
             trade for trade in account_trades
             if str(trade.get("strategy_id") or "unattributed") == strategy_id
+        ]
+    else:
+        account_trades = [
+            trade for trade in account_trades
+            if str(trade.get("strategy_id") or "unattributed") != "unattributed"
         ]
     symbols = {
         str(trade.get("symbol") or "").strip()

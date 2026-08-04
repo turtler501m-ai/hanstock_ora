@@ -12,6 +12,7 @@ from src.dashboard.core import (
     _INDEX_SYMBOL_ALIASES,
     _resolved_trade_strategy_id,
     _safe_index_rows,
+    _strategy_label,
 )
 
 
@@ -28,6 +29,7 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
             "ai_rebalance",
         )
         self.assertEqual(_resolved_trade_strategy_id({"reason": "manual order"}), "")
+        self.assertEqual(_strategy_label("unattributed"), "수동/출처 미확인")
 
     def test_kis_benchmark_move_preserves_consecutive_sessions(self):
         rows = _safe_index_rows([
