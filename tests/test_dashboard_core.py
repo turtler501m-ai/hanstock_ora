@@ -1833,6 +1833,97 @@ class DashboardCoreTests(unittest.TestCase):
         finally:
             dashboard.trader.config.trade_db_path = original_db_path
 
+    def test_broker_sync_reconciles_response_lost_order_from_exact_balance_gap(self):
+        import src.dashboard.routes.stock as stock_routes
+
+        original_db_path = dashboard.trader.config.trade_db_path
+        original_get_api = stock_routes._get_api
+        original_get_balance_data = stock_routes._get_balance_data
+        original_fetch_cloud_trades = stock_routes.fetch_cloud_trades
+        original_clear_balance_cache = stock_routes._clear_balance_cache
+        original_dry_run = stock_routes.trader.config.dry_run
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                db_path = f"{tmpdir}/trades.sqlite"
+                dashboard.trader.config.trade_db_path = db_path
+                stock_routes.trader.config.dry_run = False
+                dashboard.trader.init_db()
+                dashboard.trader.save_trade(
+                    "011200", "HMM", "buy", 250, 21100, "broker fill",
+                    True, True, broker_order_id="B-HMM", order_status="filled",
+                    filled_qty=250, filled_price=21100,
+                )
+                dashboard.trader.save_trade(
+                    "011200", "HMM", "sell", 250, 0, "live sell",
+                    False, True, order_status="failed",
+                    response_msg=(
+                        "('Connection aborted.', RemoteDisconnected("
+                        "'Remote end closed connection without response'))"
+                    ),
+                )
+
+                class _FakeAPI:
+                    def get_trade_history(self, start_date, end_date):
+                        return []
+
+                stock_routes._get_api = lambda: _FakeAPI()
+                stock_routes._get_balance_data = lambda api, allow_cache=False: {
+                    "output1": [],
+                    "output2": [{}],
+                }
+                stock_routes.fetch_cloud_trades = lambda: []
+                stock_routes._clear_balance_cache = lambda: None
+
+                result = stock_routes._execute_trade_sync(
+                    days=1,
+                    run_id="test-response-loss-sync",
+                    started_at="2026-08-04T14:00:00+09:00",
+                )
+
+                self.assertEqual(result["response_loss_reconciled_count"], 1)
+                self.assertEqual(result["removed_mismatch_count"], 0)
+                self.assertEqual(result["balance_synced_count"], 0)
+                with sqlite3.connect(db_path) as conn:
+                    conn.row_factory = sqlite3.Row
+                    sell = conn.execute(
+                        "SELECT * FROM trades WHERE action = 'sell'"
+                    ).fetchone()
+                self.assertEqual(sell["order_status"], "reconciled")
+                self.assertEqual(sell["ok"], 1)
+                self.assertEqual(sell["filled_qty"], 250)
+                self.assertEqual(sell["filled_price"], 21100)
+                self.assertIn("응답 유실 주문 보정", sell["response_msg"])
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+            stock_routes._get_api = original_get_api
+            stock_routes._get_balance_data = original_get_balance_data
+            stock_routes.fetch_cloud_trades = original_fetch_cloud_trades
+            stock_routes._clear_balance_cache = original_clear_balance_cache
+            stock_routes.trader.config.dry_run = original_dry_run
+
+    def test_broker_cleanup_preserves_ambiguous_transport_failure(self):
+        import src.dashboard.routes.stock as stock_routes
+
+        original_db_path = dashboard.trader.config.trade_db_path
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                dashboard.trader.init_db()
+                dashboard.trader.save_trade(
+                    "011200", "HMM", "sell", 250, 0, "live sell",
+                    False, True, order_status="failed",
+                    response_msg="ReadTimeout: broker response timed out",
+                )
+
+                result = stock_routes._remove_non_broker_trade_rows()
+
+                self.assertEqual(result["removed_count"], 0)
+                with sqlite3.connect(dashboard.trader.config.trade_db_path) as conn:
+                    count = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
+                self.assertEqual(count, 1)
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+
     def test_broker_sync_reports_removed_mismatch_rows(self):
         import src.dashboard.routes.stock as stock_routes
 

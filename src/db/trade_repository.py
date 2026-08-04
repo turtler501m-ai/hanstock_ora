@@ -347,7 +347,17 @@ def list_local_trade_cleanup_candidates(limit: int = 200) -> list[dict]:
         item = dict(row)
         status = str(item.get("order_status") or "")
         symbol = str(item.get("symbol") or "")
-        if status == "failed" and not item.get("broker_order_id"):
+        response = str(item.get("response_msg") or "").lower()
+        ambiguous_markers = (
+            "connection aborted", "connection reset", "remote disconnected",
+            "remotedisconnected", "remote end closed", "readtimeout",
+            "connecttimeout", "timed out", "timeout", "시간 초과",
+        )
+        if status in {"failed", "broker_unknown"} and not item.get("broker_order_id") \
+                and any(marker in response for marker in ambiguous_markers):
+            cleanup_reason = "broker response was lost; reconcile balance before deletion"
+            risk = "high"
+        elif status == "failed" and not item.get("broker_order_id"):
             cleanup_reason = "broker rejected before order number was issued"
             risk = "low"
         elif symbol.startswith("Q") and symbol[1:].isdigit():

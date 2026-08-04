@@ -840,6 +840,134 @@ def sync_trade_order_status(days: int = 30):
 
 
 
+_AMBIGUOUS_ORDER_ERROR_MARKERS = (
+    "connection aborted",
+    "connection reset",
+    "remote disconnected",
+    "remotedisconnected",
+    "remote end closed",
+    "readtimeout",
+    "connecttimeout",
+    "timed out",
+    "timeout",
+    "시간 초과",
+)
+
+
+def _is_ambiguous_order_failure(message: object) -> bool:
+    normalized = str(message or "").strip().lower()
+    return bool(normalized) and any(
+        marker in normalized for marker in _AMBIGUOUS_ORDER_ERROR_MARKERS
+    )
+
+
+def _reconcile_ambiguous_orders_from_balance(current_holdings: dict) -> dict:
+    """Promote response-lost orders only when their total exactly explains the balance gap."""
+    with trader.connect_db() as conn:
+        conn.row_factory = sqlite3.Row
+        confirmed_rows = conn.execute(
+            """
+            SELECT * FROM trades
+            WHERE COALESCE(env, ?) = ? AND COALESCE(ok, 0) = 1
+            ORDER BY ts ASC, id ASC
+            """,
+            (trader.config.trading_env, trader.config.trading_env),
+        ).fetchall()
+        unresolved_rows = conn.execute(
+            """
+            SELECT * FROM trades
+            WHERE COALESCE(env, ?) = ?
+              AND COALESCE(broker_order_id, '') = ''
+              AND COALESCE(order_status, '') IN ('failed', 'broker_unknown')
+              AND COALESCE(filled_qty, 0) = 0
+            ORDER BY ts ASC, id ASC
+            """,
+            (trader.config.trading_env, trader.config.trading_env),
+        ).fetchall()
+
+        positions = {}
+        average_costs = {}
+        for trade in _account_trades([dict(row) for row in confirmed_rows]):
+            symbol = str(trade.get("symbol") or "")
+            qty = _to_int(trade.get("qty"))
+            price = _to_int(trade.get("price"))
+            position = positions.get(symbol, 0)
+            if trade.get("action") == "buy":
+                new_position = position + qty
+                previous_cost = average_costs.get(symbol, 0.0)
+                average_costs[symbol] = (
+                    ((position * previous_cost) + (qty * price)) / new_position
+                    if new_position > 0 else 0.0
+                )
+                positions[symbol] = new_position
+            elif trade.get("action") == "sell":
+                positions[symbol] = max(0, position - qty)
+                if positions[symbol] == 0:
+                    average_costs[symbol] = 0.0
+
+        groups = {}
+        for row in unresolved_rows:
+            item = dict(row)
+            if not _is_ambiguous_order_failure(item.get("response_msg")):
+                continue
+            key = (str(item.get("symbol") or ""), str(item.get("action") or ""))
+            groups.setdefault(key, []).append(item)
+
+        reconciled_items = []
+        for (symbol, action), rows in groups.items():
+            local_qty = positions.get(symbol, 0)
+            broker_holding = current_holdings.get(symbol) or {}
+            broker_qty = _to_int(broker_holding.get("qty"))
+            balance_gap = broker_qty - local_qty
+            expected_qty = balance_gap if action == "buy" else -balance_gap
+            group_qty = sum(_to_int(row.get("qty")) for row in rows)
+            if expected_qty <= 0 or group_qty != expected_qty:
+                continue
+
+            raw_holding = broker_holding.get("_raw") or {}
+            fallback_price = _to_int(
+                raw_holding.get("pchs_avg_pric")
+                or broker_holding.get("price")
+                or average_costs.get(symbol)
+            )
+            for row in rows:
+                qty = _to_int(row.get("qty"))
+                price = _to_int(row.get("price")) or fallback_price
+                previous_message = str(row.get("response_msg") or "").strip()
+                message = (
+                    f"{previous_message} | 증권사 잔고 기준 응답 유실 주문 보정"
+                    if previous_message else "증권사 잔고 기준 응답 유실 주문 보정"
+                )
+                conn.execute(
+                    """
+                    UPDATE trades
+                    SET ok = 1, order_status = 'reconciled', filled_qty = ?,
+                        filled_price = ?, price = ?, response_msg = ?
+                    WHERE id = ?
+                    """,
+                    (qty, price, price, message, int(row["id"])),
+                )
+                reconciled_items.append({
+                    "sync_type": "balance",
+                    "sync_result": "response_loss_reconciled",
+                    "ts": row.get("ts") or "",
+                    "symbol": symbol,
+                    "name": row.get("name") or symbol,
+                    "action": action,
+                    "qty": qty,
+                    "price": price,
+                    "broker_order_id": "",
+                    "order_status": "reconciled",
+                    "message": message,
+                })
+
+    return {
+        "ok": True,
+        "reconciled_count": len(reconciled_items),
+        "items": reconciled_items,
+    }
+
+
 def _remove_non_broker_trade_rows() -> dict:
     """Remove local-only rows that must not survive a broker-authoritative sync."""
     removable_statuses = (
@@ -865,23 +993,23 @@ def _remove_non_broker_trade_rows() -> dict:
             """,
             (trader.config.trading_env, trader.config.trading_env, *removable_statuses),
         ).fetchall()
-        cursor = conn.execute(
-            f"""
-            DELETE FROM trades
-            WHERE COALESCE(env, ?) = ?
-              AND COALESCE(broker_order_id, '') = ''
-              AND (
-                    COALESCE(order_status, '') IN ({placeholders})
-                    OR COALESCE(ok, 0) = 0
-                  )
-            """,
-            (
-                trader.config.trading_env,
-                trader.config.trading_env,
-                *removable_statuses,
-            ),
-        )
-        removed_count = int(cursor.rowcount)
+        removable_rows = [
+            row for row in rows
+            if not (
+                str(row["order_status"] or "") in {"failed", "broker_unknown"}
+                and _is_ambiguous_order_failure(row["response_msg"])
+            )
+        ]
+        removable_ids = [int(row["id"]) for row in removable_rows]
+        if removable_ids:
+            id_placeholders = ",".join("?" for _ in removable_ids)
+            cursor = conn.execute(
+                f"DELETE FROM trades WHERE id IN ({id_placeholders})",
+                removable_ids,
+            )
+            removed_count = int(cursor.rowcount)
+        else:
+            removed_count = 0
     return {
         "ok": True,
         "removed_count": removed_count,
@@ -893,7 +1021,7 @@ def _remove_non_broker_trade_rows() -> dict:
                 "sync_result": "removed",
                 "message": row["response_msg"] or "증권사 주문번호가 없는 불일치 기록 정리",
             }
-            for row in rows
+            for row in removable_rows
         ],
     }
 
@@ -910,6 +1038,7 @@ def _save_trade_sync_result(result: dict) -> None:
             "balance_synced_count",
             "history_imported_count",
             "history_updated_count",
+            "response_loss_reconciled_count",
             "removed_mismatch_count",
             "history_error",
             "order_status_error",
@@ -1060,6 +1189,9 @@ def _execute_trade_sync(*, days: int, run_id: str, started_at: str) -> dict:
         balance_data = _get_balance_data(api, allow_cache=False)
         parsed_balance = _parse_balance(balance_data)
         current_holdings = {h['symbol']: h for h in parsed_balance['holdings']}
+        response_loss_reconciliation = _reconcile_ambiguous_orders_from_balance(
+            current_holdings
+        )
         cleanup = _remove_non_broker_trade_rows()
 
         # Reconstruct current holdings from DB and Cloud
@@ -1209,7 +1341,8 @@ def _execute_trade_sync(*, days: int, run_id: str, started_at: str) -> dict:
             }
             for item in ((order_status_sync or {}).get("orders") or [])
         ]
-        sync_items = history_items + order_status_items + balance_sync_items + list(cleanup.get("items") or [])
+        response_loss_items = list(response_loss_reconciliation.get("items") or [])
+        sync_items = history_items + order_status_items + response_loss_items + balance_sync_items + list(cleanup.get("items") or [])
         response = {
             "run_id": run_id,
             "started_at": started_at,
@@ -1219,6 +1352,7 @@ def _execute_trade_sync(*, days: int, run_id: str, started_at: str) -> dict:
             "balance_synced_count": synced_count,
             "history_imported_count": imported_count,
             "history_updated_count": updated_count,
+            "response_loss_reconciled_count": response_loss_reconciliation["reconciled_count"],
             "history_sync": history_sync,
             "history_error": history_error,
             "order_status_sync": order_status_sync,
