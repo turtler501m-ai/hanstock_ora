@@ -2505,6 +2505,79 @@ def _load_symbol_price_rows(symbols: set[str], *, limit: int = 1500) -> dict[str
     return result
 
 
+def _daily_holding_change_context(
+    trades: list[dict], dates: set[str]
+) -> dict[str, dict]:
+    """Return prior-close weighted moves for positions held at each session open."""
+    if not dates:
+        return {}
+    valid_trades = []
+    symbols: set[str] = set()
+    for trade in _account_trades(trades):
+        day = str(trade.get("ts") or "")[:10]
+        symbol = str(trade.get("symbol") or "").strip()
+        action = str(trade.get("action") or "").lower()
+        qty = _to_int(trade.get("qty"))
+        if len(day) != 10 or not symbol or action not in {"buy", "sell"} or qty <= 0:
+            continue
+        valid_trades.append((day, symbol, action, qty))
+        symbols.add(symbol)
+    valid_trades.sort(key=lambda item: item[0])
+
+    price_rows = _load_symbol_price_rows(symbols)
+    prices_by_symbol = {
+        symbol: {
+            str(row.get("date") or "")[:10]: float(row.get("close") or 0)
+            for row in rows
+            if float(row.get("close") or 0) > 0
+        }
+        for symbol, rows in price_rows.items()
+    }
+    ordered_price_dates = {
+        symbol: sorted(prices)
+        for symbol, prices in prices_by_symbol.items()
+    }
+
+    positions: dict[str, int] = {}
+    trade_index = 0
+    context: dict[str, dict] = {}
+    for day in sorted(dates):
+        while trade_index < len(valid_trades) and valid_trades[trade_index][0] < day:
+            _trade_day, symbol, action, qty = valid_trades[trade_index]
+            if action == "buy":
+                positions[symbol] = positions.get(symbol, 0) + qty
+            else:
+                positions[symbol] = max(0, positions.get(symbol, 0) - qty)
+            trade_index += 1
+
+        previous_value = 0.0
+        change_value = 0.0
+        included = 0
+        missing = 0
+        for symbol, qty in positions.items():
+            if qty <= 0:
+                continue
+            prices = prices_by_symbol.get(symbol, {})
+            current = prices.get(day)
+            prior_dates = [price_day for price_day in ordered_price_dates.get(symbol, []) if price_day < day]
+            previous = prices.get(prior_dates[-1]) if prior_dates else None
+            if not current or not previous:
+                missing += 1
+                continue
+            previous_value += qty * previous
+            change_value += qty * (current - previous)
+            included += 1
+        context[day] = {
+            "holding_change_pct": (
+                round(change_value / previous_value * 100, 2)
+                if previous_value > 0 else None
+            ),
+            "holding_change_symbol_count": included,
+            "holding_change_missing_count": missing,
+        }
+    return context
+
+
 def _load_long_benchmark_rows() -> dict[str, list[dict]]:
     aliases = {
         code: _load_symbol_price_rows(set(symbols), limit=1500)
@@ -2767,8 +2840,14 @@ def _build_periodic_performance(trades: list[dict]) -> dict:
     index_rows = _load_index_rows()
     market_context = _daily_market_context(index_rows)
     monthly_market_context = _monthly_market_context(index_rows)
+    holding_change_context = _daily_holding_change_context(trades, set(daily))
     daily_rows = [
-        {"period": key, **value, **market_context.get(key, {})}
+        {
+            "period": key,
+            **value,
+            **holding_change_context.get(key, {}),
+            **market_context.get(key, {}),
+        }
         for key, value in sorted(daily.items())
     ]
     return {

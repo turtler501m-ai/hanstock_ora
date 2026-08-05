@@ -4088,7 +4088,7 @@ function updatePeriodicPerformanceUI() {
     if (tbody) {
         tbody.innerHTML = '';
         if (!dataList.length) {
-            tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 2rem; color: #94a3b8;">성과 분석 데이터가 없습니다.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; padding: 2rem; color: #94a3b8;">성과 분석 데이터가 없습니다.</td></tr>`;
         } else {
             // Sort to display latest data first in the table
             const tableDataList = [...dataList].reverse();
@@ -4097,6 +4097,10 @@ function updatePeriodicPerformanceUI() {
                 const pnl = item.realized_pnl || 0;
                 const pnlRate = item.realized_pnl_rate || 0;
                 const pnlClass = pnl > 0 ? 'text-success' : (pnl < 0 ? 'text-danger' : '');
+                const holdingChange = item.holding_change_pct;
+                const holdingChangeClass = Number(holdingChange) > 0
+                    ? 'text-success'
+                    : (Number(holdingChange) < 0 ? 'text-danger' : '');
                 
                 tr.innerHTML = `
                     <td><strong>${escapeHtml(item.period)}</strong></td>
@@ -4106,6 +4110,7 @@ function updatePeriodicPerformanceUI() {
                     <td class="${pnlClass}">${pnl > 0 ? '+' : ''}${formatCurrency(pnl)}</td>
                     <td class="${pnlClass}">${pnlRate > 0 ? '+' : ''}${pnlRate.toFixed(2)}%</td>
                     <td class="${pnl > 0 ? 'text-success' : (pnl < 0 ? 'text-danger' : '')}">${formatCurrency(item.net_cashflow)}</td>
+                    <td class="${holdingChangeClass}" title="반영 ${Number(item.holding_change_symbol_count || 0)}종목 · 자료누락 ${Number(item.holding_change_missing_count || 0)}종목">${holdingChange == null ? '-' : `${Number(holdingChange) > 0 ? '+' : ''}${Number(holdingChange).toFixed(2)}%`}</td>
                     <td>${formatMarketIndex(item.kospi, item.kospi_change_pct)}</td>
                     <td>${formatMarketIndex(item.kosdaq, item.kosdaq_change_pct)}</td>
                 `;
@@ -4155,6 +4160,7 @@ function updatePeriodicPerformanceUI() {
     const labels = dataList.map(item => item.period);
     const pnlData = dataList.map(item => item.realized_pnl || 0);
     const pnlRateData = dataList.map(item => item.realized_pnl_rate || 0);
+    const holdingChangeData = dataList.map(item => item.holding_change_pct ?? null);
     const kospiChangeData = dataList.map(item => item.kospi_change_pct ?? null);
     const kosdaqChangeData = dataList.map(item => item.kosdaq_change_pct ?? null);
     
@@ -4192,6 +4198,18 @@ function updatePeriodicPerformanceUI() {
                         pointRadius: 4,
                         pointHoverRadius: 6,
                         tension: 0.3,
+                        yAxisID: 'y2'
+                    },
+                    {
+                        label: '보유주식 당일 등락 (%)',
+                        data: holdingChangeData,
+                        type: 'line',
+                        borderColor: '#22c55e',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        pointRadius: 3,
+                        tension: 0.3,
+                        spanGaps: true,
                         yAxisID: 'y2'
                     },
                     {

@@ -220,6 +220,28 @@ class DashboardPeriodicPerformanceTests(unittest.TestCase):
         self.assertEqual(monthly_row["kospi"], 2500.0)
         self.assertEqual(monthly_row["kosdaq"], 816.0)
 
+    def test_periodic_performance_adds_weighted_opening_holdings_change(self):
+        trader.config.dry_run = True
+        trades = [
+            {"ok": 1, "dry_run": 1, "symbol": "AAA", "action": "buy", "qty": 10, "price": 90, "ts": "2026-05-01 10:00:00"},
+            {"ok": 1, "dry_run": 1, "symbol": "BBB", "action": "buy", "qty": 5, "price": 180, "ts": "2026-05-01 10:01:00"},
+            {"ok": 1, "dry_run": 1, "symbol": "AAA", "action": "sell", "qty": 1, "price": 110, "ts": "2026-05-02 11:00:00"},
+        ]
+        prices = {
+            "AAA": [{"date": "2026-05-01", "close": 100}, {"date": "2026-05-02", "close": 110}],
+            "BBB": [{"date": "2026-05-01", "close": 200}, {"date": "2026-05-02", "close": 190}],
+        }
+
+        with patch("src.dashboard.core._load_index_rows", return_value={}), patch(
+            "src.dashboard.core._load_symbol_price_rows", return_value=prices
+        ):
+            performance = _build_periodic_performance(trades)
+
+        row = next(item for item in performance["daily"] if item["period"] == "2026-05-02")
+        self.assertEqual(row["holding_change_pct"], 2.5)
+        self.assertEqual(row["holding_change_symbol_count"], 2)
+        self.assertEqual(row["holding_change_missing_count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
