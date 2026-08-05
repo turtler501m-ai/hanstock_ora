@@ -47,6 +47,10 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("`/api/trades/local/${tradeId}?confirm=true`", APP_JS)
 
     def test_performance_tab_exposes_market_context_strategy_validation_and_sorting(self):
+        self.assertIn("보유주식 당일 등락", INDEX_HTML)
+        self.assertIn("KOSPI 대비", APP_JS)
+        self.assertIn("KOSDAQ 대비", APP_JS)
+        self.assertIn("holding_change_symbol_count", APP_JS)
         self.assertIn("성과 등락", INDEX_HTML)
         self.assertIn("코스피 (등락)", INDEX_HTML)
         self.assertIn("코스닥 (등락)", INDEX_HTML)

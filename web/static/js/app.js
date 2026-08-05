@@ -445,6 +445,21 @@ function renderPerformanceDetailPanel(item) {
     const pnl = Number(item.realized_pnl || 0);
     const pnlRate = Number(item.realized_pnl_rate || 0);
     const pnlClass = pnl > 0 ? 'text-success' : (pnl < 0 ? 'text-danger' : '');
+    const holdingChange = item.holding_change_pct == null ? null : Number(item.holding_change_pct);
+    const kospiChange = item.kospi_change_pct == null ? null : Number(item.kospi_change_pct);
+    const kosdaqChange = item.kosdaq_change_pct == null ? null : Number(item.kosdaq_change_pct);
+    const excessVsKospi = holdingChange == null || kospiChange == null
+        ? null
+        : holdingChange - kospiChange;
+    const excessVsKosdaq = holdingChange == null || kosdaqChange == null
+        ? null
+        : holdingChange - kosdaqChange;
+    const changeClass = (value) => Number(value) > 0
+        ? 'text-success'
+        : (Number(value) < 0 ? 'text-danger' : '');
+    const changeText = (value) => value == null
+        ? '-'
+        : `${Number(value) > 0 ? '+' : ''}${Number(value).toFixed(2)}%`;
     const summaryHtml = `
         <div class="performance-detail-summary">
             <div>
@@ -462,6 +477,21 @@ function renderPerformanceDetailPanel(item) {
             <div>
                 <span>실현수익률</span>
                 <strong class="${pnlClass}">${pnlRate > 0 ? '+' : ''}${pnlRate.toFixed(2)}%</strong>
+            </div>
+            <div>
+                <span>보유주식 당일 등락</span>
+                <strong class="${changeClass(holdingChange)}">${changeText(holdingChange)}</strong>
+                <small>반영 ${Number(item.holding_change_symbol_count || 0)}종목 · 자료누락 ${Number(item.holding_change_missing_count || 0)}종목</small>
+            </div>
+            <div>
+                <span>KOSPI 대비</span>
+                <strong class="${changeClass(excessVsKospi)}">${changeText(excessVsKospi)}</strong>
+                <small>KOSPI ${changeText(kospiChange)}</small>
+            </div>
+            <div>
+                <span>KOSDAQ 대비</span>
+                <strong class="${changeClass(excessVsKosdaq)}">${changeText(excessVsKosdaq)}</strong>
+                <small>KOSDAQ ${changeText(kosdaqChange)}</small>
             </div>
         </div>
     `;
