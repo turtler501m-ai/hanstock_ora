@@ -250,18 +250,48 @@ class KIStockAPI:
     )
     def get_balance(self) -> dict:
         try:
-            _kis_throttle()
             tr_id = "VTTC8434R" if config.trading_env == "demo" else "TTTC8434R"
             url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
             cano = config.kistock_account[:8]
             acnt = config.kistock_account[8:] if len(config.kistock_account) > 8 else "01"
             params = {"CANO": cano, "ACNT_PRDT_CD": acnt, "AFHR_FLPR_YN": "N", "OFL_YN": "", "INQR_DVSN": "02", "UNPR_DVSN": "01", "FUND_STTL_ICLD_YN": "N", "FNCG_AMT_AUTO_RDPT_YN": "N", "PRCS_DVSN": "01", "CTX_AREA_FK100": "", "CTX_AREA_NK100": ""}
-            r = HTTP.get(url, headers=self._headers(tr_id), params=params, timeout=15)
-            data = self._response_json(r, "Balance")
-            if data.get("rt_cd") != "0":
-                raise self._kis_error(data, "unknown KIS balance error")
+            rows = []
+            page_params = dict(params)
+            tr_cont = ""
+            seen_page_tokens: set[tuple[str, str]] = set()
+            first_page: dict | None = None
+            for page_count in range(1, 101):
+                _kis_throttle()
+                headers = self._headers(tr_id)
+                if tr_cont:
+                    headers["tr_cont"] = tr_cont
+                r = HTTP.get(url, headers=headers, params=page_params, timeout=15)
+                data = self._response_json(r, "Balance")
+                if data.get("rt_cd") != "0":
+                    raise self._kis_error(data, "unknown KIS balance error")
+                if first_page is None:
+                    first_page = dict(data)
+                rows.extend(data.get("output1", []) or [])
+
+                next_fk = str(data.get("ctx_area_fk100") or data.get("CTX_AREA_FK100") or "").strip()
+                next_nk = str(data.get("ctx_area_nk100") or data.get("CTX_AREA_NK100") or "").strip()
+                response_headers = getattr(r, "headers", {}) or {}
+                tr_cont = str(response_headers.get("tr_cont") or response_headers.get("tr-cont") or "").strip()
+                page_token = (next_fk, next_nk)
+                if tr_cont not in {"M", "F"} or (not next_fk and not next_nk):
+                    break
+                if page_token in seen_page_tokens:
+                    raise RuntimeError("KIS balance pagination returned a repeated token")
+                seen_page_tokens.add(page_token)
+                page_params["CTX_AREA_FK100"] = next_fk
+                page_params["CTX_AREA_NK100"] = next_nk
+            else:
+                raise RuntimeError("KIS balance pagination exceeded 100 pages")
+
+            result = first_page or {"rt_cd": "0"}
+            result["output1"] = rows
             self._success()
-            return data
+            return result
         except Exception:
             self._fail()
             raise
