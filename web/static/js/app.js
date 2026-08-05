@@ -1164,6 +1164,7 @@ function updateHoldingSortHeaders() {
         { key: 'qty', title: '수량' },
         { key: 'price', title: '현재가' },
         { key: 'value', title: '평가금액' },
+        { key: 'account_weight', title: '계좌 비중' },
         { key: 'rt', title: '수익률' },
         { key: 'pnl', title: '평가손익' },
         { key: 'pnl_status', title: '손익 상태' },
@@ -1282,14 +1283,14 @@ function renderHoldingRows() {
     }
     tbodyHoldings.innerHTML = '';
     if (!holdingsCache.length) {
-        setTableMessage('#table-holdings tbody', 9, '보유 종목이 없습니다');
+        setTableMessage('#table-holdings tbody', 10, '보유 종목이 없습니다');
         updateHoldingSortHeaders();
         return;
     }
 
     const rows = sortedHoldings();
     if (!rows.length) {
-        setTableMessage('#table-holdings tbody', 9, '선택한 조건에 해당하는 보유 종목이 없습니다');
+        setTableMessage('#table-holdings tbody', 10, '선택한 조건에 해당하는 보유 종목이 없습니다');
         updateHoldingSortHeaders();
         return;
     }
@@ -1302,6 +1303,9 @@ function renderHoldingRows() {
         const qty = Number(holding.qty || 0);
         const sellableQty = Number(holding.sellable_qty ?? holding.qty ?? 0);
         const sellPending = Boolean(holding.sell_pending);
+        const accountWeight = Number(holding.account_weight || 0);
+        const maxSingleWeight = Number(latestConfig?.max_single_weight || 0);
+        const weightExceeded = maxSingleWeight > 0 && accountWeight > maxSingleWeight + 0.000001;
         const canSell = sellableQty > 0 && !sellPending;
         let qtyText = sellableQty !== qty
             ? `${qty.toLocaleString()} <small class="time-muted">매도가능 ${sellableQty.toLocaleString()}</small>`
@@ -1318,6 +1322,10 @@ function renderHoldingRows() {
             <td>${qtyText}</td>
             <td>${formatCurrency(holding.price)}</td>
             <td>${formatCurrency(holding.value || Number(holding.qty || 0) * Number(holding.price || 0))}</td>
+            <td class="${weightExceeded ? 'text-danger' : ''}">
+                <strong>${formatNumber(accountWeight * 100, 2)}%</strong>
+                ${weightExceeded ? '<small class="time-muted">한도 초과</small>' : ''}
+            </td>
             <td class="${rtClass}">${formatPercent(holding.rt)}</td>
             <td class="${rtClass}">${formatCurrency(holding.pnl)}</td>
             <td><span class="holding-pnl-badge is-${pnlStatus}">${pnlStatusLabel}</span></td>
@@ -1447,7 +1455,12 @@ async function renderBalance() {
             chartData.push(holding.value || holding.qty * holding.price);
             chartColors.push(colors[idx % colors.length]);
         });
-        holdingsCache = (balance.holdings || []).map((holding) => ({ ...holding }));
+        holdingsCache = (balance.holdings || []).map((holding) => ({
+            ...holding,
+            account_weight: displayTotal > 0
+                ? Number(holding.value || (Number(holding.qty || 0) * Number(holding.price || 0))) / displayTotal
+                : 0,
+        }));
         renderHoldingAccountSummary(balance, displayTotal, realizedPnl);
         renderHoldingStrategySummary(balance);
         bindHoldingSortHeaders();
@@ -1471,7 +1484,7 @@ async function renderBalance() {
         setElementText('val-pnl', '불러오기 실패');
         setElementText('val-return', '-');
         setStatus(`계좌 API 오류: ${err.message}`);
-        setTableMessage('#table-holdings tbody', 9, err.message);
+        setTableMessage('#table-holdings tbody', 10, err.message);
         setTableMessage('#table-holding-strategies tbody', 7, err.message);
     }
 }
