@@ -430,20 +430,55 @@ class KIStockAPI:
             "FNCG_AMT_AUTO_RDPT_YN": "N", "PRCS_DVSN": "01",
             "CTX_AREA_FK100": "", "CTX_AREA_NK100": "",
         }
-        _kis_order_throttle()
         try:
-            r = HTTP.get(url, headers=self._headers(tr_id), params=params, timeout=15)
-            if getattr(r, "status_code", 200) != 200:
-                try:
-                    data = r.json()
-                except Exception:
-                    data = {}
-                msg = data.get("msg1") if isinstance(data, dict) else ""
-                if not msg:
-                    msg = getattr(r, "text", "")
-                raise RuntimeError(f"KIS balance HTTP {r.status_code}: {msg or 'request failed'}")
+            rows = []
+            page_params = dict(params)
+            tr_cont = ""
+            seen_page_tokens: set[tuple[str, str]] = set()
+            first_page: dict | None = None
+            for _page_count in range(1, 101):
+                _kis_order_throttle()
+                headers = self._headers(tr_id)
+                if tr_cont:
+                    headers["tr_cont"] = tr_cont
+                r = HTTP.get(url, headers=headers, params=page_params, timeout=15)
+                if getattr(r, "status_code", 200) != 200:
+                    try:
+                        data = r.json()
+                    except Exception:
+                        data = {}
+                    msg = data.get("msg1") if isinstance(data, dict) else ""
+                    if not msg:
+                        msg = getattr(r, "text", "")
+                    raise RuntimeError(f"KIS balance HTTP {r.status_code}: {msg or 'request failed'}")
+                data = r.json()
+                if data.get("rt_cd") not in (None, "0"):
+                    raise RuntimeError(
+                        f"KIS balance failed: {data.get('msg1') or 'unknown broker error'}"
+                    )
+                if first_page is None:
+                    first_page = dict(data)
+                rows.extend(data.get("output1", []) or [])
+
+                next_fk = str(data.get("ctx_area_fk100") or data.get("CTX_AREA_FK100") or "").strip()
+                next_nk = str(data.get("ctx_area_nk100") or data.get("CTX_AREA_NK100") or "").strip()
+                response_headers = getattr(r, "headers", {}) or {}
+                tr_cont = str(response_headers.get("tr_cont") or response_headers.get("tr-cont") or "").strip()
+                page_token = (next_fk, next_nk)
+                if tr_cont not in {"M", "F"} or (not next_fk and not next_nk):
+                    break
+                if page_token in seen_page_tokens:
+                    raise RuntimeError("KIS balance pagination returned a repeated token")
+                seen_page_tokens.add(page_token)
+                page_params["CTX_AREA_FK100"] = next_fk
+                page_params["CTX_AREA_NK100"] = next_nk
+            else:
+                raise RuntimeError("KIS balance pagination exceeded 100 pages")
+
+            result = first_page or {"rt_cd": "0"}
+            result["output1"] = rows
             self._success()
-            return r.json()
+            return result
         except Exception as e:
             logger.error(f"Failed to get KIS balance: {e}")
             self._fail()

@@ -194,6 +194,40 @@ class TraderKISIntegrationTests(unittest.TestCase):
         self.assertEqual(call.kwargs["params"]["CANO"], "12345678")
         self.assertEqual(call.kwargs["params"]["ACNT_PRDT_CD"], "01")
 
+    def test_get_balance_follows_continuation_pages(self):
+        first = _FakeResponse({
+            "rt_cd": "0",
+            "output1": [{"pdno": "005930"}],
+            "output2": [{"tot_evlu_amt": "2000000"}],
+            "ctx_area_fk100": "next-fk",
+            "ctx_area_nk100": "next-nk",
+        }, headers={"tr_cont": "M"})
+        second = _FakeResponse({
+            "rt_cd": "0",
+            "output1": [{"pdno": "000660"}],
+            "output2": [],
+        })
+
+        with (
+            patch.object(trader.config, "trading_env", "demo"),
+            patch.object(trader, "BASE_URL", "https://example.test"),
+            patch.object(trader, "KISTOCK_APP_KEY", "app-key-12345678"),
+            patch.object(trader, "KISTOCK_APP_SECRET", "secret-value"),
+            patch.object(trader, "KISTOCK_ACCOUNT", "1234567801"),
+            patch.object(trader, "_KIS_ORDER_MIN_INTERVAL_SECONDS", 0),
+            patch.object(trader.KIStockAPI, "_load_or_fetch_token", return_value="token-abc"),
+            patch.object(trader.HTTP, "get", side_effect=[first, second]) as http_get,
+        ):
+            result = trader.KIStockAPI(notify_errors=False).get_balance()
+
+        self.assertEqual([row["pdno"] for row in result["output1"]], ["005930", "000660"])
+        self.assertEqual(result["output2"], [{"tot_evlu_amt": "2000000"}])
+        self.assertEqual(http_get.call_count, 2)
+        second_call = http_get.call_args_list[1]
+        self.assertEqual(second_call.kwargs["params"]["CTX_AREA_FK100"], "next-fk")
+        self.assertEqual(second_call.kwargs["params"]["CTX_AREA_NK100"], "next-nk")
+        self.assertEqual(second_call.kwargs["headers"]["tr_cont"], "M")
+
     def test_get_balance_routes_request_headers_through_client_delegate(self):
         payload = {"rt_cd": "0", "output1": [], "output2": [{}]}
 
