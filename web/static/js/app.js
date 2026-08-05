@@ -1164,7 +1164,7 @@ function updateHoldingSortHeaders() {
         { key: 'qty', title: '수량' },
         { key: 'price', title: '현재가' },
         { key: 'value', title: '평가금액' },
-        { key: 'account_weight', title: '계좌 비중' },
+        { key: 'hanstock_weight', title: '한스톡 비중' },
         { key: 'rt', title: '수익률' },
         { key: 'pnl', title: '평가손익' },
         { key: 'pnl_status', title: '손익 상태' },
@@ -1303,9 +1303,9 @@ function renderHoldingRows() {
         const qty = Number(holding.qty || 0);
         const sellableQty = Number(holding.sellable_qty ?? holding.qty ?? 0);
         const sellPending = Boolean(holding.sell_pending);
-        const accountWeight = Number(holding.account_weight || 0);
+        const hanstockWeight = Number(holding.hanstock_weight || 0);
         const maxSingleWeight = Number(latestConfig?.max_single_weight || 0);
-        const weightExceeded = maxSingleWeight > 0 && accountWeight > maxSingleWeight + 0.000001;
+        const weightExceeded = maxSingleWeight > 0 && hanstockWeight > maxSingleWeight + 0.000001;
         const canSell = sellableQty > 0 && !sellPending;
         let qtyText = sellableQty !== qty
             ? `${qty.toLocaleString()} <small class="time-muted">매도가능 ${sellableQty.toLocaleString()}</small>`
@@ -1323,7 +1323,7 @@ function renderHoldingRows() {
             <td>${formatCurrency(holding.price)}</td>
             <td>${formatCurrency(holding.value || Number(holding.qty || 0) * Number(holding.price || 0))}</td>
             <td class="${weightExceeded ? 'text-danger' : ''}">
-                <strong>${formatNumber(accountWeight * 100, 2)}%</strong>
+                <strong>${formatNumber(hanstockWeight * 100, 2)}%</strong>
                 ${weightExceeded ? '<small class="time-muted">한도 초과</small>' : ''}
             </td>
             <td class="${rtClass}">${formatPercent(holding.rt)}</td>
@@ -1455,10 +1455,11 @@ async function renderBalance() {
             chartData.push(holding.value || holding.qty * holding.price);
             chartColors.push(colors[idx % colors.length]);
         });
+        const hanstockCapital = Number(latestConfig?.total_capital || displayTotal || 0);
         holdingsCache = (balance.holdings || []).map((holding) => ({
             ...holding,
-            account_weight: displayTotal > 0
-                ? Number(holding.value || (Number(holding.qty || 0) * Number(holding.price || 0))) / displayTotal
+            hanstock_weight: hanstockCapital > 0
+                ? Number(holding.value || (Number(holding.qty || 0) * Number(holding.price || 0))) / hanstockCapital
                 : 0,
         }));
         renderHoldingAccountSummary(balance, displayTotal, realizedPnl);
