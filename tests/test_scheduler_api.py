@@ -377,6 +377,8 @@ class SchedulerApiTests(unittest.TestCase):
         response = trigger_scheduler_run(payload={"mode": "daily_auto"})
         self.assertEqual(response["status"], "started")
         self.assertEqual(response["mode"], "daily_auto")
+        self.assertTrue(response["run_id"])
+        self.assertEqual(_scheduler_run_state["run_id"], response["run_id"])
         self.assertTrue(_scheduler_run_state["is_running"])
         mock_thread.assert_called_once()
         mock_thread_instance.start.assert_called_once()
@@ -408,6 +410,7 @@ class SchedulerApiTests(unittest.TestCase):
 
         self.assertEqual(response["strategy_ids"], ["alpha", "beta"])
         self.assertIsNone(response["strategy_id"])
+        self.assertEqual(response["max_runtime_seconds"], 600)
         thread_args = mock_thread.call_args.kwargs["args"]
         self.assertEqual(thread_args[3], ["alpha", "beta"])
 

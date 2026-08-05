@@ -1,5 +1,6 @@
 """Risk, system and scheduler HTTP handlers."""
 import functools
+import uuid
 from fastapi import APIRouter
 from src.dashboard.routes import stock as _stock
 def _refresh_legacy_dependencies() -> None:
@@ -77,7 +78,11 @@ def deactivate_kill_switch():
 
 
 @router.get("/api/scheduler/status")
-def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
+def get_scheduler_status(
+    strategy_id: str | None = None,
+    compact: bool = True,
+    run_id: str | None = None,
+):
     global _scheduler_run_state
     _dashboard_scheduler_service.refresh()
 
@@ -257,11 +262,14 @@ def get_scheduler_status(strategy_id: str | None = None, compact: bool = True):
         pass
 
     run_state = _compact_scheduler_run_state(_scheduler_run_state) if compact else _scheduler_run_state
+    requested_run_matches = not run_id or str(run_state.get("run_id") or "") == run_id
 
     return {
         "config": config,
         "last_result": last_result,
         "run_state": run_state,
+        "requested_run_id": run_id,
+        "requested_run_matches": requested_run_matches,
         "active_strategy_id": active_strategy_id,
         "active_strategy_name": active_strategy_name,
         "strategy_dispatch": strategy_dispatch,
@@ -370,15 +378,19 @@ def trigger_scheduler_run(payload: dict = Body(...)):
             detail="AI 스케줄 슬롯에 적용된 승인 전략이 없습니다.",
         )
 
+    run_id = uuid.uuid4().hex
+    max_runtime_seconds = 600 if mode == "analysis_only" else 3600
     if not _dashboard_scheduler_service.claim(
         mode=mode,
         strategy_id=",".join(strategy_ids),
+        run_id=run_id,
+        max_runtime_seconds=max_runtime_seconds,
     ):
         raise HTTPException(status_code=409, detail="스케줄러가 이미 실행 중입니다.")
 
     t = threading.Thread(
         target=_bg_run_multiple_scheduled_cycles,
-        args=(mode, include_ai_rebalance, auto_approve, strategy_ids, allowed_categories),
+        args=(mode, include_ai_rebalance, auto_approve, strategy_ids, allowed_categories, run_id),
         daemon=True
     )
     t.start()
@@ -388,4 +400,6 @@ def trigger_scheduler_run(payload: dict = Body(...)):
         "strategy_id": strategy_ids[0] if len(strategy_ids) == 1 else None,
         "strategy_ids": strategy_ids,
         "allowed_categories": sorted(allowed_categories) if allowed_categories else None,
+        "run_id": run_id,
+        "max_runtime_seconds": max_runtime_seconds,
     }

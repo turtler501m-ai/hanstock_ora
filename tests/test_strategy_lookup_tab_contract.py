@@ -27,7 +27,10 @@ class StrategyLookupTabContractTests(unittest.TestCase):
 
     def test_cached_results_are_shown_while_selected_strategies_update(self):
         script = (ROOT / "web/static/js/app.js").read_text(encoding="utf-8")
-        self.assertIn("async function renderCachedStrategyPreviews(strategyIds, strategies = [])", script)
+        self.assertIn(
+            "async function renderCachedStrategyPreviews(strategyIds, strategies = [], options = {})",
+            script,
+        )
         self.assertIn("cache_only: 'true'", script)
         self.assertIn("업데이트 중", script)
         self.assertIn("이전 결과", script)
@@ -39,7 +42,9 @@ class StrategyLookupTabContractTests(unittest.TestCase):
         self.assertIn('id="btn-refresh-strategy-lookup" class="button-ghost">새로고침</button>', html)
         self.assertIn("async function refreshStrategyLookup()", script)
         self.assertIn("await renderCachedStrategyPreviews(strategyIds, selected);", script)
-        self.assertIn("await waitForStrategyPreviewCompletion();", script)
+        self.assertIn("await waitForStrategyPreviewCompletion(started.run_id);", script)
+        self.assertIn("requested_run_matches", script)
+        self.assertIn("finishStrategyPreviewUpdatingState();", script)
         self.assertIn("await renderCandidates({ strategyIds, strategies: selected });", script)
         self.assertNotIn(
             "await renderCandidates({ strategyIds, strategies: selected, refresh: true });",

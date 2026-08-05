@@ -2804,7 +2804,9 @@ function renderStrategyPreviewCards(results, strategies = []) {
     }).join('');
 }
 
-async function renderCachedStrategyPreviews(strategyIds, strategies = []) {
+async function renderCachedStrategyPreviews(strategyIds, strategies = [], options = {}) {
+    const updating = options.updating !== false;
+    const finalError = options.error || null;
     const optimizer = document.getElementById('select-portfolio-optimizer')?.value || 'score_tilted_inverse_vol';
     const results = await Promise.all(strategyIds.map(async (strategyId) => {
         try {
@@ -2816,17 +2818,26 @@ async function renderCachedStrategyPreviews(strategyIds, strategies = []) {
                 cache_only: 'true',
             });
             const data = await fetchJson(`/api/candidates?${params.toString()}`, 30000);
-            return { strategyId, data, updating: true };
+            return { strategyId, data, updating, error: finalError };
         } catch (error) {
             return {
                 strategyId,
                 data: { candidates: [], scanned: 0, _cache: { missing: true } },
                 error: error.message,
-                updating: true,
+                updating,
             };
         }
     }));
     renderStrategyPreviewCards(results, strategies);
+}
+
+function finishStrategyPreviewUpdatingState() {
+    document.querySelectorAll('.strategy-preview-card .strategy-preview-metrics .is-complete')
+        .forEach((status) => {
+            if (status.textContent.includes('업데이트 중')) {
+                status.textContent = '업데이트 종료';
+            }
+        });
 }
 
 async function renderCandidates(options = {}) {
@@ -3001,13 +3012,26 @@ async function renderCandidates(options = {}) {
     }
 }
 
-function waitForStrategyPreviewCompletion(timeoutMs = 600000) {
+function waitForStrategyPreviewCompletion(runId, timeoutMs = 600000) {
     const startedAt = Date.now();
     return new Promise((resolve, reject) => {
         const timer = setInterval(async () => {
             try {
-                const status = await fetchJson('/api/scheduler/status', 30000);
+                if (Date.now() - startedAt > timeoutMs) {
+                    clearInterval(timer);
+                    reject(new Error('전략 조회 시간이 초과되었습니다. 이전 결과를 표시합니다.'));
+                    return;
+                }
+                const status = await fetchJson(
+                    `/api/scheduler/status?run_id=${encodeURIComponent(runId)}`,
+                    30000,
+                );
                 const runState = status.run_state || {};
+                if (!status.requested_run_matches) {
+                    clearInterval(timer);
+                    reject(new Error('조회 작업 상태가 변경되었습니다. 이전 결과를 표시합니다.'));
+                    return;
+                }
                 if (!runState.is_running) {
                     clearInterval(timer);
                     if (runState.error) reject(new Error(runState.error));
@@ -3028,13 +3052,15 @@ function waitForStrategyPreviewCompletion(timeoutMs = 600000) {
 
 async function previewSelectedStrategies() {
     const button = document.getElementById('btn-candidates');
+    let selected = [];
+    let strategyIds = [];
     setButtonBusy(button, true);
     setTableMessage('#table-candidates tbody', 9, '선택된 전략을 주문 없이 분석하고 있습니다...');
     try {
         const envelope = await fetchJson('/api/ai-strategies', 30000);
-        const selected = (envelope.strategies || []).filter((strategy) =>
+        selected = (envelope.strategies || []).filter((strategy) =>
             strategy.selected && strategy.status === 'approved');
-        const strategyIds = selected.map((strategy) => String(strategy.id));
+        strategyIds = selected.map((strategy) => String(strategy.id));
         if (!strategyIds.length) throw new Error('AI 전략 탭에서 조회할 전략을 먼저 선택해 주세요.');
         const selection = document.getElementById('strategy-preview-selection');
         if (selection) {
@@ -3043,7 +3069,7 @@ async function previewSelectedStrategies() {
             }</span><small>분석 전용 · 주문/승인 생성 없음</small>`;
         }
         await renderCachedStrategyPreviews(strategyIds, selected);
-        await postJson('/api/scheduler/run', {
+        const started = await postJson('/api/scheduler/run', {
             mode: 'analysis_only',
             include_ai_rebalance: false,
             auto_approve: false,
@@ -3051,30 +3077,33 @@ async function previewSelectedStrategies() {
             allowed_categories: ['candidate'],
         });
         setStatus(`선택 전략 ${strategyIds.length}개를 분석 전용으로 실행 중입니다. 주문은 생성되지 않습니다.`, true);
-        await waitForStrategyPreviewCompletion();
+        await waitForStrategyPreviewCompletion(started.run_id);
         await renderCandidates({ strategyIds, strategies: selected });
         setStatus(`전략 조회 완료 · ${strategyIds.length}개 전략 · 주문 없음`, true);
     } catch (error) {
         setTableMessage('#table-candidates tbody', 9, error.message);
         setStatus(`전략 조회 실패: ${error.message}`);
     } finally {
+        finishStrategyPreviewUpdatingState();
         setButtonBusy(button, false);
     }
 }
 
 async function refreshStrategyLookup() {
     const button = document.getElementById('btn-refresh-strategy-lookup');
+    let selected = [];
+    let strategyIds = [];
     setButtonBusy(button, true);
     if (button) button.textContent = '새로고침 중...';
     try {
         const envelope = await fetchJson('/api/ai-strategies', 30000);
-        const selected = (envelope.strategies || []).filter((strategy) =>
+        selected = (envelope.strategies || []).filter((strategy) =>
             strategy.selected && strategy.status === 'approved');
-        const strategyIds = selected.map((strategy) => String(strategy.id));
+        strategyIds = selected.map((strategy) => String(strategy.id));
         if (!strategyIds.length) throw new Error('AI 전략 탭에서 조회할 전략을 먼저 선택해 주세요.');
 
         await renderCachedStrategyPreviews(strategyIds, selected);
-        await postJson('/api/scheduler/run', {
+        const started = await postJson('/api/scheduler/run', {
             mode: 'analysis_only',
             include_ai_rebalance: false,
             auto_approve: false,
@@ -3082,13 +3111,14 @@ async function refreshStrategyLookup() {
             allowed_categories: ['candidate'],
         });
         setStatus(`선택 전략 ${strategyIds.length}개를 백그라운드에서 새로고침하고 있습니다. 최대 10분까지 기다립니다.`, true);
-        await waitForStrategyPreviewCompletion();
+        await waitForStrategyPreviewCompletion(started.run_id);
         await renderCandidates({ strategyIds, strategies: selected });
         setStatus(`전략 새로고침 완료 · ${strategyIds.length}개 전략 · DB 최신본 저장`, true);
     } catch (error) {
         setStatus(`전략 새로고침 실패: ${error.message}`);
     } finally {
         if (button) button.textContent = '새로고침';
+        finishStrategyPreviewUpdatingState();
         setButtonBusy(button, false);
     }
 }

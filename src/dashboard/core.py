@@ -3257,6 +3257,7 @@ def _bg_run_multiple_scheduled_cycles(
     auto_approve: bool,
     strategy_ids: list[str],
     allowed_categories: set[str] | None = None,
+    run_id: str | None = None,
 ):
     _dashboard_scheduler_service.run(
         _run_scheduled_cycles_for_strategies,
@@ -3265,4 +3266,5 @@ def _bg_run_multiple_scheduled_cycles(
         auto_approve=auto_approve,
         strategy_ids=strategy_ids,
         allowed_categories=allowed_categories,
+        run_id=run_id,
     )
