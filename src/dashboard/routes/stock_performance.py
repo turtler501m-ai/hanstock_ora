@@ -209,12 +209,14 @@ def get_performance(response: Response, strategy_id: str | None = None):
         # Fetch current prices to calculate evaluation PnL
         current_holdings = {}
         total_broker_pnl = 0
+        holding_daily_change_pct = None
         try:
             api = _get_api()
             balance_data = _get_balance_data(api)
             parsed_balance = _parse_balance(balance_data)
             current_holdings = {h['symbol']: h for h in parsed_balance['holdings']}
             total_broker_pnl = parsed_balance.get("pnl", 0)
+            holding_daily_change_pct = parsed_balance.get("holding_daily_change_pct")
         except Exception:
             pass
 
@@ -250,6 +252,7 @@ def get_performance(response: Response, strategy_id: str | None = None):
                         "current_price": current_price,
                         "eval_pnl": int(eval_pnl),
                         "return_rate": round(return_rate, 2),
+                        "daily_change_pct": current_holdings.get(sym, {}).get("daily_change_pct"),
                         "broker_qty": current_holdings.get(sym, {}).get("qty", 0),
                         "broker_pnl": int(current_holdings.get(sym, {}).get("pnl", 0)),
                         "diff_reason": "DRY_RUN"
@@ -278,6 +281,7 @@ def get_performance(response: Response, strategy_id: str | None = None):
                     "current_price": ch["price"],
                     "eval_pnl": int(ch["pnl"]),
                     "return_rate": round(return_rate, 2),
+                    "daily_change_pct": ch.get("daily_change_pct"),
                     "broker_qty": ch["qty"],
                     "broker_pnl": int(ch["pnl"]),
                     "diff_reason": diff_reason
@@ -291,6 +295,7 @@ def get_performance(response: Response, strategy_id: str | None = None):
             "realized_pnl": int(realized_pnl),
             "total_eval_pnl": int(total_eval_pnl),
             "total_broker_pnl": int(total_broker_pnl),
+            "holding_daily_change_pct": holding_daily_change_pct,
 
             "eval_details": eval_details,
             "untracked_details": untracked_details,

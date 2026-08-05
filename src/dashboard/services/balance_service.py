@@ -86,6 +86,7 @@ def parse_balance(balance_data: dict) -> dict:
             "sellable_qty": sellable_qty,
             "price": price,
             "rt": to_float(stock.get("evlu_pfls_rt")),
+            "daily_change_pct": to_float(stock.get("fltt_rt")),
             "pnl": to_int(stock.get("evlu_pfls_amt")),
             "value": value,
             "_raw": stock,
@@ -99,6 +100,14 @@ def parse_balance(balance_data: dict) -> dict:
     if cash == 0 and summary_total > 0:
         cash = summary_total - summary_stock_eval
     totals = portfolio_totals(cash, summary_total, holdings)
+    previous_stock_eval = 0.0
+    daily_change_amount = 0.0
+    for holding in holdings:
+        rate = float(holding.get("daily_change_pct") or 0.0) / 100.0
+        value = float(holding.get("value") or 0.0)
+        previous_value = value / (1.0 + rate) if rate > -1.0 else 0.0
+        previous_stock_eval += previous_value
+        daily_change_amount += value - previous_value
     return {
         "cash": cash,
         "total_eval": totals["total_eval"],
@@ -108,5 +117,8 @@ def parse_balance(balance_data: dict) -> dict:
         "cash_ratio": totals["cash_ratio"],
         "stock_ratio": totals["stock_ratio"],
         "pnl": to_int(first_summary.get("evlu_pfls_smtl_amt")),
+        "holding_daily_change_pct": round(
+            daily_change_amount / previous_stock_eval * 100, 2
+        ) if previous_stock_eval > 0 else None,
         "holdings": holdings,
     }

@@ -114,6 +114,7 @@ class DashboardCoreTests(unittest.TestCase):
                 "evlu_amt": "700000",
                 "evlu_pfls_amt": "-10000",
                 "evlu_pfls_rt": "-1.41",
+                "fltt_rt": "2.50",
             }],
             "output2": [{
                 "dnca_tot_amt": "1000000",
@@ -126,6 +127,8 @@ class DashboardCoreTests(unittest.TestCase):
 
         self.assertEqual(parsed["holdings"][0]["value"], 700000)
         self.assertEqual(parsed["holdings"][0]["price"], 70000)
+        self.assertEqual(parsed["holdings"][0]["daily_change_pct"], 2.5)
+        self.assertEqual(parsed["holding_daily_change_pct"], 2.5)
         self.assertEqual(parsed["stock_eval"], 700000)
         self.assertEqual(parsed["cash"], 200000)
         self.assertEqual(parsed["total_eval"], 900000)

@@ -3855,13 +3855,21 @@ async function renderTrades() {
                 evalPnlEl.textContent = formatCurrency(evalPnl);
                 evalPnlEl.className = evalPnl > 0 ? 'text-success' : (evalPnl < 0 ? 'text-danger' : '');
             }
+            const holdingDailyChangeEl = document.getElementById('perf-holding-daily-change');
+            if (holdingDailyChangeEl) {
+                const dailyChange = perf.holding_daily_change_pct;
+                holdingDailyChangeEl.textContent = dailyChange == null ? '-' : formatPercent(dailyChange);
+                holdingDailyChangeEl.className = Number(dailyChange) > 0
+                    ? 'text-success'
+                    : (Number(dailyChange) < 0 ? 'text-danger' : '');
+            }
             
             const tbodyEval = document.querySelector('#table-eval-details tbody');
             if (tbodyEval) {
                 tbodyEval.innerHTML = '';
                 const details = perf.eval_details || [];
                 if (!details.length) {
-                    setTableMessage('#table-eval-details tbody', 6, '자동매매로 매수한 보유종목이 없습니다.');
+                    setTableMessage('#table-eval-details tbody', 8, '자동매매로 매수한 보유종목이 없습니다.');
                 } else {
                     details.forEach((item) => {
                         const tr = document.createElement('tr');
@@ -3876,6 +3884,7 @@ async function renderTrades() {
                             <td>${formatCurrency(item.current_price)}</td>
                             <td>${formatCurrency(Number(item.current_price || 0) * Number(item.qty || 0))}</td>
                             <td class="${pnlClass}">${formatPercent(item.return_rate)}</td>
+                            <td class="${Number(item.daily_change_pct) > 0 ? 'text-success' : (Number(item.daily_change_pct) < 0 ? 'text-danger' : '')}">${item.daily_change_pct == null ? '-' : formatPercent(item.daily_change_pct)}</td>
                             <td class="${pnlClass}">${item.eval_pnl > 0 ? '+' : ''}${formatCurrency(item.eval_pnl)}</td>
                         `;
                         tbodyEval.appendChild(tr);
