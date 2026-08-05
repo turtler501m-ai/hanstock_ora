@@ -1904,6 +1904,77 @@ class DashboardCoreTests(unittest.TestCase):
             stock_routes._clear_balance_cache = original_clear_balance_cache
             stock_routes.trader.config.dry_run = original_dry_run
 
+    def test_balance_sync_sell_preserves_strategy_attribution(self):
+        import src.dashboard.routes.stock as stock_routes
+
+        original_db_path = dashboard.trader.config.trade_db_path
+        original_get_api = stock_routes._get_api
+        original_get_balance_data = stock_routes._get_balance_data
+        original_fetch_cloud_trades = stock_routes.fetch_cloud_trades
+        original_clear_balance_cache = stock_routes._clear_balance_cache
+        original_dry_run = stock_routes.trader.config.dry_run
+
+        class _FakeAPI:
+            def get_trade_history(self, start_date, end_date):
+                return []
+
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                db_path = f"{tmpdir}/trades.sqlite"
+                dashboard.trader.config.trade_db_path = db_path
+                stock_routes.trader.config.dry_run = False
+                dashboard.trader.save_trade(
+                    "005930", "Samsung", "buy", 6, 70000, "strategy buy",
+                    True, True, order_status="filled", filled_qty=6,
+                    filled_price=70000, strategy_id="alpha",
+                )
+                dashboard.trader.save_trade(
+                    "005930", "Samsung", "buy", 4, 70000, "strategy buy",
+                    True, True, order_status="filled", filled_qty=4,
+                    filled_price=70000, strategy_id="beta",
+                )
+                stock_routes._get_api = lambda: _FakeAPI()
+                stock_routes._get_balance_data = lambda api, allow_cache=False: {
+                    "output1": [{
+                        "pdno": "005930", "prdt_name": "Samsung",
+                        "hldg_qty": "5", "pchs_avg_pric": "70000",
+                        "prpr": "71000", "evlu_pfls_amt": "5000",
+                    }],
+                    "output2": [{}],
+                }
+                stock_routes.fetch_cloud_trades = lambda: []
+                stock_routes._clear_balance_cache = lambda: None
+
+                first = stock_routes._execute_trade_sync(
+                    days=1, run_id="strategy-attribution-1",
+                    started_at="2026-08-05T10:00:00+09:00",
+                )
+                second = stock_routes._execute_trade_sync(
+                    days=1, run_id="strategy-attribution-2",
+                    started_at="2026-08-05T10:01:00+09:00",
+                )
+
+                self.assertEqual(first["balance_synced_count"], 2)
+                self.assertEqual(second["balance_synced_count"], 0)
+                with sqlite3.connect(db_path) as conn:
+                    conn.row_factory = sqlite3.Row
+                    rows = conn.execute(
+                        "SELECT action, qty, strategy_id, reason FROM trades "
+                        "WHERE order_status = 'reconciled' ORDER BY strategy_id"
+                    ).fetchall()
+                self.assertEqual(
+                    [(row["action"], row["qty"], row["strategy_id"]) for row in rows],
+                    [("sell", 3, "alpha"), ("sell", 2, "beta")],
+                )
+                self.assertTrue(all(row["reason"] == "증권사 잔고 전략귀속 동기화" for row in rows))
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+            stock_routes._get_api = original_get_api
+            stock_routes._get_balance_data = original_get_balance_data
+            stock_routes.fetch_cloud_trades = original_fetch_cloud_trades
+            stock_routes._clear_balance_cache = original_clear_balance_cache
+            stock_routes.trader.config.dry_run = original_dry_run
+
     def test_broker_cleanup_preserves_ambiguous_transport_failure(self):
         import src.dashboard.routes.stock as stock_routes
 

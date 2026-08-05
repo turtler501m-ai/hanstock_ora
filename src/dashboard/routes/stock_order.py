@@ -45,6 +45,83 @@ router = _CompatRouter(tags=["stock", "stock-order"])
 _trade_sync_lock = threading.Lock()
 _trade_sync_thread: threading.Thread | None = None
 
+_ATTRIBUTED_BALANCE_SYNC_REASON = "증권사 잔고 전략귀속 동기화"
+
+
+def _strategy_position_quantities(trades: list[dict]) -> dict[str, dict[str, int]]:
+    """Return positive, recorded strategy quantities by symbol."""
+    positions: dict[str, dict[str, int]] = {}
+    position_trades = _account_trades(trades)
+    position_trades.extend(
+        trade for trade in trades
+        if _trade_is_ok(trade)
+        and str(trade.get("reason") or "").strip() == _ATTRIBUTED_BALANCE_SYNC_REASON
+    )
+    for trade in position_trades:
+        symbol = str(trade.get("symbol") or "").strip()
+        strategy_id = str(trade.get("strategy_id") or "").strip()
+        action = str(trade.get("action") or "").strip().lower()
+        if not symbol or not strategy_id or action not in {"buy", "sell"}:
+            continue
+        qty = _to_int(trade.get("qty"))
+        if qty <= 0:
+            continue
+        by_strategy = positions.setdefault(symbol, {})
+        delta = qty if action == "buy" else -qty
+        by_strategy[strategy_id] = by_strategy.get(strategy_id, 0) + delta
+    return {
+        symbol: {strategy_id: qty for strategy_id, qty in by_strategy.items() if qty > 0}
+        for symbol, by_strategy in positions.items()
+    }
+
+
+def _allocate_strategy_reconciliation(
+    qty: int,
+    strategy_quantities: dict[str, int],
+    *,
+    action: str,
+) -> list[tuple[str | None, int]]:
+    """Allocate a broker balance adjustment without losing known ownership."""
+    qty = max(0, int(qty))
+    owners = sorted(
+        ((str(strategy_id), int(owner_qty)) for strategy_id, owner_qty in strategy_quantities.items()
+         if str(strategy_id).strip() and int(owner_qty) > 0),
+        key=lambda item: item[0],
+    )
+    if qty <= 0:
+        return []
+    if not owners:
+        return [(None, qty)]
+
+    allocatable = min(qty, sum(owner_qty for _, owner_qty in owners)) if action == "sell" else qty
+    total_weight = sum(owner_qty for _, owner_qty in owners)
+    allocations = []
+    assigned = 0
+    remainders = []
+    for strategy_id, owner_qty in owners:
+        numerator = allocatable * owner_qty
+        allocated = numerator // total_weight
+        if action == "sell":
+            allocated = min(allocated, owner_qty)
+        allocations.append([strategy_id, allocated])
+        assigned += allocated
+        remainders.append((numerator % total_weight, strategy_id, owner_qty))
+
+    remaining = allocatable - assigned
+    for _, strategy_id, owner_qty in sorted(remainders, key=lambda item: (-item[0], item[1])):
+        if remaining <= 0:
+            break
+        allocation = next(item for item in allocations if item[0] == strategy_id)
+        if action != "sell" or allocation[1] < owner_qty:
+            allocation[1] += 1
+            remaining -= 1
+
+    result = [(strategy_id, allocated) for strategy_id, allocated in allocations if allocated > 0]
+    unattributed = qty - allocatable
+    if unattributed > 0:
+        result.append((None, unattributed))
+    return result
+
 @router.get("/api/approvals")
 def get_approvals(limit: int = 50, strategy_id: str | None = None):
     if limit < 1:
@@ -1206,10 +1283,23 @@ def _execute_trade_sync(*, days: int, run_id: str, started_at: str) -> dict:
         for t in cloud_trades + local_trades:
             ts = t.get("ts") or t.get("timestamp")
             if not ts: continue
-            key = f"{ts}_{t.get('symbol')}_{t.get('action')}"
+            key = (
+                f"{ts}_{t.get('symbol')}_{t.get('action')}_"
+                f"{t.get('strategy_id') or ''}_{t.get('qty') or 0}_"
+                f"{t.get('broker_order_id') or ''}"
+            )
             merged_trades[key] = t
 
-        trades = _account_trades(sorted(merged_trades.values(), key=lambda x: x.get("ts", "")))
+        merged_values = sorted(merged_trades.values(), key=lambda x: x.get("ts", ""))
+        trades = _account_trades(merged_values)
+        # Performance excludes synthetic balance rows, but balance reconciliation must
+        # remember its own new adjustments or the same gap is inserted every run.
+        trades.extend(
+            trade for trade in merged_values
+            if _trade_is_ok(trade)
+            and str(trade.get("reason") or "").strip() == _ATTRIBUTED_BALANCE_SYNC_REASON
+        )
+        strategy_positions = _strategy_position_quantities(local_trades)
 
         db_holdings = {}
         names = {}
@@ -1240,33 +1330,39 @@ def _execute_trade_sync(*, days: int, run_id: str, started_at: str) -> dict:
                 raw_stock = ch.get("_raw", {})
                 price = int(float(raw_stock.get("pchs_avg_pric", ch["price"])))
 
-                trader.save_trade(
-                    symbol=sym,
-                    name=ch["name"],
-                    action=action,
-                    qty=abs(diff),
-                    price=price,
-                    reason="증권사 잔고 강제 동기화(수동/누락분 보정)",
-                    ok=True,
-                    order_submission_enabled=False,
-                    order_status="reconciled",
-                    filled_qty=abs(diff),
-                    filled_price=price,
+                allocations = _allocate_strategy_reconciliation(
+                    abs(diff), strategy_positions.get(sym, {}), action=action,
                 )
-                synced_count += 1
-                balance_sync_items.append({
-                    "sync_type": "balance",
-                    "sync_result": "reconciled",
-                    "ts": trader.datetime.now(trader.KST).strftime("%Y-%m-%d %H:%M:%S"),
-                    "symbol": sym,
-                    "name": ch["name"],
-                    "action": action,
-                    "qty": abs(diff),
-                    "price": price,
-                    "broker_order_id": "",
-                    "order_status": "reconciled",
-                    "message": f"증권사 잔고 {broker_qty}주 / 기록 잔고 {db_qty}주 차이 보정",
-                })
+                for strategy_id, allocated_qty in allocations:
+                    trader.save_trade(
+                        symbol=sym,
+                        name=ch["name"],
+                        action=action,
+                        qty=allocated_qty,
+                        price=price,
+                        reason=_ATTRIBUTED_BALANCE_SYNC_REASON,
+                        ok=True,
+                        order_submission_enabled=False,
+                        order_status="reconciled",
+                        filled_qty=allocated_qty,
+                        filled_price=price,
+                        strategy_id=strategy_id,
+                    )
+                    balance_sync_items.append({
+                        "sync_type": "balance",
+                        "sync_result": "reconciled",
+                        "ts": trader.datetime.now(trader.KST).strftime("%Y-%m-%d %H:%M:%S"),
+                        "symbol": sym,
+                        "name": ch["name"],
+                        "action": action,
+                        "qty": allocated_qty,
+                        "price": price,
+                        "broker_order_id": "",
+                        "order_status": "reconciled",
+                        "strategy_id": strategy_id or "",
+                        "message": f"증권사 잔고 {broker_qty}주 / 기록 잔고 {db_qty}주 차이 보정",
+                    })
+                synced_count += len(allocations)
 
         # Calculate db average costs to use for selling missing items without affecting PnL
         db_costs = {}
@@ -1290,34 +1386,39 @@ def _execute_trade_sync(*, days: int, run_id: str, started_at: str) -> dict:
         for sym, db_qty in db_holdings.items():
             if db_qty > 0 and sym not in current_holdings:
                 avg_cost = int(db_costs.get(sym, {}).get("cost", 0))
-                trader.save_trade(
-                    symbol=sym,
-                    name=names.get(sym, sym),
-                    action="sell",
-                    qty=db_qty,
-                    price=avg_cost,  # Use avg_cost to avoid distorting Realized PnL
-
-                    reason="증권사 잔고 강제 동기화(수량 매도 보정)",
-                    ok=True,
-                    order_submission_enabled=False,
-                    order_status="reconciled",
-                    filled_qty=db_qty,
-                    filled_price=avg_cost,
+                allocations = _allocate_strategy_reconciliation(
+                    db_qty, strategy_positions.get(sym, {}), action="sell",
                 )
-                synced_count += 1
-                balance_sync_items.append({
-                    "sync_type": "balance",
-                    "sync_result": "reconciled",
-                    "ts": trader.datetime.now(trader.KST).strftime("%Y-%m-%d %H:%M:%S"),
-                    "symbol": sym,
-                    "name": names.get(sym, sym),
-                    "action": "sell",
-                    "qty": db_qty,
-                    "price": avg_cost,
-                    "broker_order_id": "",
-                    "order_status": "reconciled",
-                    "message": "증권사에 없는 로컬 보유수량 전량 보정",
-                })
+                for strategy_id, allocated_qty in allocations:
+                    trader.save_trade(
+                        symbol=sym,
+                        name=names.get(sym, sym),
+                        action="sell",
+                        qty=allocated_qty,
+                        price=avg_cost,  # Use avg_cost to avoid distorting Realized PnL
+                        reason=_ATTRIBUTED_BALANCE_SYNC_REASON,
+                        ok=True,
+                        order_submission_enabled=False,
+                        order_status="reconciled",
+                        filled_qty=allocated_qty,
+                        filled_price=avg_cost,
+                        strategy_id=strategy_id,
+                    )
+                    balance_sync_items.append({
+                        "sync_type": "balance",
+                        "sync_result": "reconciled",
+                        "ts": trader.datetime.now(trader.KST).strftime("%Y-%m-%d %H:%M:%S"),
+                        "symbol": sym,
+                        "name": names.get(sym, sym),
+                        "action": "sell",
+                        "qty": allocated_qty,
+                        "price": avg_cost,
+                        "broker_order_id": "",
+                        "order_status": "reconciled",
+                        "strategy_id": strategy_id or "",
+                        "message": "증권사에 없는 로컬 보유수량 전량 보정",
+                    })
+                synced_count += len(allocations)
 
         imported_count = _to_int(history_sync.get("imported_count")) if history_sync else 0
         updated_count = _to_int(history_sync.get("updated_count")) if history_sync else 0
