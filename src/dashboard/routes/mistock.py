@@ -1193,14 +1193,53 @@ def mistock_sell_all():
 
 
 @router.get("/api/mistock/trades")
-def mistock_trades(limit: int = 20):
-    rows = mistock_db.rows("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (max(1, min(limit, 500)),))
+def mistock_trades(limit: int = 20, strategy_id: str = ""):
+    if strategy_id:
+        rows = mistock_db.rows(
+            "SELECT * FROM trades WHERE COALESCE(strategy_id, 'unattributed') = ? ORDER BY id DESC LIMIT ?",
+            (strategy_id, max(1, min(limit, 500))),
+        )
+    else:
+        rows = mistock_db.rows("SELECT * FROM trades ORDER BY id DESC LIMIT ?", (max(1, min(limit, 500)),))
     return {"trades": rows}
 
 
 @router.post("/api/mistock/trades/sync")
 def mistock_trades_sync():
-    return {"ok": True, "synced_count": 0, "message": "Mistock demo DB is authoritative."}
+    started_at = mistock_db.now_text()
+    result = {"ok": True, "synced_count": 0, "message": "Mistock demo DB is authoritative."}
+    run_id = mistock_db.execute(
+        "INSERT INTO trade_sync_runs (started_at, finished_at, synced_count, status, message) VALUES (?, ?, ?, ?, ?)",
+        (started_at, mistock_db.now_text(), 0, "success", result["message"]),
+    )
+    return {**result, "run_id": run_id, "started_at": started_at, "finished_at": mistock_db.now_text()}
+
+
+@router.get("/api/mistock/trades/sync-runs")
+def mistock_trade_sync_runs(limit: int = 20):
+    return {"runs": mistock_db.rows(
+        "SELECT * FROM trade_sync_runs ORDER BY id DESC LIMIT ?", (max(1, min(limit, 100)),)
+    )}
+
+
+@router.get("/api/mistock/performance/cashflows")
+def mistock_performance_cashflows():
+    return {"cashflows": mistock_db.rows("SELECT * FROM performance_cashflows ORDER BY occurred_at, id")}
+
+
+@router.post("/api/mistock/performance/cashflows")
+def mistock_save_performance_cashflow(payload: dict = Body(...)):
+    kind = str(payload.get("kind") or "").strip().lower()
+    amount = float(payload.get("amount") or 0)
+    occurred_at = str(payload.get("occurred_at") or mistock_db.now_text()).replace("T", " ")[:19]
+    if kind not in {"deposit", "withdrawal", "dividend", "interest", "other"} or amount == 0:
+        raise HTTPException(status_code=400, detail="valid kind and non-zero amount required")
+    signed_amount = -abs(amount) if kind == "withdrawal" else abs(amount)
+    row_id = mistock_db.execute(
+        "INSERT INTO performance_cashflows (occurred_at, kind, amount, note, confirmed, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (occurred_at, kind, signed_amount, str(payload.get("note") or ""), int(bool(payload.get("confirmed"))), mistock_db.now_text()),
+    )
+    return {"ok": True, "cashflow": mistock_db.row("SELECT * FROM performance_cashflows WHERE id = ?", (row_id,))}
 
 
 def _mistock_account_trades(trades: list[dict]) -> list[dict]:
@@ -1261,6 +1300,7 @@ _MISTOCK_INDEX_TICKERS = {
     "nasdaq": "^IXIC",
 }
 _MISTOCK_INDEX_CACHE: tuple[float, dict[str, list[dict]]] = (0.0, {})
+_MISTOCK_PRICE_CACHE: tuple[float, dict[str, list[dict]]] = (0.0, {})
 
 
 def _load_mistock_index_rows() -> dict[str, list[dict]]:
@@ -1299,6 +1339,61 @@ def _load_mistock_index_rows() -> dict[str, list[dict]]:
 
     _MISTOCK_INDEX_CACHE = (time.monotonic(), series)
     return series
+
+
+def _load_mistock_price_rows(symbols: list[str]) -> dict[str, list[dict]]:
+    global _MISTOCK_PRICE_CACHE
+    cached_at, cached = _MISTOCK_PRICE_CACHE
+    requested = sorted(set(symbols))
+    if requested and time.monotonic() - cached_at < 300 and all(symbol in cached for symbol in requested):
+        return {symbol: cached[symbol] for symbol in requested}
+    if not requested:
+        return {}
+    try:
+        from src.online_access import require_online_access
+        import yfinance as yf
+
+        require_online_access("Mistock strategy forward performance")
+        frame = yf.download(requested, period="6mo", interval="1d", auto_adjust=False, progress=False, threads=True, timeout=10)
+        close = frame["Close"]
+        result = {}
+        for symbol in requested:
+            series = close[symbol].dropna() if getattr(close, "ndim", 1) > 1 else close.dropna()
+            result[symbol] = [{"date": str(index)[:10], "close": float(value)} for index, value in series.items()]
+        _MISTOCK_PRICE_CACHE = (time.monotonic(), result)
+        return result
+    except Exception as exc:
+        logger.info(f"Mistock strategy price data unavailable: {exc}")
+        return {}
+
+
+def _mistock_strategy_forward(trades: list[dict], index_rows: dict[str, list[dict]]) -> list[dict]:
+    from src.strategy.forward_performance import build_strategy_forward_performance
+
+    symbols = sorted({str(row.get("symbol") or "") for row in trades if row.get("symbol")})
+    names = {
+        str(row["id"]): str(row.get("name") or row["id"])
+        for row in mistock_db.rows("SELECT id, name FROM ai_strategies")
+    }
+    rows = build_strategy_forward_performance(
+        trades,
+        _load_mistock_price_rows(symbols),
+        {"KOSPI": index_rows.get("sp500", []), "KOSDAQ": index_rows.get("nasdaq", [])},
+        strategy_names=names,
+    )
+    for row in rows:
+        row["sp500_return_pct"] = row.pop("kospi_return_pct", None)
+        row["nasdaq_return_pct"] = row.pop("kosdaq_return_pct", None)
+        row["excess_vs_sp500_pct"] = row.pop("excess_vs_kospi_pct", None)
+        row["excess_vs_nasdaq_pct"] = row.pop("excess_vs_kosdaq_pct", None)
+        row["sp500_twr_pct"] = row.pop("kospi_twr_pct", None)
+        row["nasdaq_twr_pct"] = row.pop("kosdaq_twr_pct", None)
+        row["twr_pct"] = row.get("returns", {}).get("twr_pct")
+        row["sp500_twr_pct"] = row.get("returns", {}).get("kospi_twr_pct")
+        row["nasdaq_twr_pct"] = row.get("returns", {}).get("kosdaq_twr_pct")
+        row["excess_twr_vs_sp500_pct"] = row.get("returns", {}).get("excess_twr_vs_kospi_pct")
+        row["max_drawdown_pct"] = row.get("nav", {}).get("max_drawdown_pct")
+    return rows
 
 
 def _mistock_market_context(
@@ -1343,7 +1438,9 @@ def _mistock_market_context(
     return context
 
 
-def _build_mistock_periodic_performance(trades: list[dict], strategy_id: str = "") -> dict:
+def _build_mistock_periodic_performance(
+    trades: list[dict], strategy_id: str = "", cashflows: list[dict] | None = None,
+) -> dict:
     daily: dict[str, dict] = {}
     weekly: dict[str, dict] = {}
     monthly: dict[str, dict] = {}
@@ -1445,9 +1542,25 @@ def _build_mistock_periodic_performance(trades: list[dict], strategy_id: str = "
         week["details"].append(detail)
         month["details"].append(detail)
 
+    for cashflow in cashflows or []:
+        occurred = str(cashflow.get("occurred_at") or "")[:10]
+        if len(occurred) < 10:
+            continue
+        iso = datetime.fromisoformat(occurred).isocalendar()
+        amount = float(cashflow.get("amount") or 0)
+        for rows, key in (
+            (daily, occurred), (weekly, f"{iso.year}-W{iso.week:02d}"), (monthly, occurred[:7]),
+        ):
+            rows.setdefault(key, _period_bucket())["external_cashflow"] = (
+                rows.setdefault(key, _period_bucket()).get("external_cashflow", 0.0) + amount
+            )
+
     for rows in (daily, weekly, monthly):
         for bucket in rows.values():
-            bucket["net_cashflow"] = round(bucket["sell_amount"] - bucket["buy_amount"], 2)
+            bucket["external_cashflow"] = round(bucket.get("external_cashflow", 0.0), 2)
+            bucket["net_cashflow"] = round(
+                bucket["sell_amount"] - bucket["buy_amount"] + bucket["external_cashflow"], 2
+            )
             bucket["realized_pnl_rate"] = round((bucket["realized_pnl"] / bucket["cost_of_sold"] * 100), 2) if bucket["cost_of_sold"] > 0 else 0.0
             bucket["buy_amount"] = round(bucket["buy_amount"], 2)
             bucket["sell_amount"] = round(bucket["sell_amount"], 2)
@@ -1458,6 +1571,11 @@ def _build_mistock_periodic_performance(trades: list[dict], strategy_id: str = "
     daily_market = _mistock_market_context(index_rows)
     weekly_market = _mistock_market_context(index_rows, weekly=True)
     monthly_market = _mistock_market_context(index_rows, monthly=True)
+    try:
+        strategy_forward = _mistock_strategy_forward(account_trades, index_rows)
+    except Exception as exc:
+        logger.info(f"Mistock strategy forward performance unavailable: {exc}")
+        strategy_forward = []
     return {
         "daily": [
             {"period": key, **value, **daily_market.get(key, {})}
@@ -1472,8 +1590,40 @@ def _build_mistock_periodic_performance(trades: list[dict], strategy_id: str = "
             for key, value in sorted(monthly.items())
         ],
         "strategy_validation": _core._strategy_validation(strategy_stats),
+        "strategy_forward": strategy_forward,
         "market_data_available": bool(daily_market),
+        "unconfirmed_cashflow_count": sum(not bool(row.get("confirmed")) for row in cashflows or []),
     }
+
+
+def _mistock_holding_daily_change(holdings: dict[str, dict]) -> dict:
+    symbols = [symbol for symbol, item in holdings.items() if float(item.get("qty") or 0) > 0]
+    if not symbols:
+        return {"holding_daily_change_pct": None, "holding_daily_change_symbol_count": 0}
+    try:
+        import yfinance as yf
+        from src.online_access import require_online_access
+
+        require_online_access("Mistock holding daily performance")
+        frame = yf.download(symbols, period="5d", interval="1d", auto_adjust=False, progress=False, threads=True, timeout=8)
+        close = frame["Close"]
+        previous_value = current_value = 0.0
+        count = 0
+        for symbol in symbols:
+            series = close[symbol].dropna() if getattr(close, "ndim", 1) > 1 else close.dropna()
+            if len(series) < 2:
+                continue
+            qty = float(holdings[symbol].get("qty") or 0)
+            previous_value += qty * float(series.iloc[-2])
+            current_value += qty * float(series.iloc[-1])
+            count += 1
+        return {
+            "holding_daily_change_pct": round((current_value / previous_value - 1) * 100, 2) if previous_value > 0 else None,
+            "holding_daily_change_symbol_count": count,
+        }
+    except Exception as exc:
+        logger.info(f"Mistock holding daily performance unavailable: {exc}")
+        return {"holding_daily_change_pct": None, "holding_daily_change_symbol_count": 0}
 
 
 @router.get("/api/mistock/performance")
@@ -1569,6 +1719,9 @@ def mistock_performance(strategy_id: str = ""):
                 for symbol, position in holdings.items()
                 if float(position.get("qty") or 0) > 0
             )
+        daily_change = _mistock_holding_daily_change(
+            {symbol: position for symbol, position in holdings.items() if not strategy_id or float(position.get("qty") or 0) > 0}
+        )
                 
         return {
             "total_trades": total_trades,
@@ -1577,7 +1730,8 @@ def mistock_performance(strategy_id: str = ""):
             "total_eval_pnl": round(total_eval_pnl, 2),
             "total_broker_pnl": round(total_broker_pnl, 2),
             "eval_details": eval_details,
-            "untracked_details": []
+            "untracked_details": [],
+            **daily_change,
         }
     except Exception as e:
         from src.utils.logger import logger
@@ -1597,7 +1751,8 @@ def mistock_performance(strategy_id: str = ""):
 def mistock_periodic_performance(strategy_id: str = ""):
     try:
         trades = mistock_db.rows("SELECT * FROM trades ORDER BY ts ASC")
-        return _build_mistock_periodic_performance(trades, strategy_id=strategy_id)
+        cashflows = mistock_db.rows("SELECT * FROM performance_cashflows ORDER BY occurred_at, id")
+        return _build_mistock_periodic_performance(trades, strategy_id=strategy_id, cashflows=cashflows)
     except Exception as e:
         from src.utils.logger import logger
         logger.error(f"Failed to calculate mistock periodic performance: {e}")

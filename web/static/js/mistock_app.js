@@ -83,7 +83,7 @@ function renderPerformanceDetailPanel(item) {
     document.getElementById('performance-detail-panel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-function renderStrategyValidation(items) {
+function renderStrategyValidation(items, forwardItems = []) {
     const tbody = document.querySelector('#table-strategy-validation tbody');
     if (!tbody) return;
     if (!items.length) {
@@ -92,6 +92,7 @@ function renderStrategyValidation(items) {
     }
     const labels = { effective: '유효', monitor: '관찰', review: '재검토', insufficient: '표본 부족' };
     tbody.innerHTML = items.map((item) => {
+        const forward = forwardItems.find((row) => String(row.strategy_id) === String(item.strategy_id)) || {};
         const pnl = Number(item.realized_pnl || 0);
         const kind = item.validation_status === 'effective' ? 'buy'
             : item.validation_status === 'review' ? 'sell' : 'hold';
@@ -102,7 +103,11 @@ function renderStrategyValidation(items) {
             <td>${item.profit_factor == null ? '-' : Number(item.profit_factor).toFixed(2)}</td>
             <td>${item.expectancy == null ? '-' : formatCurrency(item.expectancy)}</td>
             <td class="${pnl > 0 ? 'text-success' : pnl < 0 ? 'text-danger' : ''}">${formatCurrency(pnl)}</td>
-            <td>${formatCurrency(item.max_drawdown || 0)}</td>
+            <td>${forward.twr_pct == null ? '-' : formatPercent(forward.twr_pct)}</td>
+            <td>${forward.max_drawdown_pct == null ? formatCurrency(item.max_drawdown || 0) : formatPercent(forward.max_drawdown_pct)}</td>
+            <td>${forward.sp500_twr_pct == null ? '-' : formatPercent(forward.sp500_twr_pct)}</td>
+            <td>${forward.nasdaq_twr_pct == null ? '-' : formatPercent(forward.nasdaq_twr_pct)}</td>
+            <td>${forward.excess_twr_vs_sp500_pct == null ? '-' : formatPercent(forward.excess_twr_vs_sp500_pct)}</td>
             <td>${pill(labels[item.validation_status] || item.validation_status, kind)}
                 <small class="strategy-validation-reason">${escapeHtml(item.validation_reason || '')}</small></td>
         </tr>`;
@@ -2727,6 +2732,12 @@ async function renderTrades() {
                 evalPnlEl.textContent = formatCurrency(evalPnl);
                 evalPnlEl.className = evalPnl > 0 ? 'text-success' : (evalPnl < 0 ? 'text-danger' : '');
             }
+            const holdingChangeEl = document.getElementById('perf-holding-daily-change');
+            if (holdingChangeEl) {
+                const change = perf.holding_daily_change_pct;
+                holdingChangeEl.textContent = change == null ? '-' : `${Number(change) > 0 ? '+' : ''}${Number(change).toFixed(2)}%`;
+                holdingChangeEl.className = Number(change) > 0 ? 'text-success' : (Number(change) < 0 ? 'text-danger' : '');
+            }
             
             const tbodyEval = document.querySelector('#table-eval-details tbody');
             if (tbodyEval) {
@@ -2792,7 +2803,7 @@ async function renderTrades() {
             console.error('Failed to fetch performance summary', e);
         }
 
-        const trades = await fetchJson('/api/mistock/trades?limit=20');
+        const trades = await fetchJson(performanceApiUrl('/api/mistock/trades?limit=20').replace('?limit=20?', '?limit=20&'));
         const tbodyTrades = document.querySelector('#table-trades tbody');
         if (!tbodyTrades) return;
         tbodyTrades.innerHTML = '';
@@ -2894,6 +2905,47 @@ async function renderPeriodicPerformance() {
     }
 }
 
+async function renderMistockTradeSyncRuns() {
+    const panel = document.getElementById('trade-sync-last-result');
+    const tbody = document.querySelector('#table-trade-sync-runs tbody');
+    if (!panel || !tbody) return;
+    const data = await fetchJson('/api/mistock/trades/sync-runs?limit=10');
+    const runs = data.runs || [];
+    panel.hidden = !runs.length;
+    tbody.innerHTML = '';
+    if (!runs.length) return;
+    setElementText('trade-sync-result-summary', runs[0].message || '-');
+    setElementText('trade-sync-result-time', runs[0].finished_at || runs[0].started_at || '-');
+    runs.forEach((run) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${escapeHtml(run.started_at || '-')}</td><td>${formatNumber(run.synced_count || 0)}건</td><td>${escapeHtml(run.status || '-')}</td><td>${escapeHtml(run.message || '-')}</td>`;
+        tbody.appendChild(tr);
+    });
+}
+
+async function saveMistockPerformanceCashflow() {
+    const amount = Number(document.getElementById('performance-cashflow-amount')?.value || 0);
+    if (!amount) {
+        setStatus('현금흐름 금액을 입력하세요.');
+        return;
+    }
+    setButtonBusy('btn-save-performance-cashflow', true);
+    try {
+        await postJson('/api/mistock/performance/cashflows', {
+            occurred_at: document.getElementById('performance-cashflow-at')?.value || new Date().toISOString(),
+            kind: document.getElementById('performance-cashflow-kind')?.value || 'other',
+            amount,
+            note: document.getElementById('performance-cashflow-note')?.value || '',
+            confirmed: Boolean(document.getElementById('performance-cashflow-confirmed')?.checked),
+        });
+        document.getElementById('performance-cashflow-amount').value = '';
+        setStatus('성과 현금흐름을 저장했습니다.', true);
+        await renderTrades();
+    } finally {
+        setButtonBusy('btn-save-performance-cashflow', false);
+    }
+}
+
 function updatePeriodicPerformanceUI() {
     if (!periodicDataCache) return;
     setPerformanceDetailPanelOpen(false);
@@ -2907,7 +2959,7 @@ function updatePeriodicPerformanceUI() {
     if (tbody) {
         tbody.innerHTML = '';
         if (!dataList.length) {
-            tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; padding: 2rem; color: #94a3b8;">성과 분석 데이터가 없습니다.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; padding: 2rem; color: #94a3b8;">성과 분석 데이터가 없습니다.</td></tr>`;
         } else {
             // Sort to display latest data first in the table
             const tableDataList = [...dataList].reverse();
@@ -2925,6 +2977,7 @@ function updatePeriodicPerformanceUI() {
                     <td class="${pnlClass}">${pnl > 0 ? '+' : ''}${formatCurrency(pnl)}</td>
                     <td class="${pnlClass}">${pnlRate > 0 ? '+' : ''}${pnlRate.toFixed(2)}%</td>
                     <td class="${pnl > 0 ? 'text-success' : (pnl < 0 ? 'text-danger' : '')}">${formatCurrency(item.net_cashflow)}</td>
+                    <td>${formatCurrency(item.external_cashflow || 0)}</td>
                     <td>${formatMarketIndex(item.sp500, item.sp500_change_pct)}</td>
                     <td>${formatMarketIndex(item.nasdaq, item.nasdaq_change_pct)}</td>
                 `;
@@ -2933,7 +2986,7 @@ function updatePeriodicPerformanceUI() {
             });
         }
     }
-    renderStrategyValidation(periodicDataCache.strategy_validation || []);
+    renderStrategyValidation(periodicDataCache.strategy_validation || [], periodicDataCache.strategy_forward || []);
     
     // 2. Render Chart.js with defense
     if (typeof Chart === 'undefined') {
@@ -3408,6 +3461,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const result = await postJson('/api/mistock/trades/sync', {});
                 setStatus(`증권사 기록 동기화 완료 (누락된 ${result.synced_count}건 추가됨)`, true);
                 await Promise.all([renderTrades(), renderBalance()]);
+                await renderMistockTradeSyncRuns();
                 
                 btnSyncTrades.textContent = result.synced_count > 0 ? `동기화 완료 (${result.synced_count}건)` : '동기화 완료 ✔️';
                 btnSyncTrades.style.backgroundColor = '#10b981'; // success green
@@ -3438,6 +3492,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const performanceScope = document.getElementById('select-performance-scope');
     if (performanceScope) {
         performanceScope.addEventListener('change', renderTrades);
+    }
+    const btnSavePerformanceCashflow = document.getElementById('btn-save-performance-cashflow');
+    if (btnSavePerformanceCashflow) {
+        btnSavePerformanceCashflow.addEventListener('click', saveMistockPerformanceCashflow);
     }
     const btnRefreshPerformance = document.getElementById('btn-refresh-performance');
     if (btnRefreshPerformance) {
@@ -3531,6 +3589,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setTableMessage('#table-optimizer tbody', 7, '최적화를 누르면 리스크 기반 목표 비중을 확인합니다');
     
     fetchDashboardData();
+    renderMistockTradeSyncRuns().catch((err) => console.error('Trade sync history failed:', err));
     
     setInterval(() => Promise.all([
         renderRuntime(),

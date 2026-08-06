@@ -134,6 +134,37 @@ class MistockDashboardTests(unittest.TestCase):
             {"alpha", "unattributed"},
         )
 
+    def test_mistock_performance_cashflow_and_sync_history_are_persisted(self):
+        saved = mistock.mistock_save_performance_cashflow({
+            "occurred_at": "2026-08-01T10:00:00", "kind": "deposit",
+            "amount": 500, "note": "account funding", "confirmed": True,
+        })
+        sync = mistock.mistock_trades_sync()
+
+        self.assertTrue(saved["ok"])
+        self.assertEqual(saved["cashflow"]["amount"], 500)
+        self.assertTrue(sync["ok"])
+        self.assertEqual(len(mistock.mistock_trade_sync_runs()["runs"]), 1)
+        periodic = mistock._build_mistock_periodic_performance(
+            [], cashflows=mistock.mistock_performance_cashflows()["cashflows"]
+        )
+        self.assertEqual(periodic["daily"][0]["external_cashflow"], 500)
+        self.assertEqual(periodic["daily"][0]["net_cashflow"], 500)
+
+    def test_mistock_trade_list_can_filter_selected_strategy(self):
+        mistock_db.init_db()
+        for strategy_id, symbol in (("alpha", "AAPL"), ("beta", "MSFT")):
+            mistock_db.execute(
+                """INSERT INTO trades
+                   (ts, symbol, name, action, qty, price, ok, env, dry_run, order_status, strategy_id)
+                   VALUES (?, ?, ?, 'buy', 1, 100, 1, 'demo', 0, 'filled', ?)""",
+                (mistock_db.now_text(), symbol, symbol, strategy_id),
+            )
+
+        result = mistock.mistock_trades(strategy_id="alpha")
+
+        self.assertEqual([row["symbol"] for row in result["trades"]], ["AAPL"])
+
     def test_mistock_uses_separate_runtime_database(self):
         health = mistock.mistock_health()
         watchlist = mistock.mistock_watchlist()
