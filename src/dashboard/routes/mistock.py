@@ -379,12 +379,9 @@ def mistock_balance():
             """
         )
     }
-    if active_symbols:
-        balance["holdings"] = [
-            holding for holding in balance.get("holdings", [])
-            if str(holding.get("symbol") or "") not in active_symbols
-        ]
-        balance["pending_sell_symbols"] = sorted(active_symbols)
+    for holding in balance.get("holdings", []):
+        holding["sell_pending"] = str(holding.get("symbol") or "") in active_symbols
+    balance["pending_sell_symbols"] = sorted(active_symbols)
     _summarize_mistock_holdings(balance)
     return balance
 

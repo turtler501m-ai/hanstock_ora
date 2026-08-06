@@ -1162,16 +1162,21 @@ function renderHoldingRows() {
         const rtClass = Number(holding.rt || 0) >= 0 ? 'text-success' : 'text-danger';
         const qty = Number(holding.qty || 0);
         const sellableQty = Number(holding.sellable_qty ?? holding.qty ?? 0);
-        const canSell = sellableQty > 0;
-        const qtyText = sellableQty !== qty
+        const sellPending = Boolean(holding.sell_pending);
+        const canSell = sellableQty > 0 && !sellPending;
+        const mistockWeight = Number(holding.mistock_weight || 0);
+        const maxSingleWeight = Number(latestConfig?.max_single_weight || 0);
+        const weightExceeded = maxSingleWeight > 0 && mistockWeight > maxSingleWeight + 0.000001;
+        let qtyText = sellableQty !== qty
             ? `${qty.toLocaleString()} <small class="time-muted">매도가능 ${sellableQty.toLocaleString()}</small>`
             : qty.toLocaleString();
+        if (sellPending) {
+            qtyText += ' <small class="time-muted">매도 진행중</small>';
+        }
         const sourceBadge = holding.source === 'local_shadow'
             ? '<small class="time-muted">로컬 체결 보정</small>'
             : '';
-        const strategyBadges = (holding.strategy_names || []).length
-            ? holding.strategy_names.map((name) => pill(name, 'hold')).join(' ')
-            : '<span class="time-muted">귀속 미확인</span>';
+        const strategyAllocations = holding.strategy_allocations || [];
         const pnlStatus = holding.pnl_status || (Number(holding.pnl || 0) < 0 ? 'loss' : (Number(holding.pnl || 0) > 0 ? 'profit' : 'flat'));
         const pnlStatusLabel = pnlStatus === 'loss' ? '손실' : (pnlStatus === 'profit' ? '수익' : '보합');
         const tr = document.createElement('tr');
@@ -1183,11 +1188,13 @@ function renderHoldingRows() {
             <td>${qtyText}</td>
             <td>${formatCurrency(holding.price)}</td>
             <td>${formatCurrency(holding.value || Number(holding.qty || 0) * Number(holding.price || 0))}</td>
-            <td><strong>${formatNumber(Number(holding.mistock_weight || 0) * 100, 2)}%</strong></td>
+            <td class="${weightExceeded ? 'text-danger' : ''}"><strong>${formatNumber(mistockWeight * 100, 2)}%</strong>${weightExceeded ? '<small class="time-muted">한도 초과</small>' : ''}</td>
             <td class="${rtClass}">${formatPercent(holding.rt)}</td>
             <td class="${rtClass}">${formatCurrency(holding.pnl)}</td>
             <td><span class="holding-pnl-badge is-${pnlStatus}">${pnlStatusLabel}</span></td>
-            <td>${strategyBadges}</td>
+            <td><div class="holding-strategy-chips">${strategyAllocations.length
+                ? strategyAllocations.map((item) => `<span class="holding-strategy-chip">${escapeHtml(item.strategy_name || item.strategy_id)}<small>${formatNumber(item.allocated_qty || 0, 2)}주</small></span>`).join('')
+                : '<span class="time-muted">귀속 미확인</span>'}</div></td>
             <td>
                 <button type="button" class="button-ghost queue-order"
                     data-symbol="${escapeHtml(holding.symbol)}"
@@ -1199,8 +1206,8 @@ function renderHoldingRows() {
                     data-source="dashboard_holding_sell"
                     data-strategy-id="${escapeHtml((holding.strategy_ids || [])[0] || '')}"
                     ${canSell ? '' : 'disabled'}
-                    title="${canSell ? '매도가능수량 전량 매도' : '매도가능수량 없음'}"
-                    style="padding:3px 8px;font-size:0.75rem;">전량</button>
+                    title="${sellPending ? '기존 매도 주문 처리 중' : (canSell ? '매도가능수량 전량 매도' : '매도가능수량 없음')}"
+                    style="padding:3px 8px;font-size:0.75rem;">${sellPending ? '진행중' : '전량'}</button>
             </td>
         `;
         tbodyHoldings.appendChild(tr);
