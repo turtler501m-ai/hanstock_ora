@@ -562,6 +562,13 @@ let periodicActiveTab = 'daily';
 let periodicDataCache = null;
 let latestConfig = null;
 
+function performanceApiUrl(path) {
+    const scope = document.getElementById('select-performance-scope')?.value || 'account';
+    if (scope !== 'strategy') return path;
+    const strategyId = activeStrategyAuditId || document.getElementById('select-ai-ranker')?.value || '';
+    return strategyId ? `${path}?strategy_id=${encodeURIComponent(strategyId)}` : path;
+}
+
 function normalizeSettingNumber(value) {
     return String(value ?? '').replaceAll(',', '').trim();
 }
@@ -2706,7 +2713,7 @@ async function renderTrades() {
     try {
         // 성과 요약 (Performance)
         try {
-            const perf = await fetchJson('/api/mistock/performance', 30000);
+            const perf = await fetchJson(performanceApiUrl('/api/mistock/performance'), 30000);
             document.getElementById('perf-total-trades').textContent = `${perf.total_trades}회`;
             document.getElementById('perf-success-rate').textContent = `${perf.success_rate}%`;
             
@@ -2837,11 +2844,12 @@ async function renderTrades() {
 
 async function renderPeriodicPerformance() {
     try {
-        const periodicData = await fetchJson('/api/mistock/performance/periodic', 30000);
+        const periodicData = await fetchJson(performanceApiUrl('/api/mistock/performance/periodic'), 30000);
         periodicDataCache = periodicData;
         
         // Attach sub-tab event listeners once
         const dailyBtn = document.getElementById('btn-perf-daily');
+        const weeklyBtn = document.getElementById('btn-perf-weekly');
         const monthlyBtn = document.getElementById('btn-perf-monthly');
         const closeDetailBtn = document.getElementById('btn-close-performance-detail');
         
@@ -2850,6 +2858,17 @@ async function renderPeriodicPerformance() {
             dailyBtn.addEventListener('click', () => {
                 periodicActiveTab = 'daily';
                 dailyBtn.classList.add('active');
+                if (weeklyBtn) weeklyBtn.classList.remove('active');
+                if (monthlyBtn) monthlyBtn.classList.remove('active');
+                updatePeriodicPerformanceUI();
+            });
+        }
+        if (weeklyBtn && !weeklyBtn.dataset.listenerAttached) {
+            weeklyBtn.dataset.listenerAttached = 'true';
+            weeklyBtn.addEventListener('click', () => {
+                periodicActiveTab = 'weekly';
+                weeklyBtn.classList.add('active');
+                if (dailyBtn) dailyBtn.classList.remove('active');
                 if (monthlyBtn) monthlyBtn.classList.remove('active');
                 updatePeriodicPerformanceUI();
             });
@@ -2860,6 +2879,7 @@ async function renderPeriodicPerformance() {
                 periodicActiveTab = 'monthly';
                 monthlyBtn.classList.add('active');
                 if (dailyBtn) dailyBtn.classList.remove('active');
+                if (weeklyBtn) weeklyBtn.classList.remove('active');
                 updatePeriodicPerformanceUI();
             });
         }
@@ -2878,7 +2898,9 @@ function updatePeriodicPerformanceUI() {
     if (!periodicDataCache) return;
     setPerformanceDetailPanelOpen(false);
     
-    const dataList = periodicActiveTab === 'daily' ? (periodicDataCache.daily || []) : (periodicDataCache.monthly || []);
+    const dataList = periodicActiveTab === 'daily'
+        ? (periodicDataCache.daily || [])
+        : (periodicActiveTab === 'weekly' ? (periodicDataCache.weekly || []) : (periodicDataCache.monthly || []));
     
     // 1. Populate the table
     const tbody = document.querySelector('#table-periodic-performance tbody');
@@ -3410,6 +3432,22 @@ document.addEventListener('DOMContentLoaded', () => {
                     btnSyncTrades.style.backgroundColor = '';
                     btnSyncTrades.style.color = '';
                 }, 3000);
+            }
+        });
+    }
+    const performanceScope = document.getElementById('select-performance-scope');
+    if (performanceScope) {
+        performanceScope.addEventListener('change', renderTrades);
+    }
+    const btnRefreshPerformance = document.getElementById('btn-refresh-performance');
+    if (btnRefreshPerformance) {
+        btnRefreshPerformance.addEventListener('click', async () => {
+            setButtonBusy('btn-refresh-performance', true);
+            try {
+                await renderTrades();
+                setStatus('성과 자료를 새로고침했습니다.', true);
+            } finally {
+                setButtonBusy('btn-refresh-performance', false);
             }
         });
     }

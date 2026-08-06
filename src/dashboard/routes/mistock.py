@@ -1305,16 +1305,22 @@ def _mistock_market_context(
     index_rows: dict[str, list[dict]],
     *,
     monthly: bool = False,
+    weekly: bool = False,
 ) -> dict[str, dict]:
     context: dict[str, dict] = {}
     for name, rows in index_rows.items():
-        if monthly:
+        if monthly or weekly:
             grouped: dict[str, list[float]] = {}
             for row in rows:
                 date = str(row.get("date") or "")
                 close = float(row.get("close") or 0)
-                if len(date) >= 7 and close > 0:
-                    grouped.setdefault(date[:7], []).append(close)
+                if len(date) >= 10 and close > 0:
+                    if weekly:
+                        iso = datetime.fromisoformat(date[:10]).isocalendar()
+                        period = f"{iso.year}-W{iso.week:02d}"
+                    else:
+                        period = date[:7]
+                    grouped.setdefault(period, []).append(close)
             points = [(period, closes[-1]) for period, closes in sorted(grouped.items())]
         else:
             points = [
@@ -1337,18 +1343,24 @@ def _mistock_market_context(
     return context
 
 
-def _build_mistock_periodic_performance(trades: list[dict]) -> dict:
+def _build_mistock_periodic_performance(trades: list[dict], strategy_id: str = "") -> dict:
     daily: dict[str, dict] = {}
+    weekly: dict[str, dict] = {}
     monthly: dict[str, dict] = {}
     holdings: dict[tuple[str, str], dict] = {}
     strategy_stats: dict[str, dict] = {}
 
-    for trade in _mistock_account_trades(trades):
+    account_trades = _mistock_account_trades(trades)
+    if strategy_id:
+        account_trades = [row for row in account_trades if str(row.get("strategy_id") or "unattributed") == strategy_id]
+    for trade in account_trades:
         ts = str(trade.get("ts") or "")
         if len(ts) < 10 or ts[0] == "-":
             continue
 
         day_key = ts[:10]
+        iso = datetime.fromisoformat(day_key).isocalendar()
+        week_key = f"{iso.year}-W{iso.week:02d}"
         month_key = ts[:7]
         action = str(trade.get("action") or "").lower()
         symbol = str(trade.get("symbol") or "")
@@ -1367,8 +1379,9 @@ def _build_mistock_periodic_performance(trades: list[dict]) -> dict:
             continue
 
         day = daily.setdefault(day_key, _period_bucket())
+        week = weekly.setdefault(week_key, _period_bucket())
         month = monthly.setdefault(month_key, _period_bucket())
-        for bucket in (day, month):
+        for bucket in (day, week, month):
             bucket["order_count"] += 1
             if action == "buy":
                 bucket["buy_count"] += 1
@@ -1398,8 +1411,10 @@ def _build_mistock_periodic_performance(trades: list[dict]) -> dict:
             realized = (price - holding["avg_cost"]) * sell_qty
             
             day["realized_pnl"] += realized
+            week["realized_pnl"] += realized
             month["realized_pnl"] += realized
             day["cost_of_sold"] += cost_of_shares_sold
+            week["cost_of_sold"] += cost_of_shares_sold
             month["cost_of_sold"] += cost_of_shares_sold
             stats["realized_pnl"] += realized
             if sell_qty > 0:
@@ -1427,9 +1442,10 @@ def _build_mistock_periodic_performance(trades: list[dict]) -> dict:
             "strategy_name": strategy_name,
         }
         day["details"].append(detail)
+        week["details"].append(detail)
         month["details"].append(detail)
 
-    for rows in (daily, monthly):
+    for rows in (daily, weekly, monthly):
         for bucket in rows.values():
             bucket["net_cashflow"] = round(bucket["sell_amount"] - bucket["buy_amount"], 2)
             bucket["realized_pnl_rate"] = round((bucket["realized_pnl"] / bucket["cost_of_sold"] * 100), 2) if bucket["cost_of_sold"] > 0 else 0.0
@@ -1440,11 +1456,16 @@ def _build_mistock_periodic_performance(trades: list[dict]) -> dict:
 
     index_rows = _load_mistock_index_rows()
     daily_market = _mistock_market_context(index_rows)
+    weekly_market = _mistock_market_context(index_rows, weekly=True)
     monthly_market = _mistock_market_context(index_rows, monthly=True)
     return {
         "daily": [
             {"period": key, **value, **daily_market.get(key, {})}
             for key, value in sorted(daily.items())
+        ],
+        "weekly": [
+            {"period": key, **value, **weekly_market.get(key, {})}
+            for key, value in sorted(weekly.items())
         ],
         "monthly": [
             {"period": key, **value, **monthly_market.get(key, {})}
@@ -1456,10 +1477,12 @@ def _build_mistock_periodic_performance(trades: list[dict]) -> dict:
 
 
 @router.get("/api/mistock/performance")
-def mistock_performance():
+def mistock_performance(strategy_id: str = ""):
     try:
         trades = mistock_db.rows("SELECT * FROM trades ORDER BY ts ASC")
         account_trades = _mistock_account_trades(trades)
+        if strategy_id:
+            account_trades = [row for row in account_trades if str(row.get("strategy_id") or "unattributed") == strategy_id]
         
         total_trades = len(account_trades)
         success_count = sum(1 for t in account_trades if t.get("ok", 1))
@@ -1539,6 +1562,13 @@ def mistock_performance():
                     "broker_pnl": round(current_holdings.get(sym, {}).get("pnl", 0.0), 2),
                     "diff_reason": ""
                 })
+        if strategy_id:
+            total_eval_pnl = sum(float(item.get("eval_pnl") or 0) for item in eval_details)
+            total_broker_pnl = sum(
+                float(current_holdings.get(symbol, {}).get("pnl") or 0)
+                for symbol, position in holdings.items()
+                if float(position.get("qty") or 0) > 0
+            )
                 
         return {
             "total_trades": total_trades,
@@ -1564,14 +1594,14 @@ def mistock_performance():
 
 
 @router.get("/api/mistock/performance/periodic")
-def mistock_periodic_performance():
+def mistock_periodic_performance(strategy_id: str = ""):
     try:
         trades = mistock_db.rows("SELECT * FROM trades ORDER BY ts ASC")
-        return _build_mistock_periodic_performance(trades)
+        return _build_mistock_periodic_performance(trades, strategy_id=strategy_id)
     except Exception as e:
         from src.utils.logger import logger
         logger.error(f"Failed to calculate mistock periodic performance: {e}")
-        return {"daily": [], "monthly": []}
+        return {"daily": [], "weekly": [], "monthly": []}
 
 
 import threading

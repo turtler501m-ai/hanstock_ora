@@ -63,6 +63,19 @@ class MistockDashboardTests(unittest.TestCase):
         self.assertEqual(validation["closed_count"], 1)
         self.assertEqual(validation["realized_pnl"], 20.0)
         self.assertEqual(validation["validation_status"], "insufficient")
+        self.assertEqual(len(performance["weekly"]), 1)
+        self.assertEqual(performance["weekly"][0]["order_count"], 2)
+        self.assertEqual(performance["weekly"][0]["realized_pnl"], 20.0)
+
+        strategy_only = mistock._build_mistock_periodic_performance(
+            trades + [{
+                "ts": "2026-05-02 11:00:00", "symbol": "MSFT", "name": "Microsoft",
+                "action": "buy", "qty": 1, "price": 200, "strategy_id": "beta",
+            }],
+            strategy_id="alpha",
+        )
+        self.assertEqual(strategy_only["daily"][1]["order_count"], 1)
+        self.assertEqual(strategy_only["strategy_validation"][0]["strategy_id"], "alpha")
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
