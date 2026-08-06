@@ -117,18 +117,19 @@ def _order_delay_seconds() -> float:
 
 
 def _place_order(symbol: str, action: str, qty: float, price: float, reason: str, strategy_id: str | None):
-    if action == "buy" and _daily_order_count() >= max(0, mistock_config.max_daily_orders):
-        return {
-            "ok": False,
-            "status": "daily_limit",
-            "message": f"daily order limit reached ({mistock_config.max_daily_orders})",
-        }
     kwargs = {"reason": reason}
     if strategy_id:
         kwargs["strategy_id"] = strategy_id
     retries = max(0, mistock_config.rate_limit_retries)
     result = {}
     for attempt in range(retries + 1):
+        if action == "buy" and _daily_order_count() >= max(0, mistock_config.max_daily_orders):
+            return {
+                "ok": False,
+                "status": "daily_limit",
+                "message": f"daily order limit reached ({mistock_config.max_daily_orders})",
+                "retry_count": attempt,
+            }
         result = mistock_trader.place_order(symbol, action, qty, price, **kwargs)
         message = str(result.get("msg1") or result.get("message") or "").lower()
         rate_limited = any(marker in message for marker in ("초당 거래건수", "rate limit", "too many requests", "egw00201"))
@@ -154,7 +155,10 @@ def _available_position_slots(held_symbols: set[str], pending_buy_symbols: set[s
 
 def _maintain_scheduler_approvals(strategy_id: str | None = None, now: datetime | None = None) -> dict:
     effective_strategy_id = strategy_id or "mistock_nasdaq_rule_v1"
-    attributed = mistock_db.execute(
+    attributed = int((mistock_db.row(
+        "SELECT COUNT(*) AS count FROM approvals WHERE source = 'scheduler' AND COALESCE(strategy_id, '') = ''"
+    ) or {}).get("count") or 0)
+    mistock_db.execute(
         """
         UPDATE approvals SET strategy_id = ?, updated_at = ?
         WHERE source = 'scheduler' AND COALESCE(strategy_id, '') = ''
@@ -162,7 +166,11 @@ def _maintain_scheduler_approvals(strategy_id: str | None = None, now: datetime 
         (effective_strategy_id, mistock_db.now_text()),
     )
     cutoff = ((now or datetime.now(KST)).astimezone(KST) - timedelta(hours=max(1, mistock_config.approval_expiry_hours))).strftime("%Y-%m-%d %H:%M:%S")
-    expired = mistock_db.execute(
+    expired = int((mistock_db.row(
+        "SELECT COUNT(*) AS count FROM approvals WHERE source = 'scheduler' AND status = 'pending' AND created_at < ?",
+        (cutoff,),
+    ) or {}).get("count") or 0)
+    mistock_db.execute(
         """
         UPDATE approvals
         SET status = 'expired', updated_at = ?, response_msg = ?

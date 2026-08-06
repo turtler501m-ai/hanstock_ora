@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -984,6 +985,65 @@ class MistockDashboardTests(unittest.TestCase):
                 patch.object(mistock_scheduler, "send_mistock_slack"):
             mistock_scheduler.run_mistock_scheduled_cycle(mode="execute")
         self.assertEqual(get_balance.call_count, 2)
+
+    def test_scheduler_expires_old_approval_and_sets_strategy(self):
+        old = (datetime.now(mistock_scheduler.KST) - timedelta(hours=25)).strftime("%Y-%m-%d %H:%M:%S")
+        approval_id = mistock_db.execute(
+            """
+            INSERT INTO approvals (created_at, updated_at, symbol, name, action, qty, price, reason, source, status, response_msg)
+            VALUES (?, ?, 'AAPL', 'Apple', 'buy', 1, 100, 'old', 'scheduler', 'pending', '')
+            """,
+            (old, old),
+        )
+        original = mistock_config.approval_expiry_hours
+        try:
+            mistock_config.approval_expiry_hours = 24
+            result = mistock_scheduler._maintain_scheduler_approvals()
+        finally:
+            mistock_config.approval_expiry_hours = original
+        row = mistock_db.row("SELECT status, strategy_id FROM approvals WHERE id = ?", (approval_id,))
+        self.assertEqual(result, {"attributed": 1, "expired": 1})
+        self.assertEqual(row["status"], "expired")
+        self.assertEqual(row["strategy_id"], "mistock_nasdaq_rule_v1")
+
+    def test_scheduler_rebalance_enforces_weight_and_cash_buffer(self):
+        mistock_db.execute("DELETE FROM approvals")
+        originals = (mistock_config.max_positions, mistock_config.max_single_weight, mistock_config.cash_buffer)
+        try:
+            mistock_config.max_positions = 2
+            mistock_config.max_single_weight = 0.4
+            mistock_config.cash_buffer = 0.2
+            orders = mistock_scheduler._build_risk_rebalance_sells({
+                "cash": 100.0,
+                "stock_eval": 900.0,
+                "total_eval": 1000.0,
+                "holdings": [
+                    {"symbol": "AAPL", "qty": 6, "price": 100.0, "value": 600.0},
+                    {"symbol": "MSFT", "qty": 3, "price": 100.0, "value": 300.0},
+                ],
+            })
+        finally:
+            mistock_config.max_positions, mistock_config.max_single_weight, mistock_config.cash_buffer = originals
+        self.assertEqual(len(orders), 1)
+        self.assertEqual(orders[0]["symbol"], "AAPL")
+        self.assertEqual(orders[0]["qty"], 2)
+
+    def test_scheduler_daily_limit_stops_rate_limit_retry(self):
+        original_limit = mistock_config.max_daily_orders
+        original_retries = mistock_config.rate_limit_retries
+        try:
+            mistock_config.max_daily_orders = 20
+            mistock_config.rate_limit_retries = 3
+            with patch.object(mistock_scheduler, "_daily_order_count", side_effect=[19, 20]), \
+                    patch.object(mistock_trader, "place_order", return_value={"ok": False, "message": "rate limit"}) as place_order, \
+                    patch.object(mistock_scheduler.time, "sleep"):
+                result = mistock_scheduler._place_order("AAPL", "buy", 1, 100, "test", None)
+        finally:
+            mistock_config.max_daily_orders = original_limit
+            mistock_config.rate_limit_retries = original_retries
+        self.assertEqual(result["status"], "daily_limit")
+        self.assertEqual(result["retry_count"], 1)
+        place_order.assert_called_once()
 
     def test_create_approval_does_not_auto_execute_when_broker_balance_is_fallback(self):
         mistock_db.set_setting("auto_approval", "true")
