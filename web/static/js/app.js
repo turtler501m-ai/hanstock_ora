@@ -913,6 +913,18 @@ function renderPortfolioChart(labels, data, colors) {
     }
 
     const ctx = document.getElementById('portfolioChart').getContext('2d');
+    const total = data.reduce((sum, value) => sum + Number(value || 0), 0);
+    const legend = document.getElementById('portfolio-legend');
+    if (legend) {
+        legend.innerHTML = labels.map((label, index) => {
+            const ratio = total > 0 ? Number(data[index] || 0) / total * 100 : 0;
+            return `<div class="asset-allocation-legend-item" title="${escapeHtml(label)}">
+                <span class="asset-allocation-legend-swatch" style="background:${escapeHtml(colors[index] || '#64748b')}"></span>
+                <span class="asset-allocation-legend-name">${escapeHtml(label)}</span>
+                <span class="asset-allocation-legend-value">${formatNumber(ratio, 1)}%</span>
+            </div>`;
+        }).join('');
+    }
     if (portfolioChartInstance) {
         portfolioChartInstance.destroy();
     }
@@ -936,8 +948,7 @@ function renderPortfolioChart(labels, data, colors) {
             maintainAspectRatio: false,
             plugins: {
                 legend: {
-                    position: 'right',
-                    labels: { boxWidth: 12, padding: 15 }
+                    display: false
                 }
             },
             cutout: '65%'

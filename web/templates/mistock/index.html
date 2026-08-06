@@ -237,8 +237,11 @@
                     <section class="card glass panel-chart">
                         <h2>자산 비중</h2>
                         <p class="section-help">현금과 보유 종목 평가금의 구성입니다.</p>
-                        <div class="chart-container">
-                            <canvas id="portfolioChart"></canvas>
+                        <div class="asset-allocation-layout">
+                            <div class="chart-container asset-allocation-chart">
+                                <canvas id="portfolioChart"></canvas>
+                            </div>
+                            <div id="portfolio-legend" class="asset-allocation-legend" aria-label="보유 종목별 자산 비중"></div>
                         </div>
                     </section>
 

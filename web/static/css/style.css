@@ -1135,6 +1135,56 @@ tbody tr:hover {
     display: block; /* Chart.js responsive compatibility */
 }
 
+.asset-allocation-layout {
+    display: grid;
+    gap: 1rem;
+}
+
+.asset-allocation-chart {
+    height: 240px;
+}
+
+.asset-allocation-legend {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem 1rem;
+}
+
+.asset-allocation-legend-item {
+    display: grid;
+    grid-template-columns: 10px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+    padding: 0.25rem 0;
+    color: var(--text-muted);
+    font-size: 0.76rem;
+}
+
+.asset-allocation-legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+}
+
+.asset-allocation-legend-name {
+    overflow: hidden;
+    color: var(--text-color);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.asset-allocation-legend-value {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+    .asset-allocation-legend {
+        grid-template-columns: 1fr;
+    }
+}
+
 .performance-validation {
     margin: 1.25rem 0 1.4rem;
     padding: 1rem;
