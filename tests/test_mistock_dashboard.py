@@ -276,9 +276,9 @@ class MistockDashboardTests(unittest.TestCase):
 
         self.assertTrue(order["ok"])
         self.assertEqual(balance["balance_source"], "demo_local_shadow")
-        self.assertEqual(balance["cash"], 800.0)
+        self.assertEqual(balance["cash"], 799.8)
         self.assertEqual(balance["stock_eval"], 200.0)
-        self.assertEqual(balance["total_eval"], 1000.0)
+        self.assertEqual(balance["total_eval"], 999.8)
         self.assertEqual(balance["holdings"][0]["symbol"], "AAPL")
         self.assertEqual(balance["holdings"][0]["qty"], 2.0)
         self.assertEqual(balance["holdings"][0]["source"], "local_shadow")
@@ -319,6 +319,8 @@ class MistockDashboardTests(unittest.TestCase):
         self.assertEqual(holding["avg_price"], 100.0)
         self.assertEqual(holding["pnl"], 20.0)
         self.assertEqual(balance["pnl"], 20.0)
+        self.assertEqual(balance["cash"], 800.0)
+        self.assertEqual(balance["total_eval"], 1020.0)
 
     def test_demo_sell_calls_kis_order_api(self):
         calls = []

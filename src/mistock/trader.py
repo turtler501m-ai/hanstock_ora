@@ -308,6 +308,49 @@ def _apply_local_filled_order(symbol: str, action: str, qty: float, price: float
             db.execute("DELETE FROM holdings WHERE symbol = ?", (symbol,))
 
 
+def _demo_shadow_cash(exchange_rate: float) -> float:
+    """Return demo cash from configured principal and the persisted fill ledger."""
+    principal = _configured_capital_usd(exchange_rate)
+    totals = db.row(
+        """
+        SELECT
+            COALESCE(SUM(CASE WHEN action = 'buy' THEN qty * price ELSE 0 END), 0) AS buys,
+            COALESCE(SUM(CASE WHEN action = 'sell' THEN qty * price ELSE 0 END), 0) AS sells,
+            COALESCE(SUM(COALESCE(fee, 0) + COALESCE(tax, 0)), 0) AS costs
+        FROM trades
+        WHERE ok = 1
+          AND env = 'demo'
+          AND order_status IN ('filled', 'demo_local_filled')
+        """
+    ) or {}
+    buys = _to_float(totals.get("buys"), 0.0)
+    sells = _to_float(totals.get("sells"), 0.0)
+    costs = _to_float(totals.get("costs"), 0.0)
+    # Old databases can contain opening holdings created before trade-ledger
+    # persistence was introduced. Account for only the unexplained quantity at
+    # its stored cost basis, while normal fills continue to come from trades.
+    opening_cost = 0.0
+    for holding in db.rows(
+        """
+        SELECT h.qty, h.avg_price,
+               COALESCE(SUM(CASE
+                   WHEN t.action = 'buy' THEN t.qty
+                   WHEN t.action = 'sell' THEN -t.qty
+                   ELSE 0 END), 0) AS ledger_qty
+        FROM holdings h
+        LEFT JOIN trades t
+          ON t.symbol = h.symbol
+         AND t.ok = 1
+         AND t.env = 'demo'
+         AND t.order_status IN ('filled', 'demo_local_filled')
+        GROUP BY h.symbol, h.qty, h.avg_price
+        """
+    ):
+        missing_qty = max(0.0, _to_float(holding.get("qty")) - _to_float(holding.get("ledger_qty")))
+        opening_cost += missing_qty * _to_float(holding.get("avg_price"))
+    return max(0.0, principal - opening_cost - buys + sells - costs)
+
+
 def _kis_demo_order_is_unsupported(msg: str) -> bool:
     normalized = str(msg or "")
     return any(
@@ -418,8 +461,6 @@ def get_balance() -> dict[str, Any]:
                 for item in holdings
                 if item.get("source") == "local_shadow"
             )
-            if local_shadow_eval > 0 and cash > 0:
-                cash = max(0.0, cash - local_shadow_eval)
             # frcr_evlu_tota는 USD 평가액 합계 (KRW 환산 아님)
             broker_total_eval = _first_positive(summary, [
                 "frcr_evlu_tota",
@@ -433,13 +474,13 @@ def get_balance() -> dict[str, Any]:
             if config.trading_env == "demo" and cash <= 0 and broker_total_eval > 0:
                 cash = max(0.0, broker_total_eval - stock_eval)
             balance_source = "kis"
-            if config.trading_env == "demo" and cash <= 0 and local_shadow_eval > 0 and broker_total_eval <= 0:
-                cash = max(0.0, _configured_capital_usd(exchange_rate) - stock_eval)
+            if config.trading_env == "demo" and local_shadow_eval > 0 and broker_total_eval <= 0:
+                cash = _demo_shadow_cash(exchange_rate)
                 balance_source = "demo_local_shadow"
             if config.trading_env == "demo" and cash <= 0 and stock_eval <= 0 and broker_total_eval <= 0:
                 cash = _configured_capital_usd(exchange_rate)
                 balance_source = "demo_config_fallback"
-            if config.trading_env == "demo":
+            if config.trading_env == "demo" and local_shadow_eval <= 0:
                 configured_cap = _configured_capital_usd(exchange_rate)
                 if configured_cap > 0:
                     effective_total = cash + stock_eval
