@@ -147,6 +147,11 @@ def _daily_order_count(now: datetime | None = None) -> int:
     return int((row or {}).get("count") or 0)
 
 
+def _available_position_slots(held_symbols: set[str], pending_buy_symbols: set[str]) -> int:
+    reserved = held_symbols | pending_buy_symbols
+    return max(0, max(0, mistock_config.max_positions) - len(reserved))
+
+
 def _maintain_scheduler_approvals(strategy_id: str | None = None, now: datetime | None = None) -> dict:
     effective_strategy_id = strategy_id or "mistock_nasdaq_rule_v1"
     attributed = mistock_db.execute(
@@ -305,6 +310,10 @@ def run_mistock_scheduled_cycle(mode: str = "execute", strategy_id: str | None =
     pending_approved = []
     if mode == "execute" and auto_approve and broker_submission_available and market_open:
         pending_approved = _execute_pending_scheduler_approvals(strategy_id)
+        if any((item.get("result") or {}).get("ok") for item in pending_approved):
+            balance = mistock_trader.get_balance()
+            cash = float(balance.get("cash") or 0)
+            broker_submission_available = mistock_trader.broker_submission_available(balance)
     
     # 3. 매도 신호 처리 및 주문 집행/대기등록
     rebalance_sells = _build_risk_rebalance_sells(balance)
@@ -352,6 +361,10 @@ def run_mistock_scheduled_cycle(mode: str = "execute", strategy_id: str | None =
         row["symbol"]
         for row in mistock_db.rows("SELECT symbol FROM approvals WHERE status = 'pending'")
     }
+    pending_buy_symbols = {
+        row["symbol"]
+        for row in mistock_db.rows("SELECT symbol FROM approvals WHERE status = 'pending' AND action = 'buy'")
+    }
     
     # A successful exit starts a per-symbol re-entry cooldown.
     cooldown_cutoff = (datetime.now(KST) - timedelta(hours=max(0, mistock_config.rebuy_cooldown_hours))).strftime("%Y-%m-%d %H:%M:%S")
@@ -365,7 +378,8 @@ def run_mistock_scheduled_cycle(mode: str = "execute", strategy_id: str | None =
     
     # Exclude held, pending, and recently exited symbols.
     exclude_symbols = held_symbols | pending_symbols | recent_exits
-    buy_candidates = [c for c in candidates if c.get("symbol") not in exclude_symbols]
+    available_position_slots = _available_position_slots(held_symbols, pending_buy_symbols)
+    buy_candidates = [c for c in candidates if c.get("symbol") not in exclude_symbols][:available_position_slots]
     
     # Keep account values and configured capital in USD before applying the buffer.
     total_eval = float(balance.get("total_eval") or (cash + float(balance.get("stock_eval") or 0)))

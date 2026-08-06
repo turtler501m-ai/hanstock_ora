@@ -951,6 +951,40 @@ class MistockDashboardTests(unittest.TestCase):
             reason="before market", strategy_id="mistock_nasdaq_rule_v1",
         )
 
+    def test_scheduler_position_slots_include_pending_buys(self):
+        original = mistock_config.max_positions
+        try:
+            mistock_config.max_positions = 3
+            self.assertEqual(
+                mistock_scheduler._available_position_slots({"AAPL", "MSFT"}, {"MSFT", "NVDA"}),
+                0,
+            )
+            self.assertEqual(
+                mistock_scheduler._available_position_slots({"AAPL"}, {"MSFT"}),
+                1,
+            )
+        finally:
+            mistock_config.max_positions = original
+
+    def test_scheduler_reloads_balance_after_pending_execution(self):
+        balances = [
+            {"cash": 100.0, "stock_eval": 900.0, "total_eval": 1000.0, "holdings": []},
+            {"cash": 300.0, "stock_eval": 700.0, "total_eval": 1000.0, "holdings": []},
+        ]
+        with patch.object(mistock_trader, "scan_candidates", return_value={"scanned": 0, "candidates": []}), \
+                patch.object(mistock_trader, "get_balance", side_effect=balances) as get_balance, \
+                patch.object(mistock_scheduler, "_execute_pending_scheduler_approvals", return_value=[{"result": {"ok": True}}]), \
+                patch.object(mistock_scheduler, "_build_risk_rebalance_sells", return_value=[]), \
+                patch.object(mistock_trader, "signals", return_value=[]), \
+                patch.object(mistock_trader, "build_orders", return_value=[]), \
+                patch.object(mistock_trader, "broker_submission_available", return_value=True), \
+                patch.object(mistock_trader, "runtime_flags", return_value={"order_submission_enabled": True}), \
+                patch.object(mistock_db, "get_setting", return_value="true"), \
+                patch.object(mistock_scheduler, "is_us_market_open", return_value=True), \
+                patch.object(mistock_scheduler, "send_mistock_slack"):
+            mistock_scheduler.run_mistock_scheduled_cycle(mode="execute")
+        self.assertEqual(get_balance.call_count, 2)
+
     def test_create_approval_does_not_auto_execute_when_broker_balance_is_fallback(self):
         mistock_db.set_setting("auto_approval", "true")
 
