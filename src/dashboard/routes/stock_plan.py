@@ -82,6 +82,7 @@ def get_scheduler_status(
     strategy_id: str | None = None,
     compact: bool = True,
     run_id: str | None = None,
+    period: str = "monthly",
 ):
     global _scheduler_run_state
     _dashboard_scheduler_service.refresh()
@@ -101,22 +102,55 @@ def get_scheduler_status(
         "order_submission": trader.runtime_flags().order_submission_enabled,
     }
 
+    period_options = {
+        "daily": (1, "일별"),
+        "weekly": (7, "주별"),
+        "monthly": (30, "월별"),
+    }
+    if period not in period_options:
+        raise HTTPException(
+            status_code=400,
+            detail="period must be one of: daily, weekly, monthly",
+        )
+    period_days, period_label = period_options[period]
+
     last_result = None
     try:
         from src.db.repository import load_recent_scheduler_results, load_latest_scheduler_result
-        last_result = load_recent_scheduler_results(days=30)
-        if last_result is None:
+        last_result = load_recent_scheduler_results(days=period_days)
+        if last_result is None and period == "monthly":
             last_result = load_latest_scheduler_result()
     except Exception:
         pass
 
-    if last_result is None:
+    if last_result is None and period == "monthly":
         path = Path(config["result_path"])
         if path.exists():
             try:
                 last_result = json.loads(path.read_text(encoding="utf-8"))
             except Exception:
                 pass
+
+    if last_result is None and period != "monthly":
+        last_result = {
+            "mode": None,
+            "recorded_at": None,
+            "result": {
+                "results": [],
+                "auto_approved": [],
+                "auto_approval_errors": [],
+                "errors": [],
+                "execution_runs": [],
+                "status": "empty",
+                "ok": True,
+            },
+        }
+
+    if isinstance(last_result, dict):
+        last_result["period"] = period
+        last_result["period_label"] = period_label
+        last_result["range_days"] = period_days
+        last_result["summary_label"] = f"{period_label} 집계"
 
     last_result = _enrich_scheduler_display(last_result)
     if compact:
@@ -270,6 +304,9 @@ def get_scheduler_status(
         "run_state": run_state,
         "requested_run_id": run_id,
         "requested_run_matches": requested_run_matches,
+        "result_period": period,
+        "result_period_label": period_label,
+        "result_range_days": period_days,
         "active_strategy_id": active_strategy_id,
         "active_strategy_name": active_strategy_name,
         "strategy_dispatch": strategy_dispatch,

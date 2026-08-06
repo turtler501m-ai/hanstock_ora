@@ -2988,6 +2988,28 @@ tbody tr:hover {
     margin-bottom: 0.9rem;
 }
 
+.schedule-result-period-control {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+}
+
+.schedule-result-period-control label {
+    color: var(--text-muted);
+    font-size: 0.76rem;
+}
+
+.schedule-result-period-control select {
+    min-width: 145px;
+}
+
+.schedule-result-period-control .time-muted {
+    flex-basis: 100%;
+    text-align: right;
+}
+
 .schedule-result-metrics {
     display: grid;
     grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -3038,6 +3060,13 @@ tbody tr:hover {
 }
 
 @media (max-width: 760px) {
+    .schedule-result-period-control {
+        justify-content: flex-start;
+    }
+
+    .schedule-result-period-control .time-muted {
+        text-align: left;
+    }
     .schedule-page-heading {
         align-items: flex-start;
         flex-direction: column;

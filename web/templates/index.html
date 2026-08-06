@@ -674,10 +674,18 @@
                     <div class="panel-header split-header">
                         <div>
                             <span class="schedule-card-kicker">실행 이력</span>
-                            <h2>최근 스케줄 실행 결과</h2>
-                            <p class="section-help">최근 사이클에서 생성된 계획, 승인과 주문 처리 결과입니다.</p>
+                            <h2>기간별 스케줄 실행 결과</h2>
+                            <p class="section-help">일별·주별·월별로 생성된 계획, 승인과 주문 처리 결과를 집계합니다.</p>
                         </div>
-                        <span class="time-muted" id="sched-last-run-time">-</span>
+                        <div class="schedule-result-period-control">
+                            <label for="sched-result-period">집계 기간</label>
+                            <select id="sched-result-period">
+                                <option value="daily">일별 · 오늘</option>
+                                <option value="weekly">주별 · 최근 7일</option>
+                                <option value="monthly" selected>월별 · 최근 30일</option>
+                            </select>
+                            <span class="time-muted" id="sched-last-run-time">-</span>
+                        </div>
                     </div>
 
                     <div class="schedule-result-metrics">

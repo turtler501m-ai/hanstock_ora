@@ -5157,6 +5157,7 @@ window.addEventListener('load', () => {
     const btnRunAnalysisOnly = document.getElementById('btn-run-analysis-only');
     const btnRunExecute = document.getElementById('btn-run-execute');
     const btnSaveAiSchedule = document.getElementById('btn-save-ai-schedule');
+    const schedulerResultPeriod = document.getElementById('sched-result-period');
 
     if (btnRunDailyAuto) {
         btnRunDailyAuto.addEventListener('click', () => triggerSchedule('daily_auto'));
@@ -5178,6 +5179,12 @@ window.addEventListener('load', () => {
             } finally {
                 setButtonBusy(btnSaveAiSchedule, false);
             }
+        });
+    }
+    if (schedulerResultPeriod) {
+        schedulerResultPeriod.addEventListener('change', () => {
+            window._expandedRounds = new Set();
+            renderScheduleInfo();
         });
     }
 
@@ -5244,8 +5251,10 @@ async function saveAiScheduleSettings() {
 async function renderScheduleInfo() {
     try {
         const strategyId = getActiveStrategyId();
-        const query = strategyId ? `?strategy_id=${encodeURIComponent(strategyId)}` : '';
-        const data = await fetchJson(`/api/scheduler/status${query}`);
+        const period = document.getElementById('sched-result-period')?.value || 'monthly';
+        const params = new URLSearchParams({ period });
+        if (strategyId) params.set('strategy_id', strategyId);
+        const data = await fetchJson(`/api/scheduler/status?${params.toString()}`);
         await renderSchedulerStrategyChecklist(data.strategy_dispatch?.schedules || []);
         const aiSchedule = await loadAiScheduleSettings();
         const dispatch = data.strategy_dispatch || {};
