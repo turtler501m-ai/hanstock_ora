@@ -589,7 +589,44 @@ class RuntimePlanTests(unittest.TestCase):
             1,
             120000,
             "AI rebalance",
-            source="trader",
+            source="ai-allocation",
+            strategy_id="ai_rebalance",
+            strategy_version=None,
+            profile_hash=None,
+            source_candidate_id=None,
+        )
+
+    def test_analysis_order_preserves_strategy_attribution(self):
+        row = {
+            "symbol": "047810",
+            "name": "Korea Aerospace",
+            "action": "buy",
+            "qty": 90,
+            "price": 120000,
+            "reason": "new buy score=3.0",
+            "category": "candidate",
+            "strategy_id": "heikin_ashi_scalping_strategy",
+            "strategy_version": 4,
+            "profile_hash": "profile-4",
+            "source_candidate_id": 321,
+        }
+
+        with patch("src.trader.queue_approval", return_value=923) as queue_approval:
+            result = trader.execute_plan_row(None, {"mode": "analysis_only"}, row)
+
+        self.assertEqual(result["decision"], "queue")
+        queue_approval.assert_called_once_with(
+            "047810",
+            "Korea Aerospace",
+            "buy",
+            90,
+            120000,
+            "new buy score=3.0",
+            source="auto_trader",
+            strategy_id="heikin_ashi_scalping_strategy",
+            strategy_version=4,
+            profile_hash="profile-4",
+            source_candidate_id=321,
         )
 
     def test_execute_plan_row_keeps_router_pending_result_as_queue(self):

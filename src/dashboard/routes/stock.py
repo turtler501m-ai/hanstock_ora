@@ -87,6 +87,7 @@ STRATEGY_DISPLAY_NAMES = {
     "plunge_bounce_strategy": "급락 반등",
     "heikin_ashi_scalping_strategy": "알파 하이킨아시",
     "issue_sector_rotation_strategy": "이슈 섹터 순환 모멘텀",
+    "ai_rebalance": "AI 리밸런싱",
 }
 
 STRATEGY_STATUS_LABELS = {
@@ -119,6 +120,7 @@ APPROVAL_SOURCE_CLASSIFICATIONS = {
     "scheduler-test": ("테스트 주문", "test"),
     "auto_trader": ("자동매매 · 전략 미기록", "automation"),
     "autonomous_strategy": ("자율매매 · 전략 미기록", "automation"),
+    "trader": ("자동매매 · 전략 미기록", "automation"),
 }
 
 

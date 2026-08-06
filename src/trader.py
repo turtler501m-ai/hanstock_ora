@@ -824,6 +824,13 @@ def execute_plan_row(api, context: dict, row: dict) -> dict:
 
     mode = context.get("mode")
     if mode == "analysis_only":
+        strategy_id = (
+            row.get("strategy_id")
+            or (AI_REBALANCE_STRATEGY_ID if row.get("category") == "ai_rebalance" else None)
+            or context.get("strategy_id")
+            or "seven_split"
+        )
+        source = "ai-allocation" if row.get("category") == "ai_rebalance" else "auto_trader"
         approval_id = queue_approval(
             row["symbol"],
             row["name"],
@@ -831,7 +838,11 @@ def execute_plan_row(api, context: dict, row: dict) -> dict:
             row["qty"],
             row["price"],
             row.get("reason", ""),
-            source="trader",
+            source=source,
+            strategy_id=strategy_id,
+            strategy_version=row.get("strategy_version"),
+            profile_hash=row.get("profile_hash"),
+            source_candidate_id=row.get("source_candidate_id"),
         )
         return {**row, "decision": "queue", "ok": True, "approval_id": approval_id}
 
@@ -1448,7 +1459,7 @@ def run(
     if candidates and notify_session:
         slack_candidates(candidates)
 
-    context: dict = {"mode": mode}
+    context: dict = {"mode": mode, "strategy_id": force_strategy_id or "seven_split"}
     if mode != "analysis_only":
         context["router"] = OrderRouter(api, execution_context=runtime.flags)
 

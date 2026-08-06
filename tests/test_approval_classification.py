@@ -38,6 +38,7 @@ class ApprovalClassificationTests(unittest.TestCase):
             "portfolio-optimizer": ("tool", "포트폴리오 최적화"),
             "scheduler-test": ("test", "테스트 주문"),
             "auto_trader": ("automation", "자동매매 · 전략 미기록"),
+            "trader": ("automation", "자동매매 · 전략 미기록"),
         }
 
         for source, expected in cases.items():
