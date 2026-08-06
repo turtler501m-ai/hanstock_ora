@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -116,10 +117,105 @@ def _order_delay_seconds() -> float:
 
 
 def _place_order(symbol: str, action: str, qty: float, price: float, reason: str, strategy_id: str | None):
+    if action == "buy" and _daily_order_count() >= max(0, mistock_config.max_daily_orders):
+        return {
+            "ok": False,
+            "status": "daily_limit",
+            "message": f"daily order limit reached ({mistock_config.max_daily_orders})",
+        }
     kwargs = {"reason": reason}
     if strategy_id:
         kwargs["strategy_id"] = strategy_id
-    return mistock_trader.place_order(symbol, action, qty, price, **kwargs)
+    retries = max(0, mistock_config.rate_limit_retries)
+    result = {}
+    for attempt in range(retries + 1):
+        result = mistock_trader.place_order(symbol, action, qty, price, **kwargs)
+        message = str(result.get("msg1") or result.get("message") or "").lower()
+        rate_limited = any(marker in message for marker in ("초당 거래건수", "rate limit", "too many requests", "egw00201"))
+        if result.get("ok") or not rate_limited or attempt >= retries:
+            result["retry_count"] = attempt
+            return result
+        delay = max(0.0, mistock_config.rate_limit_backoff_seconds) * (2 ** attempt)
+        logger.warning(f"[MISTOCK SCHEDULER] KIS rate limit for {symbol}; retrying in {delay:.1f}s")
+        time.sleep(delay)
+    return result
+
+
+def _daily_order_count(now: datetime | None = None) -> int:
+    day_start = (now or datetime.now(KST)).astimezone(KST).strftime("%Y-%m-%d 00:00:00")
+    row = mistock_db.row("SELECT COUNT(*) AS count FROM trades WHERE ts >= ?", (day_start,))
+    return int((row or {}).get("count") or 0)
+
+
+def _maintain_scheduler_approvals(strategy_id: str | None = None, now: datetime | None = None) -> dict:
+    effective_strategy_id = strategy_id or "mistock_nasdaq_rule_v1"
+    attributed = mistock_db.execute(
+        """
+        UPDATE approvals SET strategy_id = ?, updated_at = ?
+        WHERE source = 'scheduler' AND COALESCE(strategy_id, '') = ''
+        """,
+        (effective_strategy_id, mistock_db.now_text()),
+    )
+    cutoff = ((now or datetime.now(KST)).astimezone(KST) - timedelta(hours=max(1, mistock_config.approval_expiry_hours))).strftime("%Y-%m-%d %H:%M:%S")
+    expired = mistock_db.execute(
+        """
+        UPDATE approvals
+        SET status = 'expired', updated_at = ?, response_msg = ?
+        WHERE source = 'scheduler' AND status = 'pending' AND created_at < ?
+        """,
+        (mistock_db.now_text(), f"expired after {mistock_config.approval_expiry_hours} hours", cutoff),
+    )
+    return {"attributed": attributed, "expired": expired}
+
+
+def _build_risk_rebalance_sells(balance: dict) -> list[dict]:
+    holdings = [dict(item) for item in balance.get("holdings", []) if float(item.get("qty") or 0) > 0]
+    total = float(balance.get("total_eval") or 0)
+    if total <= 0:
+        total = float(balance.get("cash") or 0) + sum(float(item.get("value") or 0) for item in holdings)
+    if total <= 0 or not holdings:
+        return []
+
+    pending = {row["symbol"] for row in mistock_db.rows(
+        "SELECT symbol FROM approvals WHERE source='scheduler' AND action='sell' AND status IN ('pending','executing')"
+    )}
+    orders: dict[str, dict] = {}
+    projected_cash = float(balance.get("cash") or 0)
+
+    def add_sell(item: dict, quantity: float, reason: str) -> None:
+        nonlocal projected_cash
+        symbol = item.get("symbol")
+        price = float(item.get("price") or item.get("current_price") or 0)
+        available = float(item.get("qty") or 0) - float((orders.get(symbol) or {}).get("qty") or 0)
+        qty = min(available, max(0, math.ceil(quantity)))
+        if not symbol or symbol in pending or price <= 0 or qty <= 0:
+            return
+        existing = orders.get(symbol)
+        if existing:
+            existing["qty"] += qty
+            existing["reason"] += f"; {reason}"
+        else:
+            orders[symbol] = {"symbol": symbol, "qty": qty, "price": price, "reason": reason}
+        projected_cash += qty * price
+
+    excess_count = max(0, len(holdings) - max(1, mistock_config.max_positions))
+    for item in sorted(holdings, key=lambda row: float(row.get("value") or 0))[:excess_count]:
+        add_sell(item, float(item["qty"]), "position count rebalance")
+
+    max_value = total * max(0.0, mistock_config.max_single_weight)
+    for item in sorted(holdings, key=lambda row: float(row.get("value") or 0), reverse=True):
+        excess_value = float(item.get("value") or 0) - max_value
+        if excess_value > 0:
+            add_sell(item, excess_value / float(item.get("price") or item.get("current_price") or 1), "single-position weight rebalance")
+
+    cash_target = total * max(0.0, mistock_config.cash_buffer)
+    for item in sorted(holdings, key=lambda row: float(row.get("value") or 0), reverse=True):
+        if projected_cash >= cash_target:
+            break
+        price = float(item.get("price") or item.get("current_price") or 0)
+        if price > 0:
+            add_sell(item, (cash_target - projected_cash) / price, "cash buffer rebalance")
+    return list(orders.values())
 
 
 def _execute_pending_scheduler_approvals(strategy_id: str | None = None) -> list[dict]:
@@ -145,6 +241,12 @@ def _execute_pending_scheduler_approvals(strategy_id: str | None = None) -> list
             item.get("reason") or "scheduler pending approval",
             item.get("strategy_id") or strategy_id,
         )
+        if result.get("status") == "daily_limit":
+            mistock_db.execute(
+                "UPDATE approvals SET updated_at = ?, response_msg = ? WHERE id = ?",
+                (mistock_db.now_text(), result.get("message"), item["id"]),
+            )
+            break
         status = "executed" if result.get("ok") else "failed"
         mistock_db.execute(
             "UPDATE approvals SET status = ?, updated_at = ?, response_msg = ? WHERE id = ?",
@@ -175,6 +277,7 @@ def run_mistock_scheduled_cycle(mode: str = "execute", strategy_id: str | None =
     미국 주식 시장(미장) 유니버스 스캔, 신호 분석 및 주문 집행(KIS 모의투자 또는 실거래)을 수행합니다.
     """
     logger.info(f"[MISTOCK SCHEDULER] Starting scheduled cycle. Mode={mode}")
+    approval_maintenance = _maintain_scheduler_approvals(strategy_id)
     
     # 1. 시세 조회 및 후보 종목 스캔
     min_score = (
@@ -204,7 +307,16 @@ def run_mistock_scheduled_cycle(mode: str = "execute", strategy_id: str | None =
         pending_approved = _execute_pending_scheduler_approvals(strategy_id)
     
     # 3. 매도 신호 처리 및 주문 집행/대기등록
-    sell_sigs = [sig for sig in mistock_trader.signals() if sig["action"] == "sell" and float(sig["signal_qty"]) > 0]
+    rebalance_sells = _build_risk_rebalance_sells(balance)
+    rebalance_symbols = {item["symbol"] for item in rebalance_sells}
+    sell_sigs = [
+        {"symbol": item["symbol"], "signal_qty": item["qty"], "signal_price": item["price"], "reason": item["reason"]}
+        for item in rebalance_sells
+    ]
+    sell_sigs.extend(
+        sig for sig in mistock_trader.signals()
+        if sig["action"] == "sell" and float(sig["signal_qty"]) > 0 and sig["symbol"] not in rebalance_symbols
+    )
     sold_items = []
     for idx, sig in enumerate(sell_sigs):
         qty = float(sig["signal_qty"])
@@ -241,23 +353,30 @@ def run_mistock_scheduled_cycle(mode: str = "execute", strategy_id: str | None =
         for row in mistock_db.rows("SELECT symbol FROM approvals WHERE status = 'pending'")
     }
     
-    # 중복 주문 방지: 최근 12시간 동안 이미 매수 주문을 시도한 적이 있는 종목 기호 제외
-    twelve_hours_ago = (datetime.now(KST) - timedelta(hours=12)).strftime("%Y-%m-%d %H:%M:%S")
-    recent_buys = {
+    # A successful exit starts a per-symbol re-entry cooldown.
+    cooldown_cutoff = (datetime.now(KST) - timedelta(hours=max(0, mistock_config.rebuy_cooldown_hours))).strftime("%Y-%m-%d %H:%M:%S")
+    recent_exits = {
         row["symbol"]
-        for row in mistock_db.rows("SELECT symbol FROM trades WHERE action = 'buy' AND ts >= ?", (twelve_hours_ago,))
+        for row in mistock_db.rows(
+            "SELECT symbol FROM trades WHERE action = 'sell' AND ok = 1 AND ts >= ?",
+            (cooldown_cutoff,),
+        )
     }
     
-    # approvals에 이미 pending이거나 trades에 매수 기록된 기호 제외
-    exclude_symbols = held_symbols | pending_symbols | recent_buys
+    # Exclude held, pending, and recently exited symbols.
+    exclude_symbols = held_symbols | pending_symbols | recent_exits
     buy_candidates = [c for c in candidates if c.get("symbol") not in exclude_symbols]
     
-    # 총 운용자금(total_capital) 한도에서 이미 보유한 평가액을 뺀 잔여만 신규 매수에 사용한다.
-    # demo 모의투자 계좌의 통합증거금(수억 달러)을 그대로 쓰면 주문이 폭주하므로 한도를 건다.
-    deployed = float(balance.get("stock_eval", 0.0) or 0.0)
-    cap = float(mistock_config.total_capital or 0.0)
-    sizing_cash = min(cash, max(0.0, cap - deployed)) if cap > 0 else cash
-    orders = mistock_trader.build_orders(buy_candidates, sizing_cash)
+    # Keep account values and configured capital in USD before applying the buffer.
+    total_eval = float(balance.get("total_eval") or (cash + float(balance.get("stock_eval") or 0)))
+    stock_eval = float(balance.get("stock_eval") or 0)
+    configured_cap = float(mistock_trader._configured_capital_usd() or 0)
+    managed_total = min(total_eval, configured_cap) if configured_cap > 0 else total_eval
+    managed_cash = min(cash, max(0.0, managed_total - stock_eval))
+    available_cash = max(0.0, managed_cash - managed_total * max(0.0, mistock_config.cash_buffer))
+    buffer_factor = max(0.01, 1.0 - max(0.0, mistock_config.cash_buffer))
+    orders = mistock_trader.build_orders(buy_candidates, available_cash / buffer_factor)
+    orders = orders[:max(0, mistock_config.max_daily_orders - _daily_order_count())]
     bought_items = []
     
     if mode == "execute":
@@ -268,6 +387,8 @@ def run_mistock_scheduled_cycle(mode: str = "execute", strategy_id: str | None =
                 logger.info(f"[MISTOCK SCHEDULER] Placing buy order for {ord['symbol']}. Qty={qty}, Price={price}")
                 res = _place_order(ord["symbol"], "buy", qty, price, ord["reason"], strategy_id)
                 bought_items.append({"symbol": ord["symbol"], "qty": qty, "price": price, "result": res})
+                if res.get("status") == "daily_limit":
+                    break
                 # 잔고 부족 응답이면 이후 주문도 실패할 것이므로 즉시 중단한다
                 msg = (res.get("msg1") or res.get("message") or "")
                 if not res.get("ok") and "주문가능금액" in msg:
@@ -306,6 +427,8 @@ def run_mistock_scheduled_cycle(mode: str = "execute", strategy_id: str | None =
         "sold": sold_items,
         "bought": bought_items,
         "pending_approved": pending_approved,
+        "approval_maintenance": approval_maintenance,
+        "rebalance_plan": rebalance_sells,
         "plan": orders,
         "errors": [
             {

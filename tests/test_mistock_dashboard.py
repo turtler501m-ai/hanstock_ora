@@ -946,7 +946,10 @@ class MistockDashboardTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(row["status"], "executed")
         self.assertEqual(result["pending_approved"][0]["symbol"], "AAPL")
-        place_order.assert_called_once_with("AAPL", "buy", 1.0, 100.0, reason="before market")
+        place_order.assert_called_once_with(
+            "AAPL", "buy", 1.0, 100.0,
+            reason="before market", strategy_id="mistock_nasdaq_rule_v1",
+        )
 
     def test_create_approval_does_not_auto_execute_when_broker_balance_is_fallback(self):
         mistock_db.set_setting("auto_approval", "true")
