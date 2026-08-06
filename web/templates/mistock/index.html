@@ -124,7 +124,7 @@
 
             <nav class="dashboard-tabs" aria-label="대시보드 기능 메뉴">
                 <button type="button" class="dashboard-tab active" data-dashboard-tab="overview">개요</button>
-                <button type="button" class="dashboard-tab" data-dashboard-tab="portfolio">보유/리스크</button>
+                <button type="button" class="dashboard-tab" data-dashboard-tab="portfolio">보유종목</button>
                 <button type="button" class="dashboard-tab" data-dashboard-tab="watchlist">관심종목</button>
                 <button type="button" class="dashboard-tab" data-dashboard-tab="ai-strategies">AI 전략</button>
                 <button type="button" class="dashboard-tab" data-dashboard-tab="indicator-strategy">지표전략</button>
@@ -251,15 +251,66 @@
             </section>
 
             <section class="dashboard-section" id="dashboard-tab-portfolio">
+                <div class="holding-page-heading">
+                    <div>
+                        <span class="holding-eyebrow">PORTFOLIO POSITIONS</span>
+                        <h2>보유종목 현황</h2>
+                        <p class="section-help">미스톡 계좌의 보유자산과 전략별 귀속, 평가손익 상태를 함께 확인합니다.</p>
+                    </div>
+                    <div class="holding-page-actions">
+                        <button type="button" id="btn-refresh-holdings" class="button-ghost compact-button">새로고침</button>
+                        <button type="button" id="btn-sell-all-holdings" class="button-danger">전량 매도 요청</button>
+                    </div>
+                </div>
+
+                <div id="holding-account-summary" class="ai-strategy-summary holdings-account-summary"></div>
+
+                <div class="holding-analysis-grid">
+                    <section class="card glass holding-strategy-panel">
+                        <div class="panel-header split-header">
+                            <div>
+                                <span class="holding-card-kicker">STRATEGY ALLOCATION</span>
+                                <h2>전략별 평가 현황</h2>
+                                <p class="section-help">체결기록의 전략 귀속수량을 현재 보유수량 범위에서 배분한 결과입니다.</p>
+                            </div>
+                            <span class="holding-count-badge" id="holding-strategy-count">0개 전략</span>
+                        </div>
+                        <div class="table-responsive">
+                            <table id="table-holding-strategies">
+                                <thead><tr><th>전략</th><th>종목</th><th>평가금액</th><th>비중</th><th>평가손익</th><th>수익률</th><th>손익 여부</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </section>
+
+                    <section class="card glass holding-diagnosis-panel">
+                        <div>
+                            <span class="holding-card-kicker">POSITION HEALTH</span>
+                            <h2>손익 진단</h2>
+                            <p class="section-help">현재 보유종목의 손익 분포와 전략 귀속률입니다.</p>
+                        </div>
+                        <div class="holding-health-grid">
+                            <div class="is-profit"><span>수익 종목</span><strong id="holding-profit-count">0</strong></div>
+                            <div class="is-loss"><span>손실 종목</span><strong id="holding-loss-count">0</strong></div>
+                            <div><span>보합 종목</span><strong id="holding-flat-count">0</strong></div>
+                            <div><span>전략 귀속률</span><strong id="holding-attribution-coverage">0%</strong></div>
+                        </div>
+                        <div class="holding-loss-list" id="holding-loss-list"><span class="time-muted">손실 종목을 확인 중입니다.</span></div>
+                    </section>
+                </div>
+
                 <section class="card glass panel-holdings">
                     <div class="panel-header split-header">
                         <div>
-                            <h2>보유 종목</h2>
-                            <p class="section-help">미스톡 모의투자 계좌 기준 보유 수량, 현재가, 평가금액, 손익을 표시합니다.</p>
+                            <span class="holding-card-kicker">HOLDINGS DETAIL</span>
+                            <h2>보유종목 상세</h2>
+                            <p class="section-help">열 제목을 눌러 정렬하고 전략과 손익 상태로 목록을 좁혀 볼 수 있습니다.</p>
                         </div>
-                        <button type="button" id="btn-sell-all-holdings" class="button-danger">전량 매도 요청</button>
+                        <div class="holding-table-filters">
+                            <label><span>전략</span><select id="select-holding-strategy-filter"><option value="all">전체 전략</option></select></label>
+                            <label><span>손익</span><select id="select-holding-pnl-filter"><option value="all">전체 상태</option><option value="profit">수익</option><option value="loss">손실</option><option value="flat">보합</option></select></label>
+                        </div>
                     </div>
-                    <div id="holding-account-summary" class="ai-strategy-summary holdings-account-summary"></div>
                     <div class="table-responsive">
                         <table id="table-holdings">
                             <thead>
@@ -268,8 +319,10 @@
                                     <th>수량</th>
                                     <th>현재가</th>
                                     <th>평가금액</th>
+                                    <th>미스톡 비중</th>
                                     <th>수익률</th>
                                     <th>평가손익</th>
+                                    <th>손익 상태</th>
                                     <th>귀속 전략</th>
                                     <th>매도</th>
                                 </tr>

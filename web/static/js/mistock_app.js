@@ -5,6 +5,8 @@ let watchlistSortAsc = true;
 let holdingsCache = [];
 let holdingsSortKey = 'value';
 let holdingsSortAsc = false;
+let holdingStrategyFilter = 'all';
+let holdingPnlFilter = 'all';
 let activeStrategyAuditId = '';
 let schedulerPollInterval = null;
 
@@ -1084,11 +1086,19 @@ function holdingSortValue(holding, key) {
     if (key === 'symbol') {
         return String(holding.symbol || '').toLowerCase();
     }
+    if (key === 'pnl_status') {
+        return String(holding.pnl_status || '').toLowerCase();
+    }
     return Number(holding[key] || 0);
 }
 
 function sortedHoldings() {
-    const rows = [...holdingsCache];
+    const rows = holdingsCache.filter((holding) => {
+        const status = holding.pnl_status || (Number(holding.pnl || 0) < 0 ? 'loss' : (Number(holding.pnl || 0) > 0 ? 'profit' : 'flat'));
+        const strategyIds = (holding.strategy_allocations || []).map((item) => String(item.strategy_id || ''));
+        const strategyMatch = holdingStrategyFilter === 'all' || strategyIds.includes(holdingStrategyFilter);
+        return strategyMatch && (holdingPnlFilter === 'all' || status === holdingPnlFilter);
+    });
     rows.sort((a, b) => {
         const av = holdingSortValue(a, holdingsSortKey);
         const bv = holdingSortValue(b, holdingsSortKey);
@@ -1109,9 +1119,12 @@ function updateHoldingSortHeaders() {
         { key: 'qty', title: '수량' },
         { key: 'price', title: '현재가' },
         { key: 'value', title: '평가금액' },
+        { key: 'mistock_weight', title: '미스톡 비중' },
         { key: 'rt', title: '수익률' },
         { key: 'pnl', title: '평가손익' },
+        { key: 'pnl_status', title: '손익 상태' },
         { key: '', title: '귀속 전략' },
+        { key: '', title: '매도' },
     ];
     headerMap.forEach((item, index) => {
         const th = headers[index];
@@ -1119,9 +1132,9 @@ function updateHoldingSortHeaders() {
             return;
         }
         th.dataset.sort = item.key;
-        th.style.cursor = 'pointer';
+        th.style.cursor = item.key ? 'pointer' : 'default';
         th.style.userSelect = 'none';
-        th.title = `${item.title} 기준 정렬`;
+        th.title = item.key ? `${item.title} 기준 정렬` : '';
         const icon = holdingsSortKey === item.key ? (holdingsSortAsc ? ' ▲' : ' ▼') : '';
         th.innerHTML = `${escapeHtml(item.title)}<span class="sort-icon">${icon}</span>`;
     });
@@ -1134,12 +1147,18 @@ function renderHoldingRows() {
     }
     tbodyHoldings.innerHTML = '';
     if (!holdingsCache.length) {
-        setTableMessage('#table-holdings tbody', 8, '보유 종목이 없습니다');
+        setTableMessage('#table-holdings tbody', 10, '보유 종목이 없습니다');
         updateHoldingSortHeaders();
         return;
     }
 
-    sortedHoldings().forEach((holding) => {
+    const rows = sortedHoldings();
+    if (!rows.length) {
+        setTableMessage('#table-holdings tbody', 10, '선택한 조건에 해당하는 보유 종목이 없습니다');
+        updateHoldingSortHeaders();
+        return;
+    }
+    rows.forEach((holding) => {
         const rtClass = Number(holding.rt || 0) >= 0 ? 'text-success' : 'text-danger';
         const qty = Number(holding.qty || 0);
         const sellableQty = Number(holding.sellable_qty ?? holding.qty ?? 0);
@@ -1153,6 +1172,8 @@ function renderHoldingRows() {
         const strategyBadges = (holding.strategy_names || []).length
             ? holding.strategy_names.map((name) => pill(name, 'hold')).join(' ')
             : '<span class="time-muted">귀속 미확인</span>';
+        const pnlStatus = holding.pnl_status || (Number(holding.pnl || 0) < 0 ? 'loss' : (Number(holding.pnl || 0) > 0 ? 'profit' : 'flat'));
+        const pnlStatusLabel = pnlStatus === 'loss' ? '손실' : (pnlStatus === 'profit' ? '수익' : '보합');
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td>
@@ -1162,8 +1183,10 @@ function renderHoldingRows() {
             <td>${qtyText}</td>
             <td>${formatCurrency(holding.price)}</td>
             <td>${formatCurrency(holding.value || Number(holding.qty || 0) * Number(holding.price || 0))}</td>
+            <td><strong>${formatNumber(Number(holding.mistock_weight || 0) * 100, 2)}%</strong></td>
             <td class="${rtClass}">${formatPercent(holding.rt)}</td>
             <td class="${rtClass}">${formatCurrency(holding.pnl)}</td>
+            <td><span class="holding-pnl-badge is-${pnlStatus}">${pnlStatusLabel}</span></td>
             <td>${strategyBadges}</td>
             <td>
                 <button type="button" class="button-ghost queue-order"
@@ -1186,6 +1209,50 @@ function renderHoldingRows() {
         button.addEventListener('click', () => createApprovalFromButton(button), { once: true });
     });
     updateHoldingSortHeaders();
+}
+
+function renderHoldingAnalysis(balance) {
+    const summary = balance.holding_summary || {};
+    setElementText('holding-profit-count', formatNumber(summary.profit_count || 0));
+    setElementText('holding-loss-count', formatNumber(summary.loss_count || 0));
+    setElementText('holding-flat-count', formatNumber(summary.flat_count || 0));
+    setElementText('holding-attribution-coverage', `${formatNumber(summary.attribution_coverage || 0, 1)}%`);
+
+    const strategies = balance.strategy_summary || [];
+    const attributed = strategies.filter((item) => item.strategy_id !== 'unattributed');
+    setElementText('holding-strategy-count', `${formatNumber(attributed.length)}개 전략`);
+    const tbody = document.querySelector('#table-holding-strategies tbody');
+    if (tbody) {
+        tbody.innerHTML = '';
+        if (!strategies.length) {
+            setTableMessage('#table-holding-strategies tbody', 7, '전략별 귀속 정보가 없습니다');
+        } else {
+            strategies.forEach((item) => {
+                const pnl = Number(item.pnl || 0);
+                const status = pnl < 0 ? 'loss' : (pnl > 0 ? 'profit' : 'flat');
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td><div class="symbol-name">${escapeHtml(item.strategy_name || item.strategy_id)}</div><div class="symbol-code">${escapeHtml(item.strategy_id)}</div></td>
+                    <td><strong>${formatNumber(item.holding_count || 0)}개</strong><small class="time-muted">손실 ${formatNumber(item.loss_holding_count || 0)}개</small></td>
+                    <td>${formatCurrency(item.evaluation_amount)}</td><td>${formatNumber(item.allocation_ratio || 0, 1)}%</td>
+                    <td class="${pnl >= 0 ? 'text-success' : 'text-danger'}">${formatCurrency(pnl)}</td>
+                    <td class="${pnl >= 0 ? 'text-success' : 'text-danger'}">${formatPercent(item.return_rate)}</td>
+                    <td><span class="holding-pnl-badge is-${status}">${status === 'loss' ? '손실' : (status === 'profit' ? '수익' : '보합')}</span></td>`;
+                tbody.appendChild(tr);
+            });
+        }
+    }
+
+    const strategySelect = document.getElementById('select-holding-strategy-filter');
+    if (strategySelect) {
+        strategySelect.innerHTML = ['<option value="all">전체 전략</option>', ...strategies.map((item) => `<option value="${escapeHtml(item.strategy_id)}">${escapeHtml(item.strategy_name || item.strategy_id)}</option>`)].join('');
+        strategySelect.value = holdingStrategyFilter;
+    }
+    const lossList = document.getElementById('holding-loss-list');
+    if (lossList) {
+        const losses = [...(balance.holdings || [])].filter((item) => item.pnl_status === 'loss').sort((a, b) => Number(a.pnl || 0) - Number(b.pnl || 0));
+        lossList.innerHTML = losses.length ? `<div class="holding-loss-list-title">손실 종목 우선 확인</div>${losses.slice(0, 5).map((item) => `<div class="holding-loss-item"><span><strong>${escapeHtml(item.name || item.symbol)}</strong><small>${escapeHtml(item.symbol)}</small></span><span class="text-danger"><strong>${formatCurrency(item.pnl)}</strong><small>${formatPercent(item.rt)}</small></span></div>`).join('')}` : '<div class="holding-loss-empty">현재 손실 보유종목이 없습니다.</div>';
+    }
 }
 
 function bindHoldingSortHeaders() {
@@ -1320,6 +1387,7 @@ async function renderBalance() {
         });
         holdingsCache = (balance.holdings || []).map((holding) => ({ ...holding }));
         renderHoldingAccountSummary(balance, displayTotal, realizedPnl);
+        renderHoldingAnalysis(balance);
         bindHoldingSortHeaders();
         renderHoldingRows();
 
@@ -3378,6 +3446,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnSellAllHoldings = document.getElementById('btn-sell-all-holdings');
     if (btnSellAllHoldings) {
         btnSellAllHoldings.addEventListener('click', sellAllHoldings);
+    }
+    const btnRefreshHoldings = document.getElementById('btn-refresh-holdings');
+    if (btnRefreshHoldings) {
+        btnRefreshHoldings.addEventListener('click', async () => {
+            setButtonBusy('btn-refresh-holdings', true);
+            try {
+                await renderBalance();
+            } finally {
+                setButtonBusy('btn-refresh-holdings', false);
+            }
+        });
+    }
+    const holdingStrategySelect = document.getElementById('select-holding-strategy-filter');
+    if (holdingStrategySelect) {
+        holdingStrategySelect.addEventListener('change', () => {
+            holdingStrategyFilter = holdingStrategySelect.value || 'all';
+            renderHoldingRows();
+        });
+    }
+    const holdingPnlSelect = document.getElementById('select-holding-pnl-filter');
+    if (holdingPnlSelect) {
+        holdingPnlSelect.addEventListener('change', () => {
+            holdingPnlFilter = holdingPnlSelect.value || 'all';
+            renderHoldingRows();
+        });
     }
     const btnDryRun = document.getElementById('btn-dry-run');
     if (btnDryRun) {

@@ -100,6 +100,27 @@ class MistockDashboardTests(unittest.TestCase):
         self.assertIn("/api/mistock/orders/cancel", paths)
         self.assertIn("/api/mistock/orders/revise", paths)
 
+    def test_mistock_holding_summary_matches_hanstock_structure(self):
+        balance = {
+            "holdings": [
+                {"symbol": "AAPL", "qty": 2, "value": 240, "pnl": 40,
+                 "strategies": [{"id": "alpha", "name": "Alpha", "qty": 1}]},
+                {"symbol": "MSFT", "qty": 1, "value": 180, "pnl": -20, "strategies": []},
+            ]
+        }
+
+        mistock._summarize_mistock_holdings(balance)
+
+        self.assertEqual(balance["holding_summary"]["profit_count"], 1)
+        self.assertEqual(balance["holding_summary"]["loss_count"], 1)
+        self.assertAlmostEqual(balance["holding_summary"]["attribution_coverage"], 28.571428, places=5)
+        self.assertEqual(balance["holdings"][0]["pnl_status"], "profit")
+        self.assertAlmostEqual(balance["holdings"][0]["mistock_weight"], 240 / 420)
+        self.assertEqual(
+            {item["strategy_id"] for item in balance["strategy_summary"]},
+            {"alpha", "unattributed"},
+        )
+
     def test_mistock_uses_separate_runtime_database(self):
         health = mistock.mistock_health()
         watchlist = mistock.mistock_watchlist()

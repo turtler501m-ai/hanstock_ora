@@ -385,7 +385,80 @@ def mistock_balance():
             if str(holding.get("symbol") or "") not in active_symbols
         ]
         balance["pending_sell_symbols"] = sorted(active_symbols)
+    _summarize_mistock_holdings(balance)
     return balance
+
+
+def _summarize_mistock_holdings(balance: dict) -> None:
+    """Add the same position-health and strategy-attribution view as Hanstock."""
+    strategy_totals: dict[str, dict] = {}
+    total_value = sum(float(item.get("value") or 0) for item in balance.get("holdings", []))
+    attributed_value = 0.0
+
+    for holding in balance.get("holdings", []):
+        qty = max(0.0, float(holding.get("qty") or 0))
+        value = float(holding.get("value") or 0)
+        pnl = float(holding.get("pnl") or 0)
+        recorded = [item for item in holding.get("strategies", []) if float(item.get("qty") or 0) > 0]
+        recorded_qty = sum(float(item.get("qty") or 0) for item in recorded)
+        scale = min(1.0, qty / recorded_qty) if recorded_qty > 0 else 0.0
+        allocations = []
+        for item in recorded:
+            allocated_qty = float(item.get("qty") or 0) * scale
+            allocations.append({
+                "strategy_id": str(item.get("id") or ""),
+                "strategy_name": str(item.get("name") or item.get("id") or ""),
+                "allocated_qty": allocated_qty,
+            })
+        allocated_qty = sum(item["allocated_qty"] for item in allocations)
+        if qty - allocated_qty > 1e-8 or not allocations:
+            allocations.append({
+                "strategy_id": "unattributed",
+                "strategy_name": "귀속 미확인",
+                "allocated_qty": max(0.0, qty - allocated_qty),
+            })
+
+        for item in allocations:
+            weight = item["allocated_qty"] / qty if qty > 0 else 0.0
+            item_value = value * weight
+            item_pnl = pnl * weight
+            item.update({
+                "allocated_qty": round(item["allocated_qty"], 4),
+                "evaluation_amount": item_value,
+                "pnl": item_pnl,
+                "return_rate": item_pnl / (item_value - item_pnl) * 100 if item_value - item_pnl > 0 else 0.0,
+            })
+            summary = strategy_totals.setdefault(item["strategy_id"], {
+                "strategy_id": item["strategy_id"], "strategy_name": item["strategy_name"],
+                "evaluation_amount": 0.0, "pnl": 0.0, "holding_count": 0,
+                "loss_holding_count": 0, "profit_holding_count": 0,
+            })
+            summary["evaluation_amount"] += item_value
+            summary["pnl"] += item_pnl
+            summary["holding_count"] += 1
+            summary["loss_holding_count"] += int(item_pnl < 0)
+            summary["profit_holding_count"] += int(item_pnl > 0)
+            if item["strategy_id"] != "unattributed":
+                attributed_value += item_value
+        holding["strategy_allocations"] = allocations
+        holding["pnl_status"] = "loss" if pnl < 0 else ("profit" if pnl > 0 else "flat")
+        holding["mistock_weight"] = value / total_value if total_value > 0 else 0.0
+
+    for summary in strategy_totals.values():
+        cost = summary["evaluation_amount"] - summary["pnl"]
+        summary["return_rate"] = summary["pnl"] / cost * 100 if cost > 0 else 0.0
+        summary["allocation_ratio"] = summary["evaluation_amount"] / total_value * 100 if total_value > 0 else 0.0
+    holdings = balance.get("holdings", [])
+    balance["strategy_summary"] = sorted(strategy_totals.values(), key=lambda item: -item["evaluation_amount"])
+    balance["holding_summary"] = {
+        "total_count": len(holdings),
+        "profit_count": sum(item.get("pnl_status") == "profit" for item in holdings),
+        "loss_count": sum(item.get("pnl_status") == "loss" for item in holdings),
+        "flat_count": sum(item.get("pnl_status") == "flat" for item in holdings),
+        "evaluation_amount": total_value,
+        "pnl": sum(float(item.get("pnl") or 0) for item in holdings),
+        "attribution_coverage": attributed_value / total_value * 100 if total_value > 0 else 0.0,
+    }
 
 
 @router.get("/api/mistock/portfolio-optimizer")
