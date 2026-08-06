@@ -1354,11 +1354,13 @@ def _load_mistock_price_rows(symbols: list[str]) -> dict[str, list[dict]]:
         import yfinance as yf
 
         require_online_access("Mistock strategy forward performance")
-        frame = yf.download(requested, period="6mo", interval="1d", auto_adjust=False, progress=False, threads=True, timeout=10)
+        yahoo_symbols = {symbol: symbol.replace(".", "-") for symbol in requested}
+        frame = yf.download(list(yahoo_symbols.values()), period="6mo", interval="1d", auto_adjust=False, progress=False, threads=True, timeout=10)
         close = frame["Close"]
         result = {}
         for symbol in requested:
-            series = close[symbol].dropna() if getattr(close, "ndim", 1) > 1 else close.dropna()
+            yahoo_symbol = yahoo_symbols[symbol]
+            series = close[yahoo_symbol].dropna() if getattr(close, "ndim", 1) > 1 else close.dropna()
             result[symbol] = [{"date": str(index)[:10], "close": float(value)} for index, value in series.items()]
         _MISTOCK_PRICE_CACHE = (time.monotonic(), result)
         return result
@@ -1375,11 +1377,15 @@ def _mistock_strategy_forward(trades: list[dict], index_rows: dict[str, list[dic
         str(row["id"]): str(row.get("name") or row["id"])
         for row in mistock_db.rows("SELECT id, name FROM ai_strategies")
     }
+    completed_sessions = [str(row.get("date") or "")[:10] for row in index_rows.get("sp500", []) if row.get("date")]
+    as_of = max(completed_sessions) if completed_sessions else None
+    completed_trades = [row for row in trades if not as_of or str(row.get("ts") or "")[:10] <= as_of]
     rows = build_strategy_forward_performance(
-        trades,
+        completed_trades,
         _load_mistock_price_rows(symbols),
         {"KOSPI": index_rows.get("sp500", []), "KOSDAQ": index_rows.get("nasdaq", [])},
         strategy_names=names,
+        as_of=as_of,
     )
     for row in rows:
         row["sp500_return_pct"] = row.pop("kospi_return_pct", None)
