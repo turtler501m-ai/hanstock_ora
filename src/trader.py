@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
 from src.config import config, get_settings, trading_flags
 from src.utils.logger import logger
 from src.online_access import require_online_access
-from src.api.kis_api import HTTP
+from src.api.kis_api import HTTP, _kis_throttle
 from src.kis_client import KISClient, KISClientConfig
 from src.db.repository import init_db, connect_db, save_trade, update_trade_order_status
 from src.notifier.slack import slack_session_start, slack_order, slack_candidates, slack_session_end, slack_error
@@ -627,7 +627,18 @@ class KIStockAPI:
         rows = []
         page_params = dict(params)
         tr_cont = ""
+        seen_page_tokens: set[tuple[str, str]] = set()
+        max_pages = max(1, int(os.environ.get("KIS_TRADE_HISTORY_MAX_PAGES", "100")))
+        page_count = 0
         while True:
+            page_count += 1
+            if page_count > max_pages:
+                logger.warning(
+                    "KIS trade history pagination stopped after "
+                    f"{max_pages} pages with {len(rows)} rows"
+                )
+                break
+            _kis_throttle()
             headers = self._headers(tr_id)
             if tr_cont:
                 headers["tr_cont"] = tr_cont
@@ -640,11 +651,18 @@ class KIStockAPI:
             next_nk = str(data.get("ctx_area_nk100") or data.get("CTX_AREA_NK100") or "").strip()
             response_headers = getattr(r, "headers", {}) or {}
             tr_cont = str(response_headers.get("tr_cont") or response_headers.get("tr-cont") or "").strip()
+            page_token = (next_fk, next_nk)
+            if page_count > 1 and page_token in seen_page_tokens:
+                logger.warning(
+                    "KIS trade history pagination returned a repeated token; "
+                    f"stopping with {len(rows)} rows"
+                )
+                break
             if tr_cont not in {"M", "F"} or (not next_fk and not next_nk):
                 break
+            seen_page_tokens.add(page_token)
             page_params["CTX_AREA_FK100"] = next_fk
             page_params["CTX_AREA_NK100"] = next_nk
-            _kis_order_throttle()
         return rows
 
     def get_condition_search_list(self, user_id: str) -> list:

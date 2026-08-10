@@ -312,6 +312,51 @@ class SchedulerModeTests(unittest.TestCase):
             ["plunge_bounce_strategy", "heikin_ashi_scalping_strategy"],
         )
 
+    def test_strategy_dispatch_reuses_one_pre_order_sync_for_independent_strategies(self):
+        schedules = [
+            {"strategy_id": "plunge_bounce_strategy", "mode": "execute", "auto_approve": True},
+            {"strategy_id": "heikin_ashi_scalping_strategy", "mode": "execute", "auto_approve": True},
+        ]
+        shared_sync = {"ok": True, "updated_count": 2}
+        with patch.object(
+            strategy_scheduler, "list_strategy_schedules", return_value=schedules
+        ), patch.object(
+            strategy_scheduler, "is_schedule_due", return_value=True
+        ), patch.object(
+            strategy_scheduler, "_sync_order_status_before_cycle", return_value=shared_sync
+        ) as sync_mock, patch.object(
+            strategy_scheduler, "run_scheduled_cycle", return_value={"results": []}
+        ) as run_cycle, patch.object(
+            strategy_scheduler, "mark_strategy_schedule_run"
+        ):
+            ran = strategy_scheduler.dispatch_due_schedules()
+
+        self.assertEqual(
+            ran,
+            ["plunge_bounce_strategy", "heikin_ashi_scalping_strategy"],
+        )
+        sync_mock.assert_called_once_with()
+        self.assertEqual(run_cycle.call_count, 2)
+        self.assertTrue(all(
+            call.kwargs["pre_order_status_sync"] is shared_sync
+            for call in run_cycle.call_args_list
+        ))
+
+    def test_run_scheduled_cycle_uses_supplied_pre_order_sync_without_fetching_again(self):
+        shared_sync = {"ok": True, "updated_count": 4}
+        with patch.object(
+            scheduler, "_sync_order_status_before_cycle"
+        ) as sync_mock, patch.object(
+            scheduler.trader, "run", return_value={"results": []}
+        ):
+            result = scheduler.run_scheduled_cycle(
+                mode="execute",
+                pre_order_status_sync=shared_sync,
+            )
+
+        sync_mock.assert_not_called()
+        self.assertIs(result["pre_order_status_sync"], shared_sync)
+
     def test_run_scheduled_cycle_delegates_execute_mode(self):
         expected = {"mode": "execute", "results": []}
 

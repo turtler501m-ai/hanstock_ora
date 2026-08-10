@@ -29,6 +29,9 @@ SchedulerOperationError = (
 )
 
 
+_PRE_ORDER_STATUS_SYNC_UNSET = object()
+
+
 def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
     try:
         return max(minimum, int(os.environ.get(name, str(default))))
@@ -271,6 +274,7 @@ def run_scheduled_cycle(
     force_strategy_id: str | None = None,
     allowed_categories: set[str] | None = None,
     persist_result: bool = True,
+    pre_order_status_sync: dict | None | object = _PRE_ORDER_STATUS_SYNC_UNSET,
 ) -> dict:
     # force_strategy_id가 명시되지 않은 경우(cron 등) 현재 선택된 전략을 사용해
     # trader 실행과 결과 기록의 strategy_id가 일치하도록 한다.
@@ -299,7 +303,8 @@ def run_scheduled_cycle(
         retry_delay_seconds = _env_float("HANSTOCK_SCHEDULER_RETRY_DELAY_SECONDS", 5.0)
 
     _slack_cycle_start(mode=mode)
-    pre_order_status_sync = _sync_order_status_before_cycle()
+    if pre_order_status_sync is _PRE_ORDER_STATUS_SYNC_UNSET:
+        pre_order_status_sync = _sync_order_status_before_cycle()
 
     if include_ai_rebalance:
         trader_kwargs = {
