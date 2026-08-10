@@ -146,7 +146,16 @@ async def audit_api_requests(request: Request, call_next):
         raise
     finally:
         duration_ms = (time.perf_counter() - started) * 1000.0
-        message = api_audit_message(request.method, path, status_code, duration_ms)
+        route = request.scope.get("route")
+        feature = getattr(route, "name", None)
+        route_path = getattr(route, "path", None) or path
+        message = api_audit_message(
+            request.method,
+            route_path,
+            status_code,
+            duration_ms,
+            feature=feature or "unmatched_api",
+        )
         if status_code >= 500:
             logger.error(message)
         elif status_code >= 400:

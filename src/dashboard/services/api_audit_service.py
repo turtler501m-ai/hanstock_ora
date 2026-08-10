@@ -24,11 +24,28 @@ def should_send_api_slack(method: str, status_code: int) -> bool:
     return int(status_code) >= 400 or str(method or "").upper() not in _READ_ONLY_METHODS
 
 
-def api_audit_message(method: str, path: str, status_code: int, duration_ms: float) -> str:
+def api_result(status_code: int) -> str:
+    if int(status_code) < 400:
+        return "success"
+    if int(status_code) < 500:
+        return "client_error"
+    return "server_error"
+
+
+def api_audit_message(
+    method: str,
+    path: str,
+    status_code: int,
+    duration_ms: float,
+    *,
+    feature: str = "unknown",
+) -> str:
     safe_method = str(method or "UNKNOWN").upper()[:12]
     safe_path = str(path or "/").split("?", 1)[0][:300]
+    safe_feature = str(feature or "unknown").replace(" ", "_")[:120]
     return (
-        f"[API] {safe_method} {safe_path} status={int(status_code)} "
+        f"[API] {safe_method} {safe_path} feature={safe_feature} "
+        f"result={api_result(status_code)} status={int(status_code)} "
         f"duration_ms={max(0.0, float(duration_ms)):.1f}"
     )
 

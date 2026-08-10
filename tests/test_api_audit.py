@@ -30,12 +30,17 @@ def _request(method: str, path: str, query: bytes = b"") -> Request:
 class ApiAuditTests(unittest.TestCase):
     def test_message_omits_query_and_body_secrets(self):
         message = api_audit_service.api_audit_message(
-            "post", "/api/settings?token=secret", 200, 12.34
+            "post",
+            "/api/settings?token=secret",
+            200,
+            12.34,
+            feature="update settings",
         )
 
         self.assertEqual(
             message,
-            "[API] POST /api/settings status=200 duration_ms=12.3",
+            "[API] POST /api/settings feature=update_settings result=success "
+            "status=200 duration_ms=12.3",
         )
         self.assertNotIn("secret", message)
 
@@ -87,9 +92,17 @@ class ApiAuditTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 201)
         logged = info.call_args.args[0]
-        self.assertIn("[API] POST /api/system/kill status=201", logged)
+        self.assertIn(
+            "[API] POST /api/system/kill feature=unmatched_api result=success status=201",
+            logged,
+        )
         self.assertNotIn("secret", logged)
         slack.assert_called_once()
+
+    def test_result_classification(self):
+        self.assertEqual(api_audit_service.api_result(200), "success")
+        self.assertEqual(api_audit_service.api_result(409), "client_error")
+        self.assertEqual(api_audit_service.api_result(500), "server_error")
 
     def test_non_api_request_is_not_audited(self):
         request = _request("GET", "/static/js/app.js")
