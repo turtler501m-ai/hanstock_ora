@@ -23,7 +23,7 @@ from src.db.repository import (
     mark_strategy_schedule_run,
     save_scheduler_result,
 )
-from src.scheduler import run_scheduled_cycle, _sync_order_status_before_cycle
+from src.scheduler import run_scheduled_cycle
 from src.db.scheduler_repository import KST
 from src.strategy.narrative_momentum import STRATEGY_ID as NARRATIVE_MOMENTUM_STRATEGY_ID
 from src.strategy.narrative_momentum_runner import run_narrative_momentum_cycle
@@ -107,18 +107,6 @@ def dispatch_due_schedules() -> list[str]:
     due_schedules.sort(
         key=lambda sched: _TRADER_DISPATCH_PRIORITY.get(str(sched.get("strategy_id") or ""), 100)
     )
-    uses_trader_scheduler = any(
-        str(sched.get("strategy_id") or "") != NARRATIVE_MOMENTUM_STRATEGY_ID
-        and (
-            str(sched.get("strategy_id") or "") in _TRADER_SCHEDULE_STRATEGY_IDS
-            or str(sched.get("strategy_id") or "") in _ISOLATED_STRATEGY_IDS
-            or not _is_registered_ai_strategy(str(sched.get("strategy_id") or ""))
-        )
-        for sched in due_schedules
-    )
-    shared_pre_order_status_sync = (
-        _sync_order_status_before_cycle() if uses_trader_scheduler else None
-    )
     for sched in due_schedules:
         strategy_id = sched.get("strategy_id")
         schedule_strategy_id = (
@@ -182,15 +170,13 @@ def dispatch_due_schedules() -> list[str]:
                     result["status"] = "completed"
                     result["ok"] = True
             else:
-                cycle_kwargs = {
-                    "auto_approve": auto_approve,
-                    "force_strategy_id": strategy_id,
-                    "allowed_categories": _allowed_categories_for_strategy(strategy_id),
-                    "persist_result": False,
-                }
-                if shared_pre_order_status_sync is not None:
-                    cycle_kwargs["pre_order_status_sync"] = shared_pre_order_status_sync
-                result = run_scheduled_cycle(mode, **cycle_kwargs)
+                result = run_scheduled_cycle(
+                    mode,
+                    auto_approve=auto_approve,
+                    force_strategy_id=strategy_id,
+                    allowed_categories=_allowed_categories_for_strategy(strategy_id),
+                    persist_result=False,
+                )
             completed_at = datetime.now(KST)
             duration_seconds = round(time.monotonic() - started_monotonic, 3)
             if not isinstance(result, dict):

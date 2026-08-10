@@ -312,18 +312,17 @@ class SchedulerModeTests(unittest.TestCase):
             ["plunge_bounce_strategy", "heikin_ashi_scalping_strategy"],
         )
 
-    def test_strategy_dispatch_reuses_one_pre_order_sync_for_independent_strategies(self):
+    def test_strategy_dispatch_skips_order_sync_for_independent_strategies(self):
         schedules = [
             {"strategy_id": "plunge_bounce_strategy", "mode": "execute", "auto_approve": True},
             {"strategy_id": "heikin_ashi_scalping_strategy", "mode": "execute", "auto_approve": True},
         ]
-        shared_sync = {"ok": True, "updated_count": 2}
         with patch.object(
             strategy_scheduler, "list_strategy_schedules", return_value=schedules
         ), patch.object(
             strategy_scheduler, "is_schedule_due", return_value=True
         ), patch.object(
-            strategy_scheduler, "_sync_order_status_before_cycle", return_value=shared_sync
+            scheduler, "_sync_order_status_before_cycle"
         ) as sync_mock, patch.object(
             strategy_scheduler, "run_scheduled_cycle", return_value={"results": []}
         ) as run_cycle, patch.object(
@@ -335,10 +334,10 @@ class SchedulerModeTests(unittest.TestCase):
             ran,
             ["plunge_bounce_strategy", "heikin_ashi_scalping_strategy"],
         )
-        sync_mock.assert_called_once_with()
+        sync_mock.assert_not_called()
         self.assertEqual(run_cycle.call_count, 2)
         self.assertTrue(all(
-            call.kwargs["pre_order_status_sync"] is shared_sync
+            "pre_order_status_sync" not in call.kwargs
             for call in run_cycle.call_args_list
         ))
 
@@ -439,7 +438,7 @@ class SchedulerModeTests(unittest.TestCase):
         self.assertEqual(result["auto_approved"], [{"id": 123, "status": "executed"}])
         self.assertEqual(result["auto_approval_errors"], [])
 
-    def test_daily_auto_syncs_order_status_after_auto_approval(self):
+    def test_daily_auto_skips_order_status_sync(self):
         expected = {
             "results": [
                 {"approval_id": 123, "category": "ai_rebalance"},
@@ -459,12 +458,12 @@ class SchedulerModeTests(unittest.TestCase):
         ):
             result = scheduler.run_scheduled_cycle(mode="daily_auto")
 
-        self.assertEqual(get_api.call_count, 2)
-        self.assertEqual(sync_status.call_count, 2)
-        self.assertEqual(result["pre_order_status_sync"]["updated_count"], 1)
-        self.assertEqual(result["order_status_sync"]["updated_count"], 1)
+        get_api.assert_not_called()
+        sync_status.assert_not_called()
+        self.assertNotIn("pre_order_status_sync", result)
+        self.assertNotIn("order_status_sync", result)
 
-    def test_execute_syncs_stale_orders_before_building_new_plan(self):
+    def test_execute_skips_stale_order_sync(self):
         with patch.object(
             scheduler.trader, "run", return_value={"results": []}
         ), patch.object(scheduler.trader.config, "dry_run", False), patch(
@@ -475,8 +474,8 @@ class SchedulerModeTests(unittest.TestCase):
         ) as sync_status:
             result = scheduler.run_scheduled_cycle(mode="execute")
 
-        sync_status.assert_called_once()
-        self.assertEqual(result["pre_order_status_sync"]["updated_count"], 3)
+        sync_status.assert_not_called()
+        self.assertNotIn("pre_order_status_sync", result)
         self.assertNotIn("order_status_sync", result)
 
     def test_daily_auto_treats_already_processed_approval_as_done(self):
@@ -534,7 +533,7 @@ class SchedulerModeTests(unittest.TestCase):
             "already_processed": True,
         }])
 
-    def test_order_status_sync_failure_is_recorded_without_failing_cycle(self):
+    def test_order_status_sync_is_not_called_by_daily_auto(self):
         expected = {
             "results": [
                 {"approval_id": 123, "category": "ai_rebalance"},
@@ -555,7 +554,7 @@ class SchedulerModeTests(unittest.TestCase):
             result = scheduler.run_scheduled_cycle(mode="daily_auto")
 
         self.assertEqual(result["auto_approved"], [{"id": 123, "status": "executed"}])
-        self.assertEqual(result["order_status_sync_error"]["message"], "history unavailable")
+        self.assertNotIn("order_status_sync_error", result)
 
     def test_daily_auto_retries_trader_run_after_transient_failure(self):
         expected = {"results": []}

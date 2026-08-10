@@ -273,12 +273,11 @@ class CommonTabStrategyFlowTests(unittest.TestCase):
                 calls_by_id[strategy_id].kwargs["include_ai_rebalance"]
             )
 
-    def test_direct_execute_shares_one_pre_order_status_sync(self):
-        shared_sync = {"ok": True, "updated_count": 1}
+    def test_direct_execute_skips_pre_order_status_sync(self):
         strategy_ids = ["plunge_bounce_strategy", "heikin_ashi_scalping_strategy"]
         with patch(
             "src.scheduler._sync_order_status_before_cycle",
-            return_value=shared_sync,
+            return_value={"ok": True, "updated_count": 1},
         ) as sync_mock, patch(
             "src.scheduler.run_scheduled_cycle",
             return_value={"results": []},
@@ -293,10 +292,10 @@ class CommonTabStrategyFlowTests(unittest.TestCase):
                 strategy_ids=strategy_ids,
             )
 
-        sync_mock.assert_called_once_with()
+        sync_mock.assert_not_called()
         self.assertEqual(run_cycle.call_count, 2)
         self.assertTrue(all(
-            invocation.kwargs["pre_order_status_sync"] is shared_sync
+            "pre_order_status_sync" not in invocation.kwargs
             for invocation in run_cycle.call_args_list
         ))
 
