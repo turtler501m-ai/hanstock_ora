@@ -121,6 +121,16 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("holdingStrategyFilter === 'all'", APP_JS)
         self.assertIn("holdingPnlFilter === 'all'", APP_JS)
 
+    def test_sell_all_does_not_implicitly_activate_kill_switch(self):
+        self.assertIn(
+            "postJson('/api/holdings/sell-all', { halt_new_buys: false })",
+            APP_JS,
+        )
+        self.assertNotIn(
+            "postJson('/api/holdings/sell-all', { halt_new_buys: true })",
+            APP_JS,
+        )
+
     def test_scheduler_checklist_uses_persisted_schedule_registrations(self):
         scheduler_renderer = APP_JS.split(
             "async function renderSchedulerStrategyChecklist", 1

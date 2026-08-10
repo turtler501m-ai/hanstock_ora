@@ -3421,7 +3421,9 @@ async function sellAllHoldings() {
         button.disabled = true;
     }
     try {
-        const result = await postJson('/api/holdings/sell-all', { halt_new_buys: true });
+        // 전량매도와 신규 매수 중단은 서로 다른 운영 기능이다.
+        // 신규 매수를 중단하려면 별도의 Kill Switch를 명시적으로 사용한다.
+        const result = await postJson('/api/holdings/sell-all', { halt_new_buys: false });
         if (result.status === 'empty') {
             setStatus('매도할 보유 종목이 없습니다.', true);
             return;
