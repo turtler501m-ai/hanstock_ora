@@ -112,6 +112,8 @@ APPROVAL_SOURCE_CLASSIFICATIONS = {
     "manual": ("수동 주문", "manual"),
     "dashboard_holding_sell": ("수동 보유종목 매도", "manual"),
     "dashboard_sell_all": ("수동 전량매도", "manual"),
+    "dashboard_strategy_holding_sell": ("수동 종목별 전략귀속 매도", "manual"),
+    "dashboard_strategy_sell_all": ("수동 전략귀속 전량매도", "manual"),
     "signal": ("수동 신호 주문", "manual"),
     "candidate": ("수동 후보 주문", "manual"),
     "execution_plan": ("수동 실행계획 주문", "manual"),

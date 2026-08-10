@@ -116,6 +116,8 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("<th>손익 상태</th>", INDEX_HTML)
         self.assertIn("function renderHoldingStrategySummary(balance)", APP_JS)
         self.assertIn("balance.strategy_summary || []", APP_JS)
+        self.assertIn("/api/holdings/strategy-sell", APP_JS)
+        self.assertIn("/api/holdings/strategy-sell-all", APP_JS)
         self.assertIn("holdingStrategyFilter === 'all'", APP_JS)
         self.assertIn("holdingPnlFilter === 'all'", APP_JS)
 

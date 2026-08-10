@@ -1227,7 +1227,7 @@ function renderHoldingStrategySummary(balance) {
     if (tbody) {
         tbody.innerHTML = '';
         if (!summaryRows.length) {
-            setTableMessage('#table-holding-strategies tbody', 7, '전략별 귀속 정보가 없습니다');
+            setTableMessage('#table-holding-strategies tbody', 8, '전략별 귀속 정보가 없습니다');
         } else {
             summaryRows.forEach((item) => {
                 const pnl = Number(item.pnl || 0);
@@ -1248,8 +1248,17 @@ function renderHoldingStrategySummary(balance) {
                     <td class="${pnl >= 0 ? 'text-success' : 'text-danger'}">${formatCurrency(pnl)}</td>
                     <td class="${pnl >= 0 ? 'text-success' : 'text-danger'}">${formatPercent(item.return_rate)}</td>
                     <td><span class="holding-pnl-badge is-${pnlStatus}">${pnlStatusLabel}</span></td>
+                    <td>
+                        <button type="button" class="button-danger compact-button strategy-sell-all"
+                            data-strategy-id="${escapeHtml(item.strategy_id)}"
+                            data-strategy-name="${escapeHtml(item.strategy_name || item.strategy_id)}"
+                            title="이 전략에 귀속된 모든 종목을 전량 매도">전량매도</button>
+                    </td>
                 `;
                 tbody.appendChild(tr);
+            });
+            tbody.querySelectorAll('.strategy-sell-all').forEach((button) => {
+                button.addEventListener('click', () => sellAllStrategyAttribution(button), { once: true });
             });
         }
     }
@@ -1344,7 +1353,15 @@ function renderHoldingRows() {
                 ? strategyAllocations.map((item) => `
                     <span class="holding-strategy-chip">
                         ${escapeHtml(item.strategy_name || item.strategy_id)}
-                        <small>${formatNumber(item.allocated_qty || 0, 2)}주</small>
+                        <small>${formatNumber(item.allocated_qty || 0)}주</small>
+                        <button type="button" class="button-ghost strategy-attribution-sell"
+                            data-symbol="${escapeHtml(holding.symbol)}"
+                            data-name="${escapeHtml(holding.name)}"
+                            data-strategy-id="${escapeHtml(item.strategy_id)}"
+                            data-strategy-name="${escapeHtml(item.strategy_name || item.strategy_id)}"
+                            data-qty="${Number(item.allocated_qty || 0)}"
+                            ${(Number(item.allocated_qty || 0) > 0 && sellableQty > 0 && !sellPending) ? '' : 'disabled'}
+                            title="이 종목의 전략 귀속수량만 매도">매도</button>
                     </span>
                 `).join('')
                 : '<span class="time-muted">귀속 미확인</span>'}</div></td>
@@ -1366,6 +1383,9 @@ function renderHoldingRows() {
     });
     tbodyHoldings.querySelectorAll('.queue-order').forEach((button) => {
         button.addEventListener('click', () => createApprovalFromButton(button), { once: true });
+    });
+    tbodyHoldings.querySelectorAll('.strategy-attribution-sell').forEach((button) => {
+        button.addEventListener('click', () => sellHoldingStrategyAttribution(button), { once: true });
     });
     updateHoldingSortHeaders();
 }
@@ -3423,6 +3443,55 @@ async function sellAllHoldings() {
         if (button) {
             button.disabled = false;
         }
+    }
+}
+
+async function sellHoldingStrategyAttribution(button) {
+    const symbol = button.dataset.symbol || '';
+    const name = button.dataset.name || symbol;
+    const strategyId = button.dataset.strategyId || '';
+    const strategyName = button.dataset.strategyName || strategyId;
+    const qty = Number(button.dataset.qty || 0);
+    if (!window.confirm(`${name}(${symbol})의 ${strategyName} 귀속 ${qty.toLocaleString()}주를 매도할까요?`)) {
+        return;
+    }
+    button.disabled = true;
+    try {
+        const result = await postJson('/api/holdings/strategy-sell', {
+            symbol,
+            strategy_id: strategyId,
+        });
+        setStatus(`${name} ${strategyName} 귀속 매도 ${result.created_count || 0}건을 등록했습니다.`, true);
+        showOrdersTab();
+        scheduleOrderProgressRefresh();
+        await Promise.all([renderApprovals(), renderBalance()]);
+    } catch (err) {
+        setStatus(`종목별 귀속 매도 요청 실패: ${err.message}`);
+        button.disabled = false;
+    }
+}
+
+async function sellAllStrategyAttribution(button) {
+    const strategyId = button.dataset.strategyId || '';
+    const strategyName = button.dataset.strategyName || strategyId;
+    if (!window.confirm(`${strategyName}에 귀속된 모든 보유종목을 전량 매도할까요?`)) {
+        return;
+    }
+    button.disabled = true;
+    try {
+        const result = await postJson('/api/holdings/strategy-sell-all', {
+            strategy_id: strategyId,
+        });
+        setStatus(
+            `${strategyName} 전체귀속 매도 ${result.created_count || 0}건 등록, ${result.skipped_count || 0}건 제외했습니다.`,
+            true
+        );
+        showOrdersTab();
+        scheduleOrderProgressRefresh();
+        await Promise.all([renderApprovals(), renderBalance()]);
+    } catch (err) {
+        setStatus(`전체귀속 전량매도 요청 실패: ${err.message}`);
+        button.disabled = false;
     }
 }
 

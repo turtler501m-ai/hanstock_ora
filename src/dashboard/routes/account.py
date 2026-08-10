@@ -226,7 +226,10 @@ def _active_sell_approval_symbols() -> set[str]:
             SELECT DISTINCT a.symbol
             FROM approvals a
             WHERE a.action = 'sell'
-              AND a.source IN ('dashboard_holding_sell', 'dashboard_sell_all')
+              AND a.source IN (
+                  'dashboard_holding_sell', 'dashboard_sell_all',
+                  'dashboard_strategy_holding_sell', 'dashboard_strategy_sell_all'
+              )
               AND COALESCE(a.symbol, '') <> ''
               AND (
                     a.status IN ('pending', 'executing')

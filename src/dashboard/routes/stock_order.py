@@ -214,7 +214,12 @@ def get_approvals(limit: int = 50, strategy_id: str | None = None):
         item["auto_approval_in_progress"] = (
             auto_approval_enabled
             and item.get("status") == "pending"
-            and item.get("source") in {"dashboard_sell_all", "dashboard_holding_sell"}
+            and item.get("source") in {
+                "dashboard_sell_all",
+                "dashboard_holding_sell",
+                "dashboard_strategy_holding_sell",
+                "dashboard_strategy_sell_all",
+            }
         )
         approvals.append(item)
     return {
@@ -660,7 +665,10 @@ def _active_dashboard_sell_symbols() -> set[str]:
             SELECT DISTINCT a.symbol
             FROM approvals a
             WHERE a.action = 'sell'
-              AND a.source IN ('dashboard_holding_sell', 'dashboard_sell_all')
+              AND a.source IN (
+                  'dashboard_holding_sell', 'dashboard_sell_all',
+                  'dashboard_strategy_holding_sell', 'dashboard_strategy_sell_all'
+              )
               AND COALESCE(a.symbol, '') <> ''
               AND (
                     a.status IN ('pending', 'executing')
@@ -696,7 +704,10 @@ def _unsubmitted_dashboard_sell_symbols() -> set[str]:
             SELECT DISTINCT symbol
             FROM approvals
             WHERE action = 'sell'
-              AND source IN ('dashboard_holding_sell', 'dashboard_sell_all')
+              AND source IN (
+                  'dashboard_holding_sell', 'dashboard_sell_all',
+                  'dashboard_strategy_holding_sell', 'dashboard_strategy_sell_all'
+              )
               AND status IN ('pending', 'executing')
               AND COALESCE(symbol, '') <> ''
             """
@@ -873,6 +884,127 @@ def sell_all_holdings(payload: dict | None = Body(default=None)):
         "skipped": skipped,
         "orders": created,
     }
+
+
+def _strategy_attribution_sell_orders(
+    strategy_id: str,
+    *,
+    symbol: str | None = None,
+) -> tuple[list[dict], list[dict]]:
+    strategy_id = str(strategy_id or "").strip()
+    if not strategy_id:
+        raise HTTPException(status_code=400, detail="strategy_id is required")
+
+    try:
+        api = _get_api()
+        parsed = _parse_balance(_get_balance_data(api, allow_cache=False))
+        from src.dashboard.routes.account import _attach_holding_strategies
+
+        _attach_holding_strategies(parsed)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"KIS balance API request failed: {exc}") from exc
+
+    target_symbol = str(symbol or "").strip()
+    orders = []
+    skipped = []
+    active_symbols = _unsubmitted_dashboard_sell_symbols()
+    source = "dashboard_strategy_holding_sell" if target_symbol else "dashboard_strategy_sell_all"
+    for holding in parsed.get("holdings", []):
+        holding_symbol = str(holding.get("symbol") or "").strip()
+        if target_symbol and holding_symbol != target_symbol:
+            continue
+        allocation = next(
+            (
+                item for item in holding.get("strategy_allocations", [])
+                if str(item.get("strategy_id") or "") == strategy_id
+            ),
+            None,
+        )
+        if not allocation:
+            continue
+        allocated_qty = _to_int(allocation.get("allocated_qty"))
+        sellable_qty = _to_int(holding.get("sellable_qty", holding.get("qty")))
+        qty = min(allocated_qty, sellable_qty)
+        if holding_symbol in active_symbols:
+            skipped.append({
+                "symbol": holding_symbol,
+                "name": str(holding.get("name") or holding_symbol),
+                "strategy_id": strategy_id,
+                "qty": allocated_qty,
+                "reason": "active sell request already exists",
+            })
+            continue
+        if qty <= 0:
+            skipped.append({
+                "symbol": holding_symbol,
+                "name": str(holding.get("name") or holding_symbol),
+                "strategy_id": strategy_id,
+                "qty": allocated_qty,
+                "reason": "sellable attributed quantity is zero",
+            })
+            continue
+        strategy_name = str(allocation.get("strategy_name") or strategy_id)
+        orders.append({
+            "symbol": holding_symbol,
+            "name": str(holding.get("name") or holding_symbol),
+            "action": "sell",
+            "qty": qty,
+            "price": 0,
+            "reason": f"dashboard strategy attribution sell: {strategy_name}",
+            "source": source,
+            "strategy_id": None if strategy_id == "unattributed" else strategy_id,
+        })
+    if target_symbol and not orders and not skipped:
+        raise HTTPException(
+            status_code=404,
+            detail=f"strategy attribution not found for {target_symbol}: {strategy_id}",
+        )
+    return orders, skipped
+
+
+def _queue_strategy_attribution_sells(orders: list[dict], skipped: list[dict]) -> dict:
+    with _holding_sell_request_lock:
+        approval_ids = [_create_approval_row(order) for order in orders]
+    auto_approval_queued = False
+    if approval_ids and _auto_approval_enabled():
+        _run_auto_approval_batch_async(approval_ids)
+        auto_approval_queued = True
+    _clear_balance_cache()
+    return {
+        "status": "created" if approval_ids else "empty",
+        "created_count": len(approval_ids),
+        "pending_count": len(approval_ids),
+        "skipped_count": len(skipped),
+        "skipped": skipped,
+        "orders": [{"id": approval_id, "status": "pending"} for approval_id in approval_ids],
+        "auto_approval_queued": auto_approval_queued,
+        "fill_status_note": "KIS 주문 접수 후 실제 체결 여부는 주문내역 동기화에서 확정됩니다.",
+    }
+
+
+@router.post("/api/holdings/strategy-sell")
+def sell_holding_strategy_attribution(payload: dict = Body(...)):
+    missing = _required_env_missing()
+    if missing:
+        raise HTTPException(status_code=503, detail=f"Missing environment variables: {', '.join(missing)}")
+    strategy_id = str(payload.get("strategy_id") or "").strip()
+    symbol = str(payload.get("symbol") or "").strip()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="symbol is required")
+    orders, skipped = _strategy_attribution_sell_orders(strategy_id, symbol=symbol)
+    return _queue_strategy_attribution_sells(orders, skipped)
+
+
+@router.post("/api/holdings/strategy-sell-all")
+def sell_all_strategy_attribution(payload: dict = Body(...)):
+    missing = _required_env_missing()
+    if missing:
+        raise HTTPException(status_code=503, detail=f"Missing environment variables: {', '.join(missing)}")
+    strategy_id = str(payload.get("strategy_id") or "").strip()
+    orders, skipped = _strategy_attribution_sell_orders(strategy_id)
+    return _queue_strategy_attribution_sells(orders, skipped)
 
 
 
