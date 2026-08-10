@@ -23,6 +23,28 @@ def _allocated_integer_amounts(total: int, weights: list[float]) -> list[int]:
     return allocated
 
 
+def _allocated_integer_quantities(total: int, requested: list[float]) -> list[int]:
+    """Scale strategy ownership to whole domestic shares using largest remainders."""
+    total = max(0, int(total))
+    positive = [max(0.0, float(value)) for value in requested]
+    requested_total = sum(positive)
+    if total <= 0 or requested_total <= 0:
+        return [0 for _ in positive]
+    if requested_total <= total:
+        return [int(value) for value in positive]
+
+    exact = [total * value / requested_total for value in positive]
+    allocated = [int(value) for value in exact]
+    remaining = total - sum(allocated)
+    remainder_order = sorted(
+        range(len(exact)),
+        key=lambda index: (-(exact[index] - allocated[index]), index),
+    )
+    for index in remainder_order[:remaining]:
+        allocated[index] += 1
+    return allocated
+
+
 def _summarize_holding_strategies(parsed: dict) -> dict:
     """Allocate broker holdings to recorded strategies without exceeding broker quantity."""
     strategy_totals: dict[str, dict] = {}
@@ -46,15 +68,18 @@ def _summarize_holding_strategies(parsed: dict) -> dict:
             for item in holding.get("strategies", [])
             if str(item.get("id") or "").strip() and float(item.get("qty") or 0) > 0
         ]
-        recorded_qty = sum(item["qty"] for item in recorded)
-        scale = min(1.0, broker_qty / recorded_qty) if recorded_qty > 0 else 0.0
+        allocated_strategy_qty = _allocated_integer_quantities(
+            int(broker_qty),
+            [item["qty"] for item in recorded],
+        )
         allocations = [
             {
                 "strategy_id": item["id"],
                 "strategy_name": item["name"],
-                "allocated_qty": item["qty"] * scale,
+                "allocated_qty": float(qty),
             }
-            for item in recorded
+            for item, qty in zip(recorded, allocated_strategy_qty)
+            if qty > 0
         ]
         allocated_qty = sum(item["allocated_qty"] for item in allocations)
         unattributed_qty = max(0.0, broker_qty - allocated_qty)
@@ -158,6 +183,7 @@ def _attach_holding_strategies(parsed: dict) -> dict:
         for item in load_ai_strategies()
         if item.get("id")
     }
+    names.setdefault("ai_rebalance", "AI 리밸런싱")
     ownership: dict[str, list[dict]] = {}
     with trader.connect_db() as conn:
         conn.row_factory = sqlite3.Row

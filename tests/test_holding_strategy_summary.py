@@ -50,7 +50,7 @@ class HoldingStrategySummaryTests(unittest.TestCase):
         self.assertEqual(summaries["unattributed"]["evaluation_amount"], 800_000)
         self.assertEqual(result["holding_summary"]["attribution_coverage"], 60.0)
 
-    def test_scaled_allocations_do_not_add_zero_unattributed_row(self):
+    def test_scaled_allocations_use_whole_shares_without_unattributed_row(self):
         parsed = {
             "holdings": [{
                 "symbol": "196170",
@@ -71,7 +71,8 @@ class HoldingStrategySummaryTests(unittest.TestCase):
             [item["strategy_id"] for item in allocations],
             ["heikin_ashi_scalping_strategy", "ai_rebalance"],
         )
-        self.assertAlmostEqual(sum(item["allocated_qty"] for item in allocations), 29.0, places=4)
+        self.assertEqual([item["allocated_qty"] for item in allocations], [25.0, 4.0])
+        self.assertEqual(sum(item["allocated_qty"] for item in allocations), 29.0)
         self.assertEqual(result["holding_summary"]["attribution_coverage"], 100.0)
 
     def test_holding_summary_counts_profit_loss_and_flat_positions(self):
