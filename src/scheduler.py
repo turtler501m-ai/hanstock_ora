@@ -108,6 +108,20 @@ def _approve_one_with_retries(approval_id: int, *, attempts: int, delay_seconds:
                 processed = already_processed_result()
                 if processed is not None:
                     return processed
+            # Risk guards persist a rejected approval before raising HTTP 409.
+            # A rejection is an expected per-order outcome, so keep processing
+            # the remaining approvals instead of failing the entire schedule.
+            current = _approval_by_id(int(approval_id))
+            if current and current.get("status") == "rejected":
+                return {
+                    "approved": {
+                        "id": approval_id,
+                        "status": "rejected",
+                        "response_msg": current.get("response_msg", ""),
+                        "already_processed": True,
+                    },
+                    "errors": [],
+                }
             if not isinstance(exc, SchedulerOperationError):
                 raise
             errors.append(_error_record(exc, attempt=attempt, approval_id=approval_id))

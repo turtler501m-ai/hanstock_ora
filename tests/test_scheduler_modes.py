@@ -533,6 +533,45 @@ class SchedulerModeTests(unittest.TestCase):
             "already_processed": True,
         }])
 
+    def test_daily_auto_treats_risk_rejected_approval_as_done_and_continues(self):
+        expected = {
+            "results": [
+                {"approval_id": 123, "category": "ai_rebalance"},
+                {"approval_id": 124, "category": "ai_rebalance"},
+            ]
+        }
+        approvals = {
+            123: {"id": 123, "status": "rejected", "response_msg": "duplicate buy"},
+            124: {"id": 124, "status": "pending", "response_msg": ""},
+        }
+
+        # HTTPException is intentionally outside SchedulerOperationError; the
+        # persisted rejected status must still make it an expected outcome.
+        from fastapi import HTTPException
+
+        def approve_with_rejection(approval_id, _label):
+            if approval_id == 123:
+                raise HTTPException(status_code=409, detail="duplicate buy")
+            return {"id": 124, "status": "executed"}
+
+        with patch.object(scheduler.trader, "run", return_value=expected), patch(
+            "src.dashboard._approval_by_id",
+            side_effect=lambda approval_id: approvals[approval_id],
+        ), patch(
+            "src.dashboard._approve_pending_approval",
+            side_effect=approve_with_rejection,
+        ) as approve_mock, patch.object(scheduler.time, "sleep"), patch.object(
+            scheduler, "_write_cycle_result"
+        ):
+            result = scheduler.run_scheduled_cycle(mode="daily_auto")
+
+        # The rejected row is recognized from persisted state; the following
+        # pending row is still submitted.
+        self.assertEqual(approve_mock.call_count, 1)
+        approve_mock.assert_called_once_with(124, "scheduled auto approval")
+        self.assertEqual(result["auto_approval_errors"], [])
+        self.assertEqual([row["status"] for row in result["auto_approved"]], ["rejected", "executed"])
+
     def test_order_status_sync_is_not_called_by_daily_auto(self):
         expected = {
             "results": [

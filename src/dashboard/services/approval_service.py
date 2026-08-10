@@ -17,6 +17,15 @@ def _dependency(name: str, local):
     candidate = getattr(core, name, None)
     return local if getattr(candidate, "_approval_service_wrapper", False) is True else candidate or local
 
+
+def _is_tick_size_error(result: dict) -> bool:
+    message = " ".join(
+        str(result.get(key) or "")
+        for key in ("msg1", "message", "response_msg")
+    )
+    return "호가단위" in message
+
+
 def _load_pending_approval(approval_id: int) -> dict:
     item = _approval_by_id(approval_id)
     if not item:
@@ -264,6 +273,22 @@ def _approve_pending_approval_serialized(
             "_current_holding_qty_from_balance", _current_holding_qty_from_balance
         )(api, item["symbol"])
         result = api.place_order(item["symbol"], item["action"], item["price"], item["qty"])
+        if result.get("rt_cd") != "0" and _is_tick_size_error(result):
+            from src.strategy.seven_split import adjust_tick_size
+
+            adjusted_price = adjust_tick_size(int(item["price"]))
+            if adjusted_price > 0 and adjusted_price != int(item["price"]):
+                logger.warning(
+                    "approval order tick-size retry approval_id={} symbol={} price={} adjusted_price={}",
+                    approval_id,
+                    item["symbol"],
+                    item["price"],
+                    adjusted_price,
+                )
+                item["price"] = adjusted_price
+                result = api.place_order(
+                    item["symbol"], item["action"], adjusted_price, item["qty"]
+                )
         ok = result.get("rt_cd") == "0"
         status = "executed" if ok else "failed"
         response_msg = _dependency(
