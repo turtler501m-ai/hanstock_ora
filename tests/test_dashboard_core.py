@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import src.dashboard as dashboard
 import src.dashboard.core as dashboard_core
+from src.dashboard.services import approval_service
 from src.dashboard import _parse_balance, _portfolio_totals
 from src.db.connection import open_sqlite
 
@@ -193,6 +194,45 @@ class DashboardCoreTests(unittest.TestCase):
         self.assertEqual(result, [])
         warning.assert_not_called()
         debug.assert_called_once()
+
+    def test_buy_approval_capacity_limits_pending_batch(self):
+        decide = approval_service._buy_approval_capacity_decision
+        pending = [(101, "005930"), (102, "000660"), (103, "035420")]
+
+        self.assertEqual(
+            decide(
+                approval_id=101,
+                symbol="005930",
+                held_symbols=set(),
+                active_buy_symbols=set(),
+                pending_buys=pending,
+                max_positions=2,
+            ),
+            (True, ""),
+        )
+        allowed, reason = decide(
+            approval_id=103,
+            symbol="035420",
+            held_symbols=set(),
+            active_buy_symbols=set(),
+            pending_buys=pending,
+            max_positions=2,
+        )
+        self.assertFalse(allowed)
+        self.assertIn("remaining position slots", reason)
+
+    def test_buy_approval_capacity_counts_holdings_and_submitted_orders(self):
+        allowed, reason = approval_service._buy_approval_capacity_decision(
+            approval_id=201,
+            symbol="035420",
+            held_symbols={"005930"},
+            active_buy_symbols={"000660"},
+            pending_buys=[(201, "035420")],
+            max_positions=2,
+        )
+
+        self.assertFalse(allowed)
+        self.assertIn("maximum positions reached", reason)
 
     def test_balance_cache_is_scoped_to_account(self):
         original_cache = dashboard.BALANCE_CACHE
