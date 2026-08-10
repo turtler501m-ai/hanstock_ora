@@ -23,11 +23,11 @@ class ApiAuditTests(unittest.TestCase):
             summary="ok=True",
         )
 
-        self.assertEqual(
-            message,
-            "[API] request_id=abc123 POST /api/settings feature=update_settings "
-            "result=success status=200 duration_ms=12.3 summary=ok=True",
-        )
+        self.assertTrue(message.startswith("[API점검] 서버="), msg=message)
+        self.assertIn("요청ID=abc123", message)
+        self.assertIn("기능=수정 설정", message)
+        self.assertIn("수행결과=성공 HTTP상태=200", message)
+        self.assertIn("처리시간ms=12.3 결과요약=ok=True 오류내용=-", message)
         self.assertNotIn("secret", message)
 
     def test_slack_policy_skips_successful_reads(self):
@@ -95,17 +95,28 @@ class ApiAuditTests(unittest.TestCase):
         self.assertEqual(sent[0]["status"], 201)
         logged = info.call_args.args[0]
         self.assertIn(
-            "request_id=abc123def456 POST /api/system/kill "
-            "feature=activate_kill_switch result=success status=201",
+            "요청ID=abc123def456 기능=킬스위치 활성화 "
+            "요청=POST /api/system/kill 수행결과=성공 HTTP상태=201",
             logged,
         )
-        self.assertIn("summary=ok=True,status=active", logged)
+        self.assertIn("결과요약=ok=True,status=active 오류내용=-", logged)
         slack.assert_called_once()
 
     def test_result_classification(self):
         self.assertEqual(api_audit_service.api_result(200), "success")
         self.assertEqual(api_audit_service.api_result(409), "client_error")
         self.assertEqual(api_audit_service.api_result(500), "server_error")
+        self.assertEqual(api_audit_service.korean_result(200), "성공")
+        self.assertEqual(api_audit_service.korean_result(409), "요청오류")
+        self.assertEqual(api_audit_service.korean_result(500), "서버오류")
+
+    def test_error_summary_is_sanitized(self):
+        body = b'{"detail":"account=1234567801 token=abc failed"}'
+        error = api_audit_service.error_from_api_body(body, 409)
+
+        self.assertNotIn("1234567801", error)
+        self.assertNotIn("token=abc", error)
+        self.assertIn("[보호됨]", error)
 
     def test_non_api_request_is_not_audited(self):
         scope = _scope("GET", "/static/js/app.js")
