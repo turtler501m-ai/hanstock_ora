@@ -5262,7 +5262,7 @@ async function saveAiScheduleSettings() {
 async function renderScheduleInfo() {
     try {
         const strategyId = getActiveStrategyId();
-        const period = document.getElementById('sched-result-period')?.value || 'monthly';
+        const period = document.getElementById('sched-result-period')?.value || 'daily';
         const params = new URLSearchParams({ period });
         if (strategyId) params.set('strategy_id', strategyId);
         const data = await fetchJson(`/api/scheduler/status?${params.toString()}`);

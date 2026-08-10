@@ -1,4 +1,5 @@
 import unittest
+from inspect import signature
 from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -13,10 +14,16 @@ class SchedulerPeriodViewTests(unittest.TestCase):
         script = (ROOT / "web/static/js/app.js").read_text(encoding="utf-8")
 
         self.assertIn('id="sched-result-period"', html)
-        self.assertIn('<option value="daily">', html)
+        self.assertIn('<option value="daily" selected>', html)
         self.assertIn('<option value="weekly">', html)
-        self.assertIn('<option value="monthly" selected>', html)
+        self.assertIn('<option value="monthly">', html)
         self.assertIn("new URLSearchParams({ period })", script)
+        self.assertIn("?.value || 'daily'", script)
+
+    def test_scheduler_status_defaults_to_daily_period(self):
+        from src.dashboard.routes.stock_plan import get_scheduler_status
+
+        self.assertEqual(signature(get_scheduler_status).parameters["period"].default, "daily")
 
     def test_scheduler_status_aggregates_selected_period(self):
         from src.dashboard import get_scheduler_status

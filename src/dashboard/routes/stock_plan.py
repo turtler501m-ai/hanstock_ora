@@ -82,7 +82,7 @@ def get_scheduler_status(
     strategy_id: str | None = None,
     compact: bool = True,
     run_id: str | None = None,
-    period: str = "monthly",
+    period: str = "daily",
 ):
     global _scheduler_run_state
     _dashboard_scheduler_service.refresh()
