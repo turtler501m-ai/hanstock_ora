@@ -113,6 +113,11 @@ def should_send_api_slack(method: str, status_code: int) -> bool:
     return int(status_code) >= 400 or str(method or "").upper() not in _READ_ONLY_METHODS
 
 
+def should_log_api_audit(method: str, status_code: int) -> bool:
+    """Log failures and mutations, but suppress repetitive successful reads."""
+    return int(status_code) >= 400 or str(method or "").upper() not in _READ_ONLY_METHODS
+
+
 def api_result(status_code: int) -> str:
     if int(status_code) < 400:
         return "success"
@@ -321,10 +326,11 @@ class ApiAuditMiddleware:
                 summary=summary,
                 error=error,
             )
-            if status_code >= 500:
-                logger.error(message)
-            elif status_code >= 400:
-                logger.warning(message)
-            else:
-                logger.info(message)
+            if should_log_api_audit(method, status_code):
+                if status_code >= 500:
+                    logger.error(message)
+                elif status_code >= 400:
+                    logger.warning(message)
+                else:
+                    logger.info(message)
             send_api_slack_async(method, route_path, status_code, duration_ms)

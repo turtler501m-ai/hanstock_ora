@@ -35,6 +35,41 @@ class ApiAuditTests(unittest.TestCase):
         self.assertTrue(api_audit_service.should_send_api_slack("POST", 200))
         self.assertTrue(api_audit_service.should_send_api_slack("GET", 500))
 
+    def test_log_policy_skips_successful_reads(self):
+        self.assertFalse(api_audit_service.should_log_api_audit("GET", 200))
+        self.assertFalse(api_audit_service.should_log_api_audit("HEAD", 204))
+        self.assertTrue(api_audit_service.should_log_api_audit("POST", 200))
+        self.assertTrue(api_audit_service.should_log_api_audit("GET", 400))
+        self.assertTrue(api_audit_service.should_log_api_audit("GET", 500))
+
+    def test_successful_get_is_not_logged(self):
+        scope = _scope("GET", "/api/mistock/health")
+
+        async def app(inner_scope, _receive, send):
+            inner_scope["route"] = SimpleNamespace(
+                name="mistock_health", path="/api/mistock/health"
+            )
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b'{"ok":true}'})
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(_message):
+            return None
+
+        middleware = api_audit_service.ApiAuditMiddleware(app)
+        with (
+            patch.object(api_audit_service.logger, "info") as info,
+            patch.object(api_audit_service.logger, "warning") as warning,
+            patch.object(api_audit_service.logger, "error") as error,
+        ):
+            asyncio.run(middleware(scope, receive, send))
+
+        info.assert_not_called()
+        warning.assert_not_called()
+        error.assert_not_called()
+
     def test_slack_notification_is_concise_and_async(self):
         sent = []
 
