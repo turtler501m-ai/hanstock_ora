@@ -58,11 +58,14 @@ def _summarize_holding_strategies(parsed: dict) -> dict:
         ]
         allocated_qty = sum(item["allocated_qty"] for item in allocations)
         unattributed_qty = max(0.0, broker_qty - allocated_qty)
-        if unattributed_qty > 0 or not allocations:
+        # Proportional scaling can leave a tiny positive IEEE-754 remainder
+        # (for example, 29 - 28.999999999999996).  It is not a real share and
+        # must not create a visible "귀속 미확인 0주" allocation.
+        if unattributed_qty > 1e-6:
             allocations.append({
                 "strategy_id": "unattributed",
                 "strategy_name": "귀속 미확인",
-                "allocated_qty": unattributed_qty if broker_qty > 0 else 0.0,
+                "allocated_qty": unattributed_qty,
             })
 
         if broker_qty > 0:
