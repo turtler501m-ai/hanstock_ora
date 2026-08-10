@@ -292,7 +292,7 @@ def _approval_retry_eligible(item: dict, trade: dict | None) -> bool:
         return False
     trade_status = str((trade or {}).get("order_status") or "").lower()
     approval_status = str(item.get("status") or "").lower()
-    if trade_status in {"failed", "partial"}:
+    if trade_status in {"failed", "partial", "submitted", "open"}:
         return True
     return approval_status == "failed"
 

@@ -60,6 +60,14 @@ class MemoryTextPath:
 
 
 class DashboardCoreTests(unittest.TestCase):
+    def test_open_sell_approval_is_eligible_for_cancel_retry(self):
+        import src.dashboard.routes.stock_order as stock_order
+
+        item = {"action": "sell", "status": "executed"}
+        trade = {"order_status": "open"}
+
+        self.assertTrue(stock_order._approval_retry_eligible(item, trade))
+
     def test_sell_all_batch_treats_already_executed_approval_as_debug_skip(self):
         from fastapi import HTTPException
         import src.dashboard.routes.stock_order as stock_order
