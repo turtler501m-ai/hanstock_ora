@@ -1626,12 +1626,25 @@ def _mistock_holding_daily_change(holdings: dict[str, dict]) -> dict:
         from src.online_access import require_online_access
 
         require_online_access("Mistock holding daily performance")
-        frame = yf.download(symbols, period="5d", interval="1d", auto_adjust=False, progress=False, threads=True, timeout=8)
+        # KIS represents share classes with a dot (BF.B/BRK.B), while Yahoo
+        # Finance expects a dash (BF-B/BRK-B). Keep the broker symbols as the
+        # response keys and translate only at the market-data boundary.
+        yahoo_symbols = {symbol: symbol.replace(".", "-") for symbol in symbols}
+        frame = yf.download(
+            list(yahoo_symbols.values()),
+            period="5d",
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+            threads=True,
+            timeout=8,
+        )
         close = frame["Close"]
         previous_value = current_value = 0.0
         count = 0
         for symbol in symbols:
-            series = close[symbol].dropna() if getattr(close, "ndim", 1) > 1 else close.dropna()
+            yahoo_symbol = yahoo_symbols[symbol]
+            series = close[yahoo_symbol].dropna() if getattr(close, "ndim", 1) > 1 else close.dropna()
             if len(series) < 2:
                 continue
             qty = float(holdings[symbol].get("qty") or 0)

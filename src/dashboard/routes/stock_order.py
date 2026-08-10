@@ -636,6 +636,12 @@ def _run_auto_approval_batch_async(approval_ids: list[int]) -> None:
             try:
                 _approve_pending_approval(approval_id, "auto approval")
             except Exception as exc:
+                detail = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
+                if "approval is already" in detail:
+                    logger.debug(
+                        f"sell-all auto approval skipped approval_id={approval_id}: {exc}"
+                    )
+                    continue
                 logger.warning(f"sell-all auto approval failed approval_id={approval_id}: {exc}")
 
     import threading

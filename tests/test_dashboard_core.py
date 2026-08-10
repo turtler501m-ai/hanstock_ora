@@ -60,6 +60,32 @@ class MemoryTextPath:
 
 
 class DashboardCoreTests(unittest.TestCase):
+    def test_sell_all_batch_treats_already_executed_approval_as_debug_skip(self):
+        from fastapi import HTTPException
+        import src.dashboard.routes.stock_order as stock_order
+
+        class ImmediateThread:
+            def __init__(self, *, target, **_kwargs):
+                self.target = target
+
+            def start(self):
+                self.target()
+
+        with (
+            patch.object(
+                stock_order,
+                "_approve_pending_approval",
+                side_effect=HTTPException(status_code=409, detail="approval is already executed"),
+            ),
+            patch("threading.Thread", ImmediateThread),
+            patch.object(stock_order.logger, "debug") as debug,
+            patch.object(stock_order.logger, "warning") as warning,
+        ):
+            stock_order._run_auto_approval_batch_async([993])
+
+        debug.assert_called_once()
+        warning.assert_not_called()
+
     def test_approval_submission_is_serialized_across_workers(self):
         active = 0
         max_active = 0

@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
+
 from src.dashboard import app
 from src.dashboard.routes import mistock
 from src.config import config as main_config
@@ -14,6 +16,20 @@ from src.mistock import trader as mistock_trader
 
 
 class MistockDashboardTests(unittest.TestCase):
+    def test_holding_daily_change_translates_kis_share_class_for_yahoo(self):
+        frame = {"Close": pd.DataFrame({"BF-B": [400.0, 404.0]})}
+        holdings = {"BF.B": {"qty": 2}}
+
+        with (
+            patch("src.online_access.require_online_access"),
+            patch("yfinance.download", return_value=frame) as download,
+        ):
+            result = mistock._mistock_holding_daily_change(holdings)
+
+        self.assertEqual(download.call_args.args[0], ["BF-B"])
+        self.assertEqual(result["holding_daily_change_pct"], 1.0)
+        self.assertEqual(result["holding_daily_change_symbol_count"], 1)
+
     def test_mistock_performance_uses_pure_us_indices(self):
         self.assertEqual(mistock._MISTOCK_INDEX_TICKERS["sp500"], "^GSPC")
         self.assertEqual(mistock._MISTOCK_INDEX_TICKERS["nasdaq"], "^IXIC")

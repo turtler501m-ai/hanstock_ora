@@ -80,6 +80,68 @@ class MistockIndicatorStrategyTests(unittest.TestCase):
         self.assertEqual(result, {"close": [], "high": [], "volume": []})
         self.assertEqual(download.call_args.args[0], "^KS11")
 
+    def test_overseas_balance_cache_coalesces_successive_dashboard_requests(self):
+        client = MagicMock()
+        client.get_overseas_balance.return_value = {
+            "output1": [{"pdno": "AAPL"}],
+            "output2": {},
+        }
+        original = (
+            trader._overseas_balance_cache,
+            trader._overseas_balance_cache_client,
+            trader._overseas_balance_cache_at,
+        )
+        try:
+            trader._overseas_balance_cache = None
+            trader._overseas_balance_cache_client = None
+            trader._overseas_balance_cache_at = 0.0
+            with (
+                patch.object(trader, "_get_kis_client", return_value=client),
+                patch.object(trader.time, "monotonic", side_effect=[100.0, 100.0, 100.0, 101.0]),
+            ):
+                first = trader._get_overseas_balance_cached()
+                second = trader._get_overseas_balance_cached()
+
+            self.assertIs(first, second)
+            client.get_overseas_balance.assert_called_once_with()
+        finally:
+            (
+                trader._overseas_balance_cache,
+                trader._overseas_balance_cache_client,
+                trader._overseas_balance_cache_at,
+            ) = original
+
+    def test_overseas_balance_error_uses_longer_cache_ttl(self):
+        client = MagicMock()
+        client.get_overseas_balance.return_value = {
+            "output1": [],
+            "output2": {},
+            "_error": "KIS 500",
+        }
+        original = (
+            trader._overseas_balance_cache,
+            trader._overseas_balance_cache_client,
+            trader._overseas_balance_cache_at,
+        )
+        try:
+            trader._overseas_balance_cache = None
+            trader._overseas_balance_cache_client = None
+            trader._overseas_balance_cache_at = 0.0
+            with (
+                patch.object(trader, "_get_kis_client", return_value=client),
+                patch.object(trader.time, "monotonic", side_effect=[100.0, 100.0, 100.0, 110.0]),
+            ):
+                trader._get_overseas_balance_cached()
+                trader._get_overseas_balance_cached()
+
+            client.get_overseas_balance.assert_called_once_with()
+        finally:
+            (
+                trader._overseas_balance_cache,
+                trader._overseas_balance_cache_client,
+                trader._overseas_balance_cache_at,
+            ) = original
+
     def test_signals_uses_persistent_peak_for_trailing_stop(self):
         holding = {
             "symbol": "AAPL",

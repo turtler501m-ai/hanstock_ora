@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from typing import Any
 
 from src.mistock.config import config
@@ -14,6 +16,56 @@ from src.utils.logger import logger
 
 
 _kis_client_cache = None
+_overseas_balance_cache: dict[str, Any] | None = None
+_overseas_balance_cache_client = None
+_overseas_balance_cache_at = 0.0
+_overseas_balance_lock = threading.Lock()
+_OVERSEAS_BALANCE_SUCCESS_TTL_SECONDS = 5.0
+_OVERSEAS_BALANCE_ERROR_TTL_SECONDS = 15.0
+
+
+def _get_overseas_balance_cached() -> dict[str, Any]:
+    """Coalesce dashboard balance polling into one short-lived KIS request."""
+    global _overseas_balance_cache
+    global _overseas_balance_cache_client
+    global _overseas_balance_cache_at
+
+    client = _get_kis_client()
+    now = time.monotonic()
+    cached = _overseas_balance_cache
+    ttl = (
+        _OVERSEAS_BALANCE_ERROR_TTL_SECONDS
+        if isinstance(cached, dict) and cached.get("_error")
+        else _OVERSEAS_BALANCE_SUCCESS_TTL_SECONDS
+    )
+    if (
+        cached is not None
+        and _overseas_balance_cache_client is client
+        and now - _overseas_balance_cache_at < ttl
+    ):
+        return cached
+
+    with _overseas_balance_lock:
+        now = time.monotonic()
+        cached = _overseas_balance_cache
+        ttl = (
+            _OVERSEAS_BALANCE_ERROR_TTL_SECONDS
+            if isinstance(cached, dict) and cached.get("_error")
+            else _OVERSEAS_BALANCE_SUCCESS_TTL_SECONDS
+        )
+        if (
+            cached is not None
+            and _overseas_balance_cache_client is client
+            and now - _overseas_balance_cache_at < ttl
+        ):
+            return cached
+        result = client.get_overseas_balance()
+        if not isinstance(result, dict):
+            result = {"output1": [], "output2": {}, "_error": "invalid KIS balance response"}
+        _overseas_balance_cache = result
+        _overseas_balance_cache_client = client
+        _overseas_balance_cache_at = time.monotonic()
+        return result
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -369,8 +421,7 @@ def get_holdings() -> list[dict[str, Any]]:
         return _local_holdings_from_db(refresh_quote=True)
     else:
         try:
-            client = _get_kis_client()
-            balance_data = client.get_overseas_balance()
+            balance_data = _get_overseas_balance_cached()
             holdings = _holdings_from_overseas_balance(balance_data)
             if config.trading_env == "demo":
                 holdings = _merge_local_shadow_holdings(holdings)
@@ -401,8 +452,7 @@ def get_balance() -> dict[str, Any]:
         }
     else:
         try:
-            client = _get_kis_client()
-            balance_data = client.get_overseas_balance()
+            balance_data = _get_overseas_balance_cached()
             if not isinstance(balance_data, dict):
                 from src.utils.logger import logger
                 logger.error(f"Invalid balance_data type in get_balance: {type(balance_data)}, expected dict. Value: {balance_data}")
