@@ -273,6 +273,33 @@ class CommonTabStrategyFlowTests(unittest.TestCase):
                 calls_by_id[strategy_id].kwargs["include_ai_rebalance"]
             )
 
+    def test_direct_execute_shares_one_pre_order_status_sync(self):
+        shared_sync = {"ok": True, "updated_count": 1}
+        strategy_ids = ["plunge_bounce_strategy", "heikin_ashi_scalping_strategy"]
+        with patch(
+            "src.scheduler._sync_order_status_before_cycle",
+            return_value=shared_sync,
+        ) as sync_mock, patch(
+            "src.scheduler.run_scheduled_cycle",
+            return_value={"results": []},
+        ) as run_cycle, patch(
+            "src.db.repository.load_ai_strategies",
+            return_value=[],
+        ):
+            dashboard._run_scheduled_cycles_for_strategies(
+                mode="execute",
+                include_ai_rebalance=False,
+                auto_approve=True,
+                strategy_ids=strategy_ids,
+            )
+
+        sync_mock.assert_called_once_with()
+        self.assertEqual(run_cycle.call_count, 2)
+        self.assertTrue(all(
+            invocation.kwargs["pre_order_status_sync"] is shared_sync
+            for invocation in run_cycle.call_args_list
+        ))
+
     def test_execution_plan_consumes_the_same_cycle_candidate_snapshot(self):
         candidate_scan = {
             "candidates": [{"ticker": "005930", "score": 3}],

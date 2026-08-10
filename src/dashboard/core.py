@@ -3143,7 +3143,7 @@ def _run_scheduled_cycles_for_strategies(
     strategy_ids: list[str],
     allowed_categories: set[str] | None = None,
 ) -> dict:
-    from src.scheduler import run_scheduled_cycle
+    from src.scheduler import run_scheduled_cycle, _sync_order_status_before_cycle
     from src.config import config
     from src.dashboard.services.analysis_cycle_service import ISOLATED_STRATEGY_IDS
 
@@ -3166,18 +3166,31 @@ def _run_scheduled_cycles_for_strategies(
         strategies=registered_strategies,
     )
 
+    shared_pre_order_status_sync = (
+        _sync_order_status_before_cycle()
+        if mode != "analysis_only"
+        and any(
+            strategy_id in ISOLATED_STRATEGY_IDS
+            or strategy_id not in registered_ai_ids
+            for strategy_id in requested_strategy_ids
+        )
+        else None
+    )
+
     runs = []
     errors = []
     for strategy_id in requested_strategy_ids:
         if strategy_id in ISOLATED_STRATEGY_IDS:
             try:
-                result = run_scheduled_cycle(
-                    mode,
-                    include_ai_rebalance=False,
-                    auto_approve=auto_approve,
-                    force_strategy_id=strategy_id,
-                    allowed_categories={"candidate"},
-                )
+                cycle_kwargs = {
+                    "include_ai_rebalance": False,
+                    "auto_approve": auto_approve,
+                    "force_strategy_id": strategy_id,
+                    "allowed_categories": {"candidate"},
+                }
+                if shared_pre_order_status_sync is not None:
+                    cycle_kwargs["pre_order_status_sync"] = shared_pre_order_status_sync
+                result = run_scheduled_cycle(mode, **cycle_kwargs)
                 if mode == "analysis_only":
                     _persist_strategy_lookup_candidate_snapshot(
                         strategy_id, result, registered_strategies
@@ -3216,13 +3229,15 @@ def _run_scheduled_cycles_for_strategies(
                     run_type=f"dashboard_{mode}",
                 )
             else:
-                result = run_scheduled_cycle(
-                    mode,
-                    include_ai_rebalance=include_ai_rebalance,
-                    auto_approve=auto_approve,
-                    force_strategy_id=strategy_id,
-                    allowed_categories=allowed_categories,
-                )
+                cycle_kwargs = {
+                    "include_ai_rebalance": include_ai_rebalance,
+                    "auto_approve": auto_approve,
+                    "force_strategy_id": strategy_id,
+                    "allowed_categories": allowed_categories,
+                }
+                if shared_pre_order_status_sync is not None:
+                    cycle_kwargs["pre_order_status_sync"] = shared_pre_order_status_sync
+                result = run_scheduled_cycle(mode, **cycle_kwargs)
             if mode == "analysis_only" and allowed_categories == {"candidate"}:
                 _persist_strategy_lookup_candidate_snapshot(
                     strategy_id, result, registered_strategies

@@ -159,7 +159,7 @@ def _sync_order_status_after_cycle(result: dict) -> dict:
     try:
         from src.dashboard import _get_api, _sync_order_status_from_history
 
-        days = _env_int("HANSTOCK_ORDER_STATUS_SYNC_DAYS", 30)
+        days = _env_int("HANSTOCK_ORDER_STATUS_SYNC_DAYS", 1)
         sync_result = _sync_order_status_from_history(_get_api(), days=days)
         return {**result, "order_status_sync": sync_result}
     except SchedulerOperationError as exc:
@@ -174,7 +174,7 @@ def _sync_order_status_before_cycle() -> dict | None:
     try:
         from src.dashboard import _get_api, _sync_order_status_from_history
 
-        days = _env_int("HANSTOCK_ORDER_STATUS_SYNC_DAYS", 30)
+        days = _env_int("HANSTOCK_ORDER_STATUS_SYNC_DAYS", 1)
         return _sync_order_status_from_history(_get_api(), days=days)
     except SchedulerOperationError as exc:
         return {"ok": False, "error": _error_record(exc)}
