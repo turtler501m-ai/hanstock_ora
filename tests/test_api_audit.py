@@ -1,30 +1,14 @@
 import asyncio
 import os
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from fastapi.responses import JSONResponse
-from starlette.requests import Request
-
-from src.dashboard import core
 from src.dashboard.services import api_audit_service
 
 
-def _request(method: str, path: str, query: bytes = b"") -> Request:
-    return Request(
-        {
-            "type": "http",
-            "http_version": "1.1",
-            "method": method,
-            "scheme": "http",
-            "path": path,
-            "raw_path": path.encode(),
-            "query_string": query,
-            "headers": [],
-            "client": ("127.0.0.1", 1234),
-            "server": ("test", 80),
-        }
-    )
+def _scope(method: str, path: str) -> dict:
+    return {"type": "http", "method": method, "path": path}
 
 
 class ApiAuditTests(unittest.TestCase):
@@ -35,12 +19,14 @@ class ApiAuditTests(unittest.TestCase):
             200,
             12.34,
             feature="update settings",
+            request_id="abc123",
+            summary="ok=True",
         )
 
         self.assertEqual(
             message,
-            "[API] POST /api/settings feature=update_settings result=success "
-            "status=200 duration_ms=12.3",
+            "[API] request_id=abc123 POST /api/settings feature=update_settings "
+            "result=success status=200 duration_ms=12.3 summary=ok=True",
         )
         self.assertNotIn("secret", message)
 
@@ -79,24 +65,41 @@ class ApiAuditTests(unittest.TestCase):
         )
 
     def test_api_middleware_logs_status_and_notifies(self):
-        request = _request("POST", "/api/system/kill", b"token=secret")
+        scope = _scope("POST", "/api/system/kill")
+        sent = []
 
-        async def call_next(_request):
-            return JSONResponse({"ok": True}, status_code=201)
+        async def app(inner_scope, _receive, send):
+            inner_scope["route"] = SimpleNamespace(
+                name="activate_kill_switch", path="/api/system/kill"
+            )
+            await send({"type": "http.response.start", "status": 201, "headers": []})
+            await send(
+                {"type": "http.response.body", "body": b'{"ok":true,"status":"active"}'}
+            )
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            sent.append(message)
+
+        middleware = api_audit_service.ApiAuditMiddleware(app)
 
         with (
-            patch.object(core.logger, "info") as info,
-            patch.object(core, "send_api_slack_async") as slack,
+            patch.object(api_audit_service.logger, "info") as info,
+            patch.object(api_audit_service, "send_api_slack_async") as slack,
+            patch.object(api_audit_service.uuid, "uuid4", return_value=SimpleNamespace(hex="abc123def456")),
         ):
-            response = asyncio.run(core.audit_api_requests(request, call_next))
+            asyncio.run(middleware(scope, receive, send))
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(sent[0]["status"], 201)
         logged = info.call_args.args[0]
         self.assertIn(
-            "[API] POST /api/system/kill feature=unmatched_api result=success status=201",
+            "request_id=abc123def456 POST /api/system/kill "
+            "feature=activate_kill_switch result=success status=201",
             logged,
         )
-        self.assertNotIn("secret", logged)
+        self.assertIn("summary=ok=True,status=active", logged)
         slack.assert_called_once()
 
     def test_result_classification(self):
@@ -105,19 +108,48 @@ class ApiAuditTests(unittest.TestCase):
         self.assertEqual(api_audit_service.api_result(500), "server_error")
 
     def test_non_api_request_is_not_audited(self):
-        request = _request("GET", "/static/js/app.js")
+        scope = _scope("GET", "/static/js/app.js")
+        sent = []
 
-        async def call_next(_request):
-            return JSONResponse({}, status_code=200)
+        async def app(_scope, _receive, send):
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"{}"})
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            sent.append(message)
+
+        middleware = api_audit_service.ApiAuditMiddleware(app)
 
         with (
-            patch.object(core.logger, "info") as info,
-            patch.object(core, "send_api_slack_async") as slack,
+            patch.object(api_audit_service.logger, "info") as info,
+            patch.object(api_audit_service, "send_api_slack_async") as slack,
         ):
-            asyncio.run(core.audit_api_requests(request, call_next))
+            asyncio.run(middleware(scope, receive, send))
 
         info.assert_not_called()
         slack.assert_not_called()
+
+    def test_payload_summary_extracts_operational_counts_only(self):
+        summary = api_audit_service.summarize_api_payload(
+            {
+                "status": "created",
+                "holdings": [{"symbol": "005930"}],
+                "orders": [{"id": 1}, {"id": 2}],
+                "failed_count": 1,
+                "account_no": "secret-account",
+                "cash": 123456,
+            }
+        )
+
+        self.assertEqual(
+            summary,
+            "status=created,holdings_count=1,orders_count=2,failed_count=1",
+        )
+        self.assertNotIn("secret-account", summary)
+        self.assertNotIn("123456", summary)
 
 
 if __name__ == "__main__":

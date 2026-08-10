@@ -35,8 +35,7 @@ from src.online_access import OnlineAccessBlockedError  # noqa: E402
 from src.runtime_state import PersistentRuntimeState  # noqa: E402
 from src.dashboard.services.cache_service import DashboardCacheService  # noqa: E402
 from src.dashboard.services.api_audit_service import (  # noqa: E402
-    api_audit_message,
-    send_api_slack_async,
+    ApiAuditMiddleware,
 )
 from src.dashboard.services.futures_service import FuturesDashboardService  # noqa: E402
 from src.dashboard.services.scheduler_service import DashboardSchedulerService  # noqa: E402
@@ -106,6 +105,7 @@ app = FastAPI(
     version="1.0.0",
     default_response_class=SafeJSONResponse,
 )
+app.add_middleware(ApiAuditMiddleware)
 DashboardOperationError = (
     OSError,
     RuntimeError,
@@ -127,42 +127,6 @@ DashboardOperationError = (
 @app.exception_handler(OnlineAccessBlockedError)
 async def online_access_blocked_handler(_request: Request, exc: OnlineAccessBlockedError):
     return JSONResponse(status_code=409, content={"detail": str(exc)})
-
-
-@app.middleware("http")
-async def audit_api_requests(request: Request, call_next):
-    path = request.url.path
-    if path != "/api" and not path.startswith("/api/"):
-        return await call_next(request)
-
-    started = time.perf_counter()
-    status_code = 500
-    try:
-        response = await call_next(request)
-        status_code = int(response.status_code)
-        return response
-    except Exception:
-        status_code = 500
-        raise
-    finally:
-        duration_ms = (time.perf_counter() - started) * 1000.0
-        route = request.scope.get("route")
-        feature = getattr(route, "name", None)
-        route_path = getattr(route, "path", None) or path
-        message = api_audit_message(
-            request.method,
-            route_path,
-            status_code,
-            duration_ms,
-            feature=feature or "unmatched_api",
-        )
-        if status_code >= 500:
-            logger.error(message)
-        elif status_code >= 400:
-            logger.warning(message)
-        else:
-            logger.info(message)
-        send_api_slack_async(request.method, path, status_code, duration_ms)
 
 
 @app.middleware("http")
