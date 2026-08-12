@@ -653,22 +653,24 @@ class KISClient:
             "INQR_DVSN_CD": "00",
         }
         last_error = ""
-        for _attempt in range(2):
-            try:
-                response = self.session.get(
-                    f"{self.config.base_url}/uapi/overseas-stock/v1/trading/inquire-present-balance",
-                    headers=self.headers(tr_id),
-                    params=params,
-                    timeout=self.config.request_timeout_seconds,
-                )
-                response.raise_for_status()
-                data = response.json()
-                if data.get("rt_cd") == "0":
-                    self.mark_success()
-                    return data
-                last_error = str(data.get("msg1", "unknown KIS balance error"))
-            except Exception as exc:
-                last_error = str(exc)
+        try:
+            # The configured HTTP session already retries transient server errors.
+            # Retrying again here multiplied one logical poll into as many as eight
+            # requests during a KIS outage.
+            response = self.session.get(
+                f"{self.config.base_url}/uapi/overseas-stock/v1/trading/inquire-present-balance",
+                headers=self.headers(tr_id),
+                params=params,
+                timeout=self.config.request_timeout_seconds,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data.get("rt_cd") == "0":
+                self.mark_success()
+                return data
+            last_error = str(data.get("msg1", "unknown KIS balance error"))
+        except Exception as exc:
+            last_error = str(exc)
         self.mark_failure(last_error)
         return {"output1": [], "output2": {}, "_error": last_error or "unknown KIS balance error"}
 

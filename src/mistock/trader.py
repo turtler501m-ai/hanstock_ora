@@ -19,9 +19,21 @@ _kis_client_cache = None
 _overseas_balance_cache: dict[str, Any] | None = None
 _overseas_balance_cache_client = None
 _overseas_balance_cache_at = 0.0
+_overseas_balance_failure_count = 0
 _overseas_balance_lock = threading.Lock()
 _OVERSEAS_BALANCE_SUCCESS_TTL_SECONDS = 5.0
-_OVERSEAS_BALANCE_ERROR_TTL_SECONDS = 15.0
+_OVERSEAS_BALANCE_ERROR_TTL_SECONDS = 60.0
+_OVERSEAS_BALANCE_MAX_ERROR_TTL_SECONDS = 15 * 60.0
+
+
+def _overseas_balance_cache_ttl(cached: dict[str, Any] | None) -> float:
+    if not isinstance(cached, dict) or not cached.get("_error"):
+        return _OVERSEAS_BALANCE_SUCCESS_TTL_SECONDS
+    exponent = max(0, _overseas_balance_failure_count - 1)
+    return min(
+        _OVERSEAS_BALANCE_ERROR_TTL_SECONDS * (2 ** exponent),
+        _OVERSEAS_BALANCE_MAX_ERROR_TTL_SECONDS,
+    )
 
 
 def _get_overseas_balance_cached() -> dict[str, Any]:
@@ -29,15 +41,12 @@ def _get_overseas_balance_cached() -> dict[str, Any]:
     global _overseas_balance_cache
     global _overseas_balance_cache_client
     global _overseas_balance_cache_at
+    global _overseas_balance_failure_count
 
     client = _get_kis_client()
     now = time.monotonic()
     cached = _overseas_balance_cache
-    ttl = (
-        _OVERSEAS_BALANCE_ERROR_TTL_SECONDS
-        if isinstance(cached, dict) and cached.get("_error")
-        else _OVERSEAS_BALANCE_SUCCESS_TTL_SECONDS
-    )
+    ttl = _overseas_balance_cache_ttl(cached)
     if (
         cached is not None
         and _overseas_balance_cache_client is client
@@ -48,11 +57,7 @@ def _get_overseas_balance_cached() -> dict[str, Any]:
     with _overseas_balance_lock:
         now = time.monotonic()
         cached = _overseas_balance_cache
-        ttl = (
-            _OVERSEAS_BALANCE_ERROR_TTL_SECONDS
-            if isinstance(cached, dict) and cached.get("_error")
-            else _OVERSEAS_BALANCE_SUCCESS_TTL_SECONDS
-        )
+        ttl = _overseas_balance_cache_ttl(cached)
         if (
             cached is not None
             and _overseas_balance_cache_client is client
@@ -62,6 +67,12 @@ def _get_overseas_balance_cached() -> dict[str, Any]:
         result = client.get_overseas_balance()
         if not isinstance(result, dict):
             result = {"output1": [], "output2": {}, "_error": "invalid KIS balance response"}
+        if _overseas_balance_cache_client is not client:
+            _overseas_balance_failure_count = 0
+        if result.get("_error"):
+            _overseas_balance_failure_count += 1
+        else:
+            _overseas_balance_failure_count = 0
         _overseas_balance_cache = result
         _overseas_balance_cache_client = client
         _overseas_balance_cache_at = time.monotonic()

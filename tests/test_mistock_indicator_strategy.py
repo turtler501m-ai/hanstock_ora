@@ -142,6 +142,52 @@ class MistockIndicatorStrategyTests(unittest.TestCase):
                 trader._overseas_balance_cache_at,
             ) = original
 
+    def test_overseas_balance_error_backoff_increases_after_each_failed_probe(self):
+        client = MagicMock()
+        client.get_overseas_balance.return_value = {
+            "output1": [],
+            "output2": {},
+            "_error": "KIS 500",
+        }
+        original = (
+            trader._overseas_balance_cache,
+            trader._overseas_balance_cache_client,
+            trader._overseas_balance_cache_at,
+            trader._overseas_balance_failure_count,
+        )
+        try:
+            trader._overseas_balance_cache = None
+            trader._overseas_balance_cache_client = None
+            trader._overseas_balance_cache_at = 0.0
+            trader._overseas_balance_failure_count = 0
+            with (
+                patch.object(trader, "_get_kis_client", return_value=client),
+                patch.object(
+                    trader.time,
+                    "monotonic",
+                    side_effect=[
+                        100.0, 100.0, 100.0,
+                        161.0, 161.0, 161.0,
+                        220.0,
+                        282.0, 282.0, 282.0,
+                    ],
+                ),
+            ):
+                trader._get_overseas_balance_cached()  # failure 1: wait 60s
+                trader._get_overseas_balance_cached()  # probe and failure 2: wait 120s
+                trader._get_overseas_balance_cached()  # still cached at +59s
+                trader._get_overseas_balance_cached()  # probe after 121s
+
+            self.assertEqual(client.get_overseas_balance.call_count, 3)
+            self.assertEqual(trader._overseas_balance_failure_count, 3)
+        finally:
+            (
+                trader._overseas_balance_cache,
+                trader._overseas_balance_cache_client,
+                trader._overseas_balance_cache_at,
+                trader._overseas_balance_failure_count,
+            ) = original
+
     def test_signals_uses_persistent_peak_for_trailing_stop(self):
         holding = {
             "symbol": "AAPL",
