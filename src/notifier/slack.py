@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import requests
 
 from src.config import config
@@ -10,12 +13,79 @@ from src.notifications import (
     build_order_summary_payload,
     build_session_end_payload,
     build_session_start_payload,
-    post_slack_payload,
+    post_slack_payload as _post_slack_payload_raw,
 )
 from src.utils.logger import logger
 
 
 HTTP = requests.Session()
+
+
+def _instance_tag() -> str:
+    explicit = os.environ.get("HANSTOCK_INSTANCE_LABEL", "").strip().upper()
+    if explicit:
+        return explicit
+    repo_name = Path(__file__).resolve().parents[2].name.lower()
+    if repo_name.endswith("_ora"):
+        return "ORA"
+    if repo_name.endswith("_kw"):
+        return "KW"
+    return "HANSTOCK"
+
+
+def _compact_text(value: str, *, prefix: str = "") -> str:
+    lines = [line.strip() for line in str(value or "").splitlines() if line.strip()]
+    compact = "\n".join(lines[:3])
+    if len(compact) > 600:
+        compact = compact[:597].rstrip() + "..."
+    if prefix and compact and not compact.startswith(prefix):
+        compact = prefix + compact
+    return compact
+
+
+def _decorate_payload(payload: dict, *, tag: str | None = None) -> dict:
+    decorated = dict(payload or {})
+    prefix = f"[{tag or _instance_tag()}] "
+    if decorated.get("text"):
+        decorated["text"] = _compact_text(decorated["text"], prefix=prefix)
+
+    blocks = [dict(block) for block in decorated.get("blocks", [])[:2]]
+    for index, block in enumerate(blocks):
+        text = block.get("text")
+        if isinstance(text, dict) and text.get("text"):
+            block["text"] = dict(text)
+            block["text"]["text"] = _compact_text(
+                text["text"], prefix=prefix if index == 0 else ""
+            )
+    if blocks:
+        decorated["blocks"] = blocks
+
+    attachments = [dict(item) for item in decorated.get("attachments", [])[:1]]
+    for attachment in attachments:
+        if attachment.get("fallback"):
+            attachment["fallback"] = _compact_text(attachment["fallback"], prefix=prefix)
+        nested = [dict(block) for block in attachment.get("blocks", [])[:2]]
+        for index, block in enumerate(nested):
+            text = block.get("text")
+            if isinstance(text, dict) and text.get("text"):
+                block["text"] = dict(text)
+                block["text"]["text"] = _compact_text(
+                    text["text"], prefix=prefix if index == 0 else ""
+                )
+        if nested:
+            attachment["blocks"] = nested
+    if attachments:
+        decorated["attachments"] = attachments
+    return decorated
+
+
+def _post_slack_payload(webhook_url: str, payload: dict, session, **kwargs) -> bool:
+    return _post_slack_payload_raw(
+        webhook_url,
+        _decorate_payload(payload),
+        session,
+        **kwargs,
+    )
 
 
 def send_slack(text: str = "", blocks: list | None = None, color: str | None = None) -> None:
@@ -40,7 +110,7 @@ def _send_slack_to(webhook_url: str | None, text: str = "", blocks: list | None 
     elif blocks:
         payload["blocks"] = blocks
 
-    post_slack_payload(
+    _post_slack_payload(
         webhook_url=webhook_url or "",
         payload=payload,
         session=HTTP,
@@ -70,7 +140,7 @@ def slack_session_start(
         mode=_mode_label(order_submission_enabled, real_orders_enabled),
         trading_env=config.trading_env,
     )
-    post_slack_payload(config.slack_webhook_url, payload, HTTP, log_fn=logger.warning)
+    _post_slack_payload(config.slack_webhook_url, payload, HTTP, log_fn=logger.warning)
 
 
 def slack_order(
@@ -84,7 +154,7 @@ def slack_order(
     indicators: dict,
 ) -> None:
     payload = build_order_summary_payload(name, symbol, action, qty, price, reason, ok, indicators)
-    post_slack_payload(config.slack_webhook_url, payload, HTTP, log_fn=logger.warning)
+    _post_slack_payload(config.slack_webhook_url, payload, HTTP, log_fn=logger.warning)
 
 
 def mistock_slack_order(
@@ -110,21 +180,21 @@ def mistock_slack_order(
         indicators,
         exchange_rate=rate,
     )
-    post_slack_payload(config.mistock_slack_webhook_url or "", payload, HTTP, log_fn=logger.warning)
+    _post_slack_payload(config.mistock_slack_webhook_url or "", payload, HTTP, log_fn=logger.warning)
 
 
 def slack_candidates(candidates: list[dict]) -> None:
     payload = build_candidates_payload(candidates)
     if payload is None:
         return
-    post_slack_payload(config.slack_webhook_url, payload, HTTP, log_fn=logger.warning)
+    _post_slack_payload(config.slack_webhook_url, payload, HTTP, log_fn=logger.warning)
 
 
 def slack_session_end(results: list[dict], cash: int, total: int, pnl: int) -> None:
     payload = build_session_end_payload(results=results, cash=cash, total=total, pnl=pnl)
-    post_slack_payload(config.slack_webhook_url, payload, HTTP, log_fn=logger.warning)
+    _post_slack_payload(config.slack_webhook_url, payload, HTTP, log_fn=logger.warning)
 
 
 def slack_error(msg: str) -> None:
     payload = build_error_payload(msg)
-    post_slack_payload(config.slack_webhook_url, payload, HTTP, log_fn=logger.warning)
+    _post_slack_payload(config.slack_webhook_url, payload, HTTP, log_fn=logger.warning)
