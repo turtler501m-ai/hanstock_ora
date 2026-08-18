@@ -26,6 +26,17 @@ fi
 
 PYTHON="$ROOT_DIR/.venv/bin/python"
 
+install_systemd_unit() {
+    local source_file="$1"
+    local target_file="$2"
+    local rendered_file
+
+    rendered_file="$(mktemp)"
+    sed "s#/home/ubuntu/hanstock#$ROOT_DIR#g" "$source_file" > "$rendered_file"
+    sudo install -m 0644 "$rendered_file" "$target_file"
+    rm -f "$rendered_file"
+}
+
 "$PYTHON" -c 'import sys; assert sys.version_info >= (3, 10), "Hanstock VM requires Python 3.10+"'
 
 echo "[update] installing requirements"
@@ -33,7 +44,7 @@ echo "[update] installing requirements"
 
 if systemctl list-unit-files hanstock.service >/dev/null 2>&1; then
     echo "[update] syncing dashboard systemd unit"
-    sudo install -m 0644 \
+    install_systemd_unit \
         "$ROOT_DIR/scripts/vm/hanstock.service" \
         /etc/systemd/system/hanstock.service
     sudo systemctl daemon-reload
@@ -44,6 +55,11 @@ echo "[update] restarting dashboard"
 "$ROOT_DIR/scripts/vm/server.sh" status
 
 if systemctl list-unit-files hanstock-autonomy.service >/dev/null 2>&1; then
+    echo "[update] syncing autonomy systemd unit"
+    install_systemd_unit \
+        "$ROOT_DIR/scripts/vm/hanstock-autonomy.service" \
+        /etc/systemd/system/hanstock-autonomy.service
+    sudo systemctl daemon-reload
     echo "[update] restarting autonomy service"
     sudo systemctl restart hanstock-autonomy.service
     systemctl status hanstock-autonomy.service --no-pager
@@ -52,7 +68,7 @@ else
 fi
 
 echo "[update] syncing condition monitor service"
-sudo install -m 0644 \
+install_systemd_unit \
     "$ROOT_DIR/scripts/vm/hanstock-condition-monitor.service" \
     /etc/systemd/system/hanstock-condition-monitor.service
 sudo systemctl daemon-reload
