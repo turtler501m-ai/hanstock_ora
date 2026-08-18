@@ -32,8 +32,9 @@ class VmServiceSafetyTest(unittest.TestCase):
         update_script = (ROOT / "scripts/vm/update.sh").read_text(encoding="utf-8")
 
         self.assertIn("install_systemd_unit", update_script)
-        self.assertIn('sed "s#/home/ubuntu/hanstock#$ROOT_DIR#g"', update_script)
+        self.assertIn('sed -E "s#/home/ubuntu/hanstock[^ /]*#$ROOT_DIR#g"', update_script)
         self.assertIn("hanstock-autonomy.service", update_script)
+        self.assertIn("hanstock-autonomy.service.d/override.conf", update_script)
 
     def test_local_vm_dashboard_uses_loopback_tunnel(self):
         tunnel_script = (ROOT / "scripts/local/vm-dashboard.ps1").read_text(

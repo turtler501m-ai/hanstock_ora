@@ -32,7 +32,7 @@ install_systemd_unit() {
     local rendered_file
 
     rendered_file="$(mktemp)"
-    sed "s#/home/ubuntu/hanstock#$ROOT_DIR#g" "$source_file" > "$rendered_file"
+    sed -E "s#/home/ubuntu/hanstock[^ /]*#$ROOT_DIR#g" "$source_file" > "$rendered_file"
     sudo install -m 0644 "$rendered_file" "$target_file"
     rm -f "$rendered_file"
 }
@@ -59,6 +59,12 @@ if systemctl list-unit-files hanstock-autonomy.service >/dev/null 2>&1; then
     install_systemd_unit \
         "$ROOT_DIR/scripts/vm/hanstock-autonomy.service" \
         /etc/systemd/system/hanstock-autonomy.service
+    if [ -f /etc/systemd/system/hanstock-autonomy.service.d/override.conf ]; then
+        echo "[update] syncing autonomy systemd override paths"
+        install_systemd_unit \
+            /etc/systemd/system/hanstock-autonomy.service.d/override.conf \
+            /etc/systemd/system/hanstock-autonomy.service.d/override.conf
+    fi
     sudo systemctl daemon-reload
     echo "[update] restarting autonomy service"
     sudo systemctl restart hanstock-autonomy.service
