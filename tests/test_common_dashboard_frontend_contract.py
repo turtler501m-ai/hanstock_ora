@@ -62,6 +62,8 @@ class CommonDashboardFrontendContractTests(unittest.TestCase):
         self.assertIn("strategy_name", APP_JS)
         self.assertIn("sortable-header", APP_JS)
         self.assertIn("data-sort-key", APP_JS)
+        self.assertIn("function renderPeriodicCanvasFallback(canvas, dataList)", APP_JS)
+        self.assertIn("using the built-in canvas renderer", APP_JS)
 
     def test_performance_tab_exposes_forward_returns_and_manual_review(self):
         self.assertIn("전략별 모의성과 및 수동 검증", INDEX_HTML)

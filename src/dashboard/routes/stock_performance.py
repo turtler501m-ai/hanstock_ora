@@ -50,7 +50,31 @@ def get_periodic_performance(response: Response, strategy_id: str | None = None)
         trades = _load_merged_trades()
         if strategy_id:
             trades = [trade for trade in trades if str(trade.get("strategy_id") or "") == strategy_id]
-        return _build_periodic_performance(trades)
+        result = _build_periodic_performance(trades)
+        # Historical holding changes come from stored daily prices. The
+        # current session is more accurately available from the live broker
+        # balance, so expose it in the cumulative-performance table/chart.
+        if not strategy_id:
+            try:
+                parsed = _parse_balance(_get_balance_data(_get_api()))
+                current_change = parsed.get("holding_daily_change_pct")
+                if current_change is not None:
+                    today = trader.datetime.now(trader.KST).strftime("%Y-%m-%d")
+                    month = today[:7]
+                    holdings = parsed.get("holdings") or []
+                    for row in result.get("daily", []):
+                        if row.get("period") == today:
+                            row["holding_change_pct"] = current_change
+                            row["holding_change_symbol_count"] = len(holdings)
+                            row["holding_change_missing_count"] = 0
+                    for row in result.get("monthly", []):
+                        if row.get("period") == month:
+                            row["holding_change_pct"] = current_change
+                            row["holding_change_symbol_count"] = len(holdings)
+                            row["holding_change_missing_count"] = 0
+            except Exception:
+                pass
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

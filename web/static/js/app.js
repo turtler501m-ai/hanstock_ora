@@ -4242,6 +4242,77 @@ async function renderPeriodicPerformance() {
     }
 }
 
+function renderPeriodicCanvasFallback(canvas, dataList) {
+    const ratio = window.devicePixelRatio || 1;
+    const width = Math.max(320, canvas.clientWidth || 900);
+    const height = Math.max(240, canvas.clientHeight || 320);
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    const series = [
+        { key: 'realized_pnl_rate', label: '성과 등락', color: '#3b82f6' },
+        { key: 'holding_change_pct', label: '보유주식 등락', color: '#22c55e' },
+        { key: 'kospi_change_pct', label: 'KOSPI 등락', color: '#f59e0b' },
+        { key: 'kosdaq_change_pct', label: 'KOSDAQ 등락', color: '#a855f7' },
+    ];
+    const values = series.flatMap(item => dataList
+        .map(row => row[item.key])
+        .filter(value => value !== null && typeof value !== 'undefined')
+        .map(Number)
+        .filter(Number.isFinite));
+    const bound = Math.max(1, ...values.map(value => Math.abs(value)));
+    const left = 54;
+    const right = 18;
+    const top = 42;
+    const bottom = 38;
+    const plotWidth = width - left - right;
+    const plotHeight = height - top - bottom;
+    const xAt = index => left + (dataList.length <= 1 ? plotWidth / 2 : index * plotWidth / (dataList.length - 1));
+    const yAt = value => top + plotHeight / 2 - (value / bound) * (plotHeight / 2);
+
+    ctx.strokeStyle = 'rgba(148, 163, 184, 0.35)';
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '12px sans-serif';
+    [-bound, 0, bound].forEach(value => {
+        const y = yAt(value);
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(width - right, y);
+        ctx.stroke();
+        ctx.fillText(`${value.toFixed(1)}%`, 4, y + 4);
+    });
+    series.forEach((item, seriesIndex) => {
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let drawing = false;
+        dataList.forEach((row, index) => {
+            const value = Number(row[item.key]);
+            if (row[item.key] === null || typeof row[item.key] === 'undefined' || !Number.isFinite(value)) {
+                drawing = false;
+                return;
+            }
+            if (drawing) ctx.lineTo(xAt(index), yAt(value));
+            else ctx.moveTo(xAt(index), yAt(value));
+            drawing = true;
+        });
+        ctx.stroke();
+        ctx.fillStyle = item.color;
+        ctx.fillRect(left + seriesIndex * 125, 12, 10, 10);
+        ctx.fillStyle = '#e2e8f0';
+        ctx.fillText(item.label, left + 15 + seriesIndex * 125, 21);
+    });
+    ctx.fillStyle = '#94a3b8';
+    const labelIndexes = [...new Set([0, Math.floor((dataList.length - 1) / 2), dataList.length - 1])];
+    labelIndexes.forEach(index => {
+        const label = String(dataList[index]?.period || '');
+        ctx.fillText(label, Math.max(left, Math.min(width - right - 70, xAt(index) - 30)), height - 12);
+    });
+}
+
 function updatePeriodicPerformanceUI() {
     if (!periodicDataCache) return;
     setPerformanceDetailPanelOpen(false);
@@ -4299,12 +4370,6 @@ function updatePeriodicPerformanceUI() {
 
     renderStrategyForwardPerformance(periodicDataCache.strategy_forward || []);
     
-    // 2. Render Chart.js with defense
-    if (typeof Chart === 'undefined') {
-        console.warn('Chart.js is not loaded yet.');
-        return;
-    }
-    
     const canvas = document.getElementById('periodicPerformanceChart');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -4319,6 +4384,13 @@ function updatePeriodicPerformanceUI() {
     }
     
     if (!dataList || dataList.length === 0) {
+        return;
+    }
+
+    // Keep the performance graph usable even when the external Chart.js CDN is blocked.
+    if (typeof Chart === 'undefined') {
+        console.warn('Chart.js is unavailable; using the built-in canvas renderer.');
+        renderPeriodicCanvasFallback(canvas, dataList);
         return;
     }
     
