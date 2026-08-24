@@ -116,6 +116,34 @@ class SchedulerApiTests(unittest.TestCase):
     @patch(
         "src.db.repository.list_strategy_schedules",
         return_value=[{
+            "strategy_id": "narrative_momentum_strategy",
+            "enabled": 1,
+            "interval_minutes": 30,
+            "start_hm": "0900",
+            "end_hm": "1530",
+            "weekdays": "1-5",
+            "mode": "analysis_only",
+            "auto_approve": 0,
+            "last_run_at": None,
+        }],
+    )
+    @patch("src.db.repository.load_ai_strategies", return_value=[])
+    def test_scheduler_status_includes_narrative_momentum_schedule(
+        self, mock_load, mock_schedules, mock_universe
+    ):
+        status = get_scheduler_status()
+
+        self.assertEqual(status["strategy_dispatch"]["enabled_count"], 1)
+        self.assertEqual(status["strategy_dispatch"]["schedule_count"], 1)
+        self.assertEqual(
+            status["strategy_dispatch"]["schedules"][0]["strategy_id"],
+            "narrative_momentum_strategy",
+        )
+
+    @patch("src.db.repository.load_strategy_universe", return_value=[])
+    @patch(
+        "src.db.repository.list_strategy_schedules",
+        return_value=[{
             "strategy_id": "ai_stock_default_v1",
             "enabled": 1,
             "interval_minutes": 5,

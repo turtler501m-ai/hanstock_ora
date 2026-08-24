@@ -25,19 +25,20 @@ from src.db.repository import (
 )
 from src.scheduler import run_scheduled_cycle
 from src.db.scheduler_repository import KST
-from src.strategy.narrative_momentum import STRATEGY_ID as NARRATIVE_MOMENTUM_STRATEGY_ID
 from src.strategy.narrative_momentum_runner import run_narrative_momentum_cycle
 from src.strategy_ids import (
     AI_STOCK_SCHEDULE_ID,
+    DOMESTIC_SCHEDULE_IDS,
     INDEPENDENT_STOCK_SCHEDULE_IDS,
     ISOLATED_STOCK_STRATEGY_IDS,
+    NARRATIVE_MOMENTUM_STRATEGY_ID,
     resolve_ai_schedule_strategy_ids,
 )
 from src.utils.logger import logger
 
 _ISOLATED_STRATEGY_IDS = ISOLATED_STOCK_STRATEGY_IDS
 _TRADER_SCHEDULE_STRATEGY_IDS = set()
-_MAIN_SCHEDULE_IDS = frozenset({AI_STOCK_SCHEDULE_ID, *INDEPENDENT_STOCK_SCHEDULE_IDS})
+_MAIN_SCHEDULE_IDS = DOMESTIC_SCHEDULE_IDS
 _TRADER_DISPATCH_PRIORITY = {
     "ai_stock_default_v1": 10,
     "plunge_bounce_strategy": 20,
@@ -76,7 +77,6 @@ def dispatch_due_schedules() -> list[str]:
         schedule
         for schedule in list_strategy_schedules(enabled_only=True)
         if str(schedule.get("strategy_id") or "") in _MAIN_SCHEDULE_IDS
-        or str(schedule.get("strategy_id") or "") == NARRATIVE_MOMENTUM_STRATEGY_ID
     ]
     if not schedules:
         logger.info("[dispatch] no enabled strategy schedules")

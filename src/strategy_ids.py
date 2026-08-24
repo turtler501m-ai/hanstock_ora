@@ -9,6 +9,17 @@ ISOLATED_STOCK_STRATEGY_IDS = frozenset(
 INDEPENDENT_STOCK_SCHEDULE_IDS = ISOLATED_STOCK_STRATEGY_IDS
 AI_STOCK_SCHEDULE_ID = "ai_stock_default_v1"
 AI_REBALANCE_STRATEGY_ID = "ai_rebalance"
+NARRATIVE_MOMENTUM_STRATEGY_ID = "narrative_momentum_strategy"
+
+# Keep the dispatcher and dashboard status on the same allow-list. Otherwise
+# an executable schedule can be reported as missing from the dashboard.
+DOMESTIC_SCHEDULE_IDS = frozenset(
+    {
+        AI_STOCK_SCHEDULE_ID,
+        NARRATIVE_MOMENTUM_STRATEGY_ID,
+        *INDEPENDENT_STOCK_SCHEDULE_IDS,
+    }
+)
 
 
 def resolve_ai_schedule_strategy_ids(

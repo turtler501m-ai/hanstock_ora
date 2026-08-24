@@ -171,6 +171,7 @@ def get_scheduler_status(
         }
         from src.strategy_ids import (
             AI_STOCK_SCHEDULE_ID,
+            DOMESTIC_SCHEDULE_IDS,
             INDEPENDENT_STOCK_SCHEDULE_IDS,
         )
 
@@ -233,8 +234,7 @@ def get_scheduler_status(
         schedules = [
             schedule
             for schedule in list_strategy_schedules(enabled_only=False)
-            if str(schedule.get("strategy_id") or "") == AI_STOCK_SCHEDULE_ID
-            or str(schedule.get("strategy_id") or "") in INDEPENDENT_STOCK_SCHEDULE_IDS
+            if str(schedule.get("strategy_id") or "") in DOMESTIC_SCHEDULE_IDS
         ]
         schedule_items = []
         total_universe_count = 0
