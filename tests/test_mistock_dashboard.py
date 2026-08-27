@@ -938,6 +938,22 @@ class MistockDashboardTests(unittest.TestCase):
         self.assertEqual(len(pending), 1)
         self.assertEqual(pending[0]["symbol"], "AAPL")
 
+    def test_demo_local_shadow_balance_disables_broker_submission(self):
+        object.__setattr__(mistock_config, "trading_env", "demo")
+
+        self.assertFalse(mistock_trader.broker_submission_available({
+            "cash": 50000.0,
+            "balance_source": "demo_local_shadow",
+        }))
+
+    def test_demo_kis_balance_allows_broker_submission(self):
+        object.__setattr__(mistock_config, "trading_env", "demo")
+
+        self.assertTrue(mistock_trader.broker_submission_available({
+            "cash": 50000.0,
+            "balance_source": "kis",
+        }))
+
     def test_scheduler_executes_pending_scheduler_approvals_when_market_open(self):
         now = mistock_db.now_text()
         approval_id = mistock_db.execute(
