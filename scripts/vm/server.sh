@@ -1,13 +1,20 @@
 #!/bin/bash
 ACTION="${1:-restart}"
 PORT="${PORT:-8000}"
-HOST="${HOST:-127.0.0.1}"
+HOST="${HOST:-0.0.0.0}"
 RELOAD="${RELOAD:-false}"
 LINES="${LINES:-80}"
 UVICORN_LOG_LEVEL="${UVICORN_LOG_LEVEL:-error}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_NAME="$(basename "$ROOT_DIR")"
+INSTANCE_SUFFIX="${REPO_NAME#hanstock_}"
+if [ "$INSTANCE_SUFFIX" != "$REPO_NAME" ]; then
+    SERVICE_UNIT="hanstock-$INSTANCE_SUFFIX.service"
+else
+    SERVICE_UNIT="hanstock.service"
+fi
 cd "$ROOT_DIR" || exit 1
 RUNTIME_DIR="$ROOT_DIR/.runtime"
 PID_FILE="$RUNTIME_DIR/dashboard-server.pid"
@@ -55,7 +62,13 @@ get_listening_pids() {
 }
 
 get_dashboard_pids() {
-    pgrep -f "uvicorn.*src.dashboard" 2>/dev/null || true
+    local pid cwd
+    for pid in $(pgrep -f "uvicorn.*src.dashboard" 2>/dev/null || true); do
+        cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+        if [ "$cwd" = "$ROOT_DIR" ]; then
+            echo "$pid"
+        fi
+    done
 }
 
 get_pid_file_pids() {
@@ -156,7 +169,7 @@ watch_logs() {
 }
 
 use_systemd() {
-    if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files hanstock.service >/dev/null 2>&1; then
+    if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files "$SERVICE_UNIT" >/dev/null 2>&1; then
         return 0
     fi
     return 1
@@ -164,12 +177,12 @@ use_systemd() {
 
 if use_systemd; then
     case "$ACTION" in
-        start)    sudo systemctl start hanstock ;;
-        stop)     sudo systemctl stop hanstock ;;
-        restart)  sudo systemctl restart hanstock ;;
-        status)   systemctl status hanstock ;;
-        logs)     journalctl -u hanstock -n "$LINES" --no-pager ;;
-        tail)     journalctl -u hanstock -f ;;
+        start)    sudo systemctl start "$SERVICE_UNIT" ;;
+        stop)     sudo systemctl stop "$SERVICE_UNIT" ;;
+        restart)  sudo systemctl restart "$SERVICE_UNIT" ;;
+        status)   systemctl status "$SERVICE_UNIT" ;;
+        logs)     journalctl -u "$SERVICE_UNIT" -n "$LINES" --no-pager ;;
+        tail)     journalctl -u "$SERVICE_UNIT" -f ;;
         *)        echo "Usage: $0 {start|stop|restart|status|logs|tail}"; exit 1 ;;
     esac
     exit 0

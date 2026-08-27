@@ -5,6 +5,15 @@ BRANCH="${1:-main}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_NAME="$(basename "$ROOT_DIR")"
+INSTANCE_SUFFIX="${REPO_NAME#hanstock_}"
+if [ "$INSTANCE_SUFFIX" != "$REPO_NAME" ]; then
+    DASHBOARD_UNIT="hanstock-$INSTANCE_SUFFIX.service"
+    CONDITION_MONITOR_UNIT="hanstock-$INSTANCE_SUFFIX-condition-monitor.service"
+else
+    DASHBOARD_UNIT="hanstock.service"
+    CONDITION_MONITOR_UNIT="hanstock-condition-monitor.service"
+fi
 cd "$ROOT_DIR"
 
 echo "[update] repo: $ROOT_DIR"
@@ -32,7 +41,10 @@ install_systemd_unit() {
     local rendered_file
 
     rendered_file="$(mktemp)"
-    sed -E "s#/home/ubuntu/hanstock[^ /]*#$ROOT_DIR#g" "$source_file" > "$rendered_file"
+    sed -E \
+        -e "s#/home/ubuntu/hanstock[^ /]*#$ROOT_DIR#g" \
+        -e "s#hanstock\.service#$DASHBOARD_UNIT#g" \
+        "$source_file" > "$rendered_file"
     sudo install -m 0644 "$rendered_file" "$target_file"
     rm -f "$rendered_file"
 }
@@ -42,11 +54,11 @@ install_systemd_unit() {
 echo "[update] installing requirements"
 "$PYTHON" -m pip install --require-hashes -r constraints/vm-python.lock
 
-if systemctl list-unit-files hanstock.service >/dev/null 2>&1; then
+if systemctl list-unit-files "$DASHBOARD_UNIT" >/dev/null 2>&1; then
     echo "[update] syncing dashboard systemd unit"
     install_systemd_unit \
         "$ROOT_DIR/scripts/vm/hanstock.service" \
-        /etc/systemd/system/hanstock.service
+        "/etc/systemd/system/$DASHBOARD_UNIT"
     sudo systemctl daemon-reload
 fi
 
@@ -76,10 +88,10 @@ fi
 echo "[update] syncing condition monitor service"
 install_systemd_unit \
     "$ROOT_DIR/scripts/vm/hanstock-condition-monitor.service" \
-    /etc/systemd/system/hanstock-condition-monitor.service
+    "/etc/systemd/system/$CONDITION_MONITOR_UNIT"
 sudo systemctl daemon-reload
-sudo systemctl enable hanstock-condition-monitor.service
-sudo systemctl restart hanstock-condition-monitor.service
-systemctl status hanstock-condition-monitor.service --no-pager
+sudo systemctl enable "$CONDITION_MONITOR_UNIT"
+sudo systemctl restart "$CONDITION_MONITOR_UNIT"
+systemctl status "$CONDITION_MONITOR_UNIT" --no-pager
 
 echo "[update] done"
