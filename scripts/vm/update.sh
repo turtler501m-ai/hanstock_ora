@@ -6,17 +6,20 @@ BRANCH="${1:-main}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REPO_NAME="$(basename "$ROOT_DIR")"
-INSTANCE_SUFFIX="${REPO_NAME#hanstock_}"
-if [ "$INSTANCE_SUFFIX" != "$REPO_NAME" ]; then
+if [[ "$REPO_NAME" == hanstock_* ]]; then
+    INSTANCE_SUFFIX="${REPO_NAME:9}"
     DASHBOARD_UNIT="hanstock-$INSTANCE_SUFFIX.service"
     CONDITION_MONITOR_UNIT="hanstock-$INSTANCE_SUFFIX-condition-monitor.service"
 else
+    INSTANCE_SUFFIX=""
     DASHBOARD_UNIT="hanstock.service"
     CONDITION_MONITOR_UNIT="hanstock-condition-monitor.service"
 fi
 cd "$ROOT_DIR"
 
 echo "[update] repo: $ROOT_DIR"
+echo "[update] dashboard unit: $DASHBOARD_UNIT"
+echo "[update] condition monitor unit: $CONDITION_MONITOR_UNIT"
 echo "[update] branch: $BRANCH"
 
 if [ ! -f ".env" ]; then
@@ -54,12 +57,13 @@ install_systemd_unit() {
 echo "[update] installing requirements"
 "$PYTHON" -m pip install --require-hashes -r constraints/vm-python.lock
 
-if systemctl list-unit-files "$DASHBOARD_UNIT" >/dev/null 2>&1; then
+if [ -n "$INSTANCE_SUFFIX" ] || systemctl list-unit-files "$DASHBOARD_UNIT" >/dev/null 2>&1; then
     echo "[update] syncing dashboard systemd unit"
     install_systemd_unit \
         "$ROOT_DIR/scripts/vm/hanstock.service" \
         "/etc/systemd/system/$DASHBOARD_UNIT"
     sudo systemctl daemon-reload
+    sudo systemctl enable "$DASHBOARD_UNIT"
 fi
 
 echo "[update] restarting dashboard"

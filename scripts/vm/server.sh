@@ -9,10 +9,11 @@ UVICORN_LOG_LEVEL="${UVICORN_LOG_LEVEL:-error}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 REPO_NAME="$(basename "$ROOT_DIR")"
-INSTANCE_SUFFIX="${REPO_NAME#hanstock_}"
-if [ "$INSTANCE_SUFFIX" != "$REPO_NAME" ]; then
+if [[ "$REPO_NAME" == hanstock_* ]]; then
+    INSTANCE_SUFFIX="${REPO_NAME:9}"
     SERVICE_UNIT="hanstock-$INSTANCE_SUFFIX.service"
 else
+    INSTANCE_SUFFIX=""
     SERVICE_UNIT="hanstock.service"
 fi
 cd "$ROOT_DIR" || exit 1
