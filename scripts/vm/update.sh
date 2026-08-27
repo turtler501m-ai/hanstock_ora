@@ -98,4 +98,7 @@ sudo systemctl enable "$CONDITION_MONITOR_UNIT"
 sudo systemctl restart "$CONDITION_MONITOR_UNIT"
 systemctl status "$CONDITION_MONITOR_UNIT" --no-pager
 
+echo "[update] syncing trade history cron"
+"$ROOT_DIR/scripts/vm/install-trade-sync-cron.sh"
+
 echo "[update] done"

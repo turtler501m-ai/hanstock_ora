@@ -34,6 +34,19 @@ class VmScheduleScriptTests(unittest.TestCase):
         self.assertIn('TIME_SPEC="${1:-0 9,15 * * 1-5}"', daily_installer)
         self.assertIn('TIME_SPEC="${1:-7-57/10 9-15 * * 1-5}"', dispatch_installer)
 
+    def test_trade_sync_runs_after_market_close(self):
+        installer = (ROOT / "scripts" / "vm" / "install-trade-sync-cron.sh").read_text(
+            encoding="utf-8"
+        )
+        trigger = (ROOT / "scripts" / "vm" / "trade-sync.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('TIME_SPEC="${1:-10 16 * * 1-5}"', installer)
+        self.assertIn('MARKER="${REPO_NAME//_/-}-trade-sync"', installer)
+        self.assertIn("/api/trades/sync?days=$DAYS", trigger)
+        self.assertIn('LOCK_FILE="$RUNTIME_DIR/trade-sync-trigger.lock"', trigger)
+
 
 if __name__ == "__main__":
     unittest.main()
