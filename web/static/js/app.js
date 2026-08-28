@@ -67,6 +67,18 @@ const toKorStatus = (value) => {
     return STATUS_LABELS[key] || value || '-';
 };
 
+const approvalDisplayStatus = (approvalStatus, orderStatus) => {
+    const approval = String(approvalStatus || '').toLowerCase();
+    const order = String(orderStatus || '').toLowerCase();
+    if (approval !== 'executed') return toKorStatus(approval);
+    if (order === 'submitted') return '주문접수';
+    if (order === 'open') return '미체결';
+    if (order === 'partial') return '부분체결';
+    if (order === 'filled' || order === 'reconciled') return '체결완료';
+    if (order === 'simulated') return '모의처리';
+    return '처리완료';
+};
+
 const ORDER_STATUS_LABELS = {
     submitted: 'Submitted',
     open: 'Open',
@@ -3575,7 +3587,12 @@ async function renderApprovals() {
 
         data.approvals.forEach((row) => {
             const status = String(row.status || '');
-            const statusKind = status === 'pending' ? 'warn' : (status === 'executed' ? 'buy' : (status === 'failed' ? 'sell' : 'hold'));
+            const orderStatus = String(row.order_status || '').toLowerCase();
+            const statusKind = status === 'pending'
+                ? 'warn'
+                : (status === 'failed'
+                    ? 'sell'
+                    : (status === 'executed' && ['submitted', 'open', 'partial'].includes(orderStatus) ? 'warn' : (status === 'executed' ? 'buy' : 'hold')));
             const estimatedCost = Number(row.qty || 0) * Number(row.price || 0);
             const autoApprovalInProgress = Boolean(row.auto_approval_in_progress);
             const retryButton = row.retry_eligible
@@ -3629,7 +3646,7 @@ async function renderApprovals() {
                 <td>${Number(row.qty || 0).toLocaleString()}</td>
                 <td>${formatCurrency(row.price)}</td>
                 <td>${formatCurrency(estimatedCost)}</td>
-                <td>${pill(toKorStatus(status), statusKind)}</td>
+                <td>${pill(approvalDisplayStatus(status, orderStatus), statusKind)}</td>
                 <td>${controls}</td>
             `;
             tbody.appendChild(tr);
@@ -3648,7 +3665,7 @@ async function renderApprovals() {
             button.addEventListener('click', () => executeApprovalAction(button, 'cancel-retry'));
         });
     } catch (err) {
-        setTableMessage('#table-approvals tbody', 9, err.message);
+        setTableMessage('#table-approvals tbody', 10, err.message);
     }
 }
 
@@ -3659,7 +3676,10 @@ async function executeApprovalAction(button, action) {
     button.disabled = true;
     try {
         const result = await postJson(`/api/approvals/${button.dataset.id}/${action}`, {});
-        setStatus(`승인 처리 결과: ${toKorStatus(result.status)} #${result.id}`, result.status !== 'failed');
+        setStatus(
+            `승인 처리 결과: ${approvalDisplayStatus(result.status, result.order_status)} #${result.id}`,
+            result.status !== 'failed'
+        );
         await Promise.all([renderApprovals(), renderTrades(), renderBalance()]);
     } catch (err) {
         setStatus(`승인 처리 실패: ${err.message}`);
@@ -5195,7 +5215,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setTableMessage('#table-signals tbody', 7, '진단하기를 누르면 보유 종목 신호를 확인합니다');
     setTableMessage('#table-candidates tbody', 9, '찾기를 누르면 관심종목에서 매수 후보를 검색합니다');
     setTableMessage('#table-execution-plan tbody', 8, '불러오기를 누르면 다음 사이클 실행 계획을 표시합니다');
-    setTableMessage('#table-approvals tbody', 9, '승인 대기 주문이 없습니다');
+    setTableMessage('#table-approvals tbody', 10, '승인 대기 주문이 없습니다');
     setTableMessage('#table-ai-allocation tbody', 8, '계산을 누르면 AI 목표 비중을 확인합니다');
     setTableMessage('#table-optimizer tbody', 7, '최적화를 누르면 리스크 기반 목표 비중을 확인합니다');
     

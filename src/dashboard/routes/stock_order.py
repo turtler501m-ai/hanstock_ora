@@ -138,26 +138,45 @@ def get_approvals(limit: int = 50, strategy_id: str | None = None):
                 "SELECT * FROM approvals WHERE strategy_id = ? ORDER BY id DESC LIMIT ?",
                 (strategy_id, limit),
             ).fetchall()
-            actionable_rows = conn.execute(
+            active_rows = conn.execute(
                 """
                 SELECT * FROM approvals
-                WHERE strategy_id = ? AND status IN ('pending', 'executing', 'failed')
+                WHERE strategy_id = ? AND status IN ('pending', 'executing')
                 ORDER BY id DESC
                 """,
                 (strategy_id,),
+            ).fetchall()
+            failed_rows = conn.execute(
+                """
+                SELECT * FROM approvals
+                WHERE strategy_id = ? AND status = 'failed'
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (strategy_id, limit),
             ).fetchall()
         else:
             recent_rows = conn.execute(
                 "SELECT * FROM approvals ORDER BY id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
-            actionable_rows = conn.execute(
+            active_rows = conn.execute(
                 """
                 SELECT * FROM approvals
-                WHERE status IN ('pending', 'executing', 'failed')
+                WHERE status IN ('pending', 'executing')
                 ORDER BY id DESC
                 """
             ).fetchall()
+            failed_rows = conn.execute(
+                """
+                SELECT * FROM approvals
+                WHERE status = 'failed'
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        actionable_rows = [*active_rows, *failed_rows]
         rows_by_id = {int(row["id"]): row for row in recent_rows}
         rows_by_id.update({int(row["id"]): row for row in actionable_rows})
         rows = sorted(rows_by_id.values(), key=lambda row: int(row["id"]), reverse=True)
@@ -1033,9 +1052,21 @@ def reject_order(approval_id: int):
             ) from exc
     now = trader.datetime.now(trader.KST).strftime("%Y-%m-%d %H:%M:%S")
     with trader.connect_db() as conn:
-        conn.execute(
-            "UPDATE approvals SET status = 'rejected', response_msg = 'Rejected by dashboard', updated_at = ? WHERE id = ?",
+        cursor = conn.execute(
+            """
+            UPDATE approvals
+            SET status = 'rejected', response_msg = 'Rejected by dashboard', updated_at = ?
+            WHERE id = ? AND status = 'pending'
+            """,
             (now, approval_id),
+        )
+    if cursor.rowcount != 1:
+        current = _approval_by_id(approval_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="approval not found")
+        raise HTTPException(
+            status_code=409,
+            detail=f"approval is already {current['status']}",
         )
     return {"id": approval_id, "status": "rejected"}
 

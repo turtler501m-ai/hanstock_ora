@@ -61,6 +61,70 @@ class MemoryTextPath:
 
 
 class DashboardCoreTests(unittest.TestCase):
+    def test_reject_approval_does_not_overwrite_concurrent_execution(self):
+        import src.dashboard.routes.stock_order as stock_order
+
+        original_db_path = dashboard.trader.config.trade_db_path
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                approval_id = stock_order._create_approval_row({
+                    "symbol": "005930",
+                    "name": "Samsung",
+                    "action": "buy",
+                    "qty": 1,
+                    "price": 70000,
+                })
+                with dashboard.trader.connect_db() as conn:
+                    conn.execute(
+                        "UPDATE approvals SET status = 'executing' WHERE id = ?",
+                        (approval_id,),
+                    )
+
+                stale_pending = {
+                    "id": approval_id,
+                    "status": "pending",
+                    "managed_order_id": None,
+                }
+                with patch.object(stock_order, "_load_pending_approval", return_value=stale_pending):
+                    with self.assertRaises(dashboard.HTTPException) as raised:
+                        stock_order.reject_order(approval_id)
+
+                self.assertEqual(raised.exception.status_code, 409)
+                self.assertIn("already executing", str(raised.exception.detail))
+                self.assertEqual(stock_order._approval_by_id(approval_id)["status"], "executing")
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+
+    def test_get_approvals_caps_historical_failed_rows_to_limit(self):
+        import src.dashboard.routes.stock_order as stock_order
+
+        original_db_path = dashboard.trader.config.trade_db_path
+        try:
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+                dashboard.trader.config.trade_db_path = f"{tmpdir}/trades.sqlite"
+                for index in range(60):
+                    approval_id = stock_order._create_approval_row({
+                        "symbol": f"{index:06d}",
+                        "name": f"Failed {index}",
+                        "action": "sell",
+                        "qty": 1,
+                        "price": 1000,
+                    })
+                    with dashboard.trader.connect_db() as conn:
+                        conn.execute(
+                            "UPDATE approvals SET status = 'failed' WHERE id = ?",
+                            (approval_id,),
+                        )
+
+                result = stock_order.get_approvals(limit=50)
+
+                self.assertEqual(len(result["approvals"]), 50)
+                self.assertEqual(result["actionable_count"], 50)
+                self.assertEqual(result["approvals"][0]["name"], "Failed 59")
+        finally:
+            dashboard.trader.config.trade_db_path = original_db_path
+
     def test_open_sell_approval_is_eligible_for_cancel_retry(self):
         import src.dashboard.routes.stock_order as stock_order
 

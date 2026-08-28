@@ -266,6 +266,7 @@ def _approve_pending_approval_serialized(
     item = _dependency("_claim_pending_approval", _claim_pending_approval)(approval_id)
     result: dict = {}
     status = "failed"
+    order_status = "failed"
     response_msg = "Order submission did not complete"
     try:
         api = _get_api()
@@ -291,6 +292,11 @@ def _approve_pending_approval_serialized(
                 )
         ok = result.get("rt_cd") == "0"
         status = "executed" if ok else "failed"
+        order_status = (
+            "submitted"
+            if ok and trader.runtime_flags().order_submission_enabled
+            else "simulated" if ok else "failed"
+        )
         response_msg = _dependency(
             "_approval_response_msg", _approval_response_msg
         )(result, ok=ok)
@@ -307,7 +313,7 @@ def _approve_pending_approval_serialized(
             ok,
             trader.runtime_flags().order_submission_enabled,
             broker_result=result,
-            order_status="submitted" if ok and trader.runtime_flags().order_submission_enabled else "simulated" if ok else "failed",
+            order_status=order_status,
             response_msg=response_msg,
             filled_qty=0 if ok and trader.runtime_flags().order_submission_enabled else item["qty"] if ok else 0,
             filled_price=0 if ok and trader.runtime_flags().order_submission_enabled else item["price"] if ok else 0,
@@ -347,7 +353,12 @@ def _approve_pending_approval_serialized(
     if status == "executed":
         _clear_balance_cache()
 
-    return {"id": approval_id, "status": status, "response_msg": response_msg}
+    return {
+        "id": approval_id,
+        "status": status,
+        "order_status": order_status,
+        "response_msg": response_msg,
+    }
 
 
 
