@@ -80,6 +80,25 @@ class MistockIndicatorStrategyTests(unittest.TestCase):
         self.assertEqual(result, {"close": [], "high": [], "volume": []})
         self.assertEqual(download.call_args.args[0], "^KS11")
 
+    def test_fetch_history_caches_empty_response_to_prevent_retry_loop(self):
+        empty = MagicMock()
+        empty.empty = True
+        original_cache = strategy._history_cache.copy()
+        try:
+            strategy._history_cache.clear()
+            with patch("src.online_access.require_online_access"), \
+                    patch("src.mistock.strategy.yf.download", return_value=empty) as download, \
+                    patch("src.mistock.strategy.time.monotonic", side_effect=[100.0, 101.0]):
+                first = strategy.fetch_history("AVB", period="5d")
+                second = strategy.fetch_history("AVB", period="5d")
+
+            self.assertEqual(first, {"close": [], "high": [], "volume": []})
+            self.assertEqual(second, first)
+            download.assert_called_once()
+        finally:
+            strategy._history_cache.clear()
+            strategy._history_cache.update(original_cache)
+
     def test_overseas_balance_cache_coalesces_successive_dashboard_requests(self):
         client = MagicMock()
         client.get_overseas_balance.return_value = {

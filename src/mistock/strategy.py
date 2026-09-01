@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 import math
+import threading
+import time
 from typing import Any
 
 import yfinance as yf
@@ -8,6 +11,17 @@ import yfinance as yf
 from src.mistock.config import config
 from src.strategy.indicators import calc_bollinger, calc_macd, calc_rsi, calc_sma
 from src.strategy.technical_signals import first_wave_pullback, moving_average_cross, trade_value_surge
+
+
+_HISTORY_SUCCESS_CACHE_SECONDS = 15.0
+_HISTORY_FAILURE_CACHE_SECONDS = 120.0
+_HISTORY_CACHE_MAX_ENTRIES = 256
+_history_cache: dict[tuple[str, str], tuple[float, dict[str, list[float]]]] = {}
+_history_cache_lock = threading.Lock()
+
+
+def _copy_history(history: dict[str, list[float]]) -> dict[str, list[float]]:
+    return {key: list(values) for key, values in history.items()}
 
 def fetch_wikipedia_universe() -> list[str]:
     import pandas as pd
@@ -484,29 +498,58 @@ def fetch_history(symbol: str, period: str = "6mo") -> dict[str, list[float]]:
     require_online_access("Mistock market-data download")
     # Yahoo Finance uses '-' for share classes (BRK-B/BF-B), while KIS uses '.'.
     yahoo_symbol = normalize_symbol(symbol).replace(".", "-")
-    data = yf.download(
-        yahoo_symbol,
-        period=period,
-        interval="1d",
-        auto_adjust=False,
-        progress=False,
-        threads=False,
-        timeout=config.yfinance_timeout_seconds,
-    )
-    if data is None or data.empty:
-        return {"close": [], "high": [], "volume": []}
-    close = data["Close"]
-    high = data["High"]
-    volume = data["Volume"]
-    if hasattr(close, "iloc") and len(getattr(close, "shape", [])) > 1:
-        close = close.iloc[:, 0]
-        high = high.iloc[:, 0]
-        volume = volume.iloc[:, 0]
-    return {
-        "close": [float(v) for v in close.dropna().tolist() if math.isfinite(float(v))],
-        "high": [float(v) for v in high.dropna().tolist() if math.isfinite(float(v))],
-        "volume": [float(v) for v in volume.dropna().tolist() if math.isfinite(float(v))],
-    }
+    cache_key = (yahoo_symbol, period)
+    now = time.monotonic()
+
+    # Keep the lock while downloading so concurrent dashboard requests coalesce
+    # into one Yahoo request. Empty responses are cached longer to avoid a noisy
+    # retry loop when Yahoo is temporarily unavailable for a valid symbol.
+    with _history_cache_lock:
+        cached = _history_cache.get(cache_key)
+        if cached and now < cached[0]:
+            return _copy_history(cached[1])
+
+        # yfinance labels any empty response as "possibly delisted", even for
+        # actively traded symbols. The caller handles an empty history, so do
+        # not emit that misleading third-party error into the trader log.
+        yfinance_logger = logging.getLogger("yfinance")
+        previous_level = yfinance_logger.level
+        yfinance_logger.setLevel(logging.CRITICAL)
+        try:
+            data = yf.download(
+                yahoo_symbol,
+                period=period,
+                interval="1d",
+                auto_adjust=False,
+                progress=False,
+                threads=False,
+                timeout=config.yfinance_timeout_seconds,
+            )
+        finally:
+            yfinance_logger.setLevel(previous_level)
+
+        if data is None or data.empty:
+            history = {"close": [], "high": [], "volume": []}
+            ttl = _HISTORY_FAILURE_CACHE_SECONDS
+        else:
+            close = data["Close"]
+            high = data["High"]
+            volume = data["Volume"]
+            if hasattr(close, "iloc") and len(getattr(close, "shape", [])) > 1:
+                close = close.iloc[:, 0]
+                high = high.iloc[:, 0]
+                volume = volume.iloc[:, 0]
+            history = {
+                "close": [float(v) for v in close.dropna().tolist() if math.isfinite(float(v))],
+                "high": [float(v) for v in high.dropna().tolist() if math.isfinite(float(v))],
+                "volume": [float(v) for v in volume.dropna().tolist() if math.isfinite(float(v))],
+            }
+            ttl = _HISTORY_SUCCESS_CACHE_SECONDS
+
+        if len(_history_cache) >= _HISTORY_CACHE_MAX_ENTRIES:
+            _history_cache.clear()
+        _history_cache[cache_key] = (now + ttl, history)
+        return _copy_history(history)
 
 
 def quote(symbol: str) -> dict[str, float]:
