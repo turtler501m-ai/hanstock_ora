@@ -160,6 +160,20 @@ class MarketRegimeClassifierTest(unittest.TestCase):
                 self.assertEqual(decision.regime, MarketRegime.UNKNOWN)
                 self.assertFalse(decision.fresh)
 
+    def test_valid_mixed_trend_falls_back_to_sideways(self):
+        decision = self.classifier.classify(indicators(
+            index_price=110,
+            sma20=108,
+            sma60=100,
+            sma200=105,
+            return_5d=0.01,
+            return_20d=0.03,
+            advance_ratio=0.5,
+        ))
+
+        self.assertEqual(decision.regime, MarketRegime.SIDEWAYS_LOW_VOL)
+        self.assertTrue(decision.fresh)
+
     def test_context_provider_persists_inputs_and_overrides_untrusted_regime(self):
         persistence = Persistence()
         provider = TrustedSnapshotContextProvider(

@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 from src.strategy.autonomy.operational_context import (
     OperationalSnapshot,
     OperationalSnapshotProvider,
+    _classify,
     assemble_operational_run_once,
 )
 from src.strategy.autonomy.runtime import RuntimeConfigurationError
@@ -89,6 +90,13 @@ class OperationalContextTest(unittest.TestCase):
         self.assertTrue(result.account["available"])
         self.assertEqual("AAA", result.market["candidates"][0]["symbol"])
         self.assertNotEqual("unknown", result.market["regime"])
+
+    def test_valid_mixed_trend_uses_sideways_regime(self):
+        values = [100.0] * 199 + [110.0]
+
+        result = _classify(values, realized=0.1, baseline=0.1, breadth=0.5)
+
+        self.assertEqual(result, "sideways_low_vol")
 
     def test_stale_scan_fails_closed_before_account_use(self):
         stale = self.now - timedelta(minutes=10)

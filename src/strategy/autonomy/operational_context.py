@@ -449,7 +449,10 @@ def _classify(values, realized, baseline, breadth):
         return "bear_rally"
     if abs(price / sma60 - 1) <= .05:
         return "sideways_high_vol" if ratio >= 1.3 else "sideways_low_vol"
-    return "unknown"
+    # All inputs are finite, fresh, and sufficiently long at this point. A
+    # mixed/non-aligned trend is still a classifiable sideways regime; reserve
+    # ``unknown`` for missing or invalid evidence handled by the caller.
+    return "sideways_high_vol" if ratio >= 1.3 else "sideways_low_vol"
 
 
 def _aware(value, name):

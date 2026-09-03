@@ -139,8 +139,10 @@ class MarketRegimeClassifier:
             )
             return RegimeDecision(regime, ("flat_medium_trend",), vol_ratio, True)
         return RegimeDecision(
-            MarketRegime.UNKNOWN,
-            ("quantitative_regime_conditions_not_met",),
+            MarketRegime.SIDEWAYS_HIGH_VOL
+            if vol_ratio >= t.high_vol_ratio
+            else MarketRegime.SIDEWAYS_LOW_VOL,
+            ("mixed_trend",),
             vol_ratio,
             True,
         )
