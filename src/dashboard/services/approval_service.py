@@ -199,6 +199,12 @@ def _is_approval_already_claimed(exc: Exception) -> bool:
     return "approval is already" in detail
 
 
+def _is_risk_limit_rejection(exc: Exception) -> bool:
+    if not isinstance(exc, HTTPException) or exc.status_code != 409:
+        return False
+    return str(exc.detail).startswith("Risk limit rejected buy:")
+
+
 def _auto_approve_pending_approvals(limit: int = 200) -> list[dict]:
     from src.dashboard import core
 
@@ -211,6 +217,9 @@ def _auto_approve_pending_approvals(limit: int = 200) -> list[dict]:
         except Exception as exc:
             if _is_approval_already_claimed(exc):
                 logger.debug(f"auto approval skipped approval_id={approval_id}: {exc}")
+                continue
+            if _is_risk_limit_rejection(exc):
+                logger.info(f"auto approval risk-rejected approval_id={approval_id}: {exc}")
                 continue
             logger.warning(f"auto approval failed for approval_id={approval_id}: {exc}")
             continue

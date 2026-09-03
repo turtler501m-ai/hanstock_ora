@@ -259,6 +259,23 @@ class DashboardCoreTests(unittest.TestCase):
         warning.assert_not_called()
         debug.assert_called_once()
 
+    def test_auto_approve_logs_risk_limit_rejection_as_expected_outcome(self):
+        exc = dashboard.HTTPException(
+            status_code=409,
+            detail="Risk limit rejected buy: duplicate buy exposure already exists for 005610",
+        )
+
+        with patch.object(dashboard_core, "_pending_approval_ids", return_value=[2251]), patch.object(
+            dashboard_core, "_approve_pending_approval", side_effect=exc
+        ), patch.object(dashboard_core.logger, "warning") as warning, patch.object(
+            dashboard_core.logger, "info"
+        ) as info:
+            result = dashboard_core._auto_approve_pending_approvals()
+
+        self.assertEqual(result, [])
+        warning.assert_not_called()
+        info.assert_called_once()
+
     def test_buy_approval_capacity_limits_pending_batch(self):
         decide = approval_service._buy_approval_capacity_decision
         pending = [(101, "005930"), (102, "000660"), (103, "035420")]
